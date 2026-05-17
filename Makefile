@@ -71,9 +71,22 @@ tidy: ## go mod tidy + verify
 # ---------- 本地运行（三进程入口） ----------
 
 .PHONY: run-api
-run-api: ## 启动 API（占用 API_PORT，默认 3000）
-	-@lsof -ti:$(API_PORT) | xargs kill -9 2>/dev/null || true
+run-api: ## 启动 API（占用 API_PORT，默认 3000）。端口占用会直接报错退出
+	@if lsof -ti:$(API_PORT) >/dev/null 2>&1; then \
+		echo "ERROR: port $(API_PORT) is busy. Run 'make stop-api' to free it, or set API_PORT=<other>."; \
+		exit 1; \
+	fi
 	$(GO) run ./cmd/api
+
+.PHONY: stop-api
+stop-api: ## 显式终止占用 API_PORT 的进程（kill -9）
+	@pids=$$(lsof -ti:$(API_PORT) 2>/dev/null); \
+	if [ -z "$$pids" ]; then \
+		echo "port $(API_PORT) is free, nothing to stop."; \
+	else \
+		echo "killing pids on port $(API_PORT): $$pids"; \
+		kill -9 $$pids; \
+	fi
 
 .PHONY: run-worker
 run-worker: ## 启动 Asynq 消费者
@@ -85,19 +98,24 @@ run-migrate: ## 跑 GORM AutoMigrate（需要 POSTGRES 配置）
 
 # ---------- 构建 ----------
 
+# bin/ 是 order-only 依赖：只有不存在时才创建，存在时不强制重做。
+# 不放进 .PHONY，否则它会每次重建。
+$(BIN_DIR):
+	@mkdir -p $(BIN_DIR)
+
 .PHONY: build
 build: build-api build-worker build-migrate ## 构建三个进程的二进制到 bin/
 
 .PHONY: build-api
-build-api: ## 构建 API
+build-api: | $(BIN_DIR) ## 构建 API
 	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(API_BIN) ./cmd/api
 
 .PHONY: build-worker
-build-worker: ## 构建 Worker
+build-worker: | $(BIN_DIR) ## 构建 Worker
 	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(WORKER_BIN) ./cmd/worker
 
 .PHONY: build-migrate
-build-migrate: ## 构建 Migrate
+build-migrate: | $(BIN_DIR) ## 构建 Migrate
 	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(MIGRATE_BIN) ./cmd/migrate
 
 # ---------- 检查 ----------

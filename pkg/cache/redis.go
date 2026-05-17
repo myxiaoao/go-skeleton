@@ -24,6 +24,10 @@ type Client struct {
 	rdb *redis.Client
 }
 
+// pingTimeout bounds the startup ping so a stuck Redis node cannot hang the
+// process indefinitely.
+const pingTimeout = 5 * time.Second
+
 // NewClient creates and verifies a Redis client.
 func NewClient(cfg RedisConfig) (*Client, error) {
 	if strings.TrimSpace(cfg.Addr) == "" {
@@ -36,7 +40,10 @@ func NewClient(cfg RedisConfig) (*Client, error) {
 		DB:       cfg.DB,
 	})
 
-	if _, err := rdb.Ping(context.Background()).Result(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+	defer cancel()
+	if _, err := rdb.Ping(ctx).Result(); err != nil {
+		_ = rdb.Close()
 		return nil, fmt.Errorf("connect to redis: %w", err)
 	}
 

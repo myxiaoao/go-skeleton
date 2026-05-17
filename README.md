@@ -1,5 +1,7 @@
 # Go Skeleton
 
+[中文](./README_zh.md) | **English**
+
 This is a clean Go service skeleton extracted from the original project shape.
 Business modules were intentionally removed; the only domain-like code left is
 the `Example` flow used to demonstrate the app layers.
@@ -106,8 +108,9 @@ make oapi-verify   # fail if generated code is out of sync (used by make verify)
 
 ## Deployment Notes
 
-- Swagger is not enabled in this skeleton. Deployment does not require `swag init`.
-- If Swagger is added later, generate docs during development or CI build, not at service startup.
+- The OpenAPI spec is generated at build time from `api/openapi.yaml`; the
+  generated `internal/oapi/oapi.gen.go` is checked into the repo, so deployment
+  does not need to run codegen.
 - `CORS_ALLOW_ORIGINS` is a comma-separated allow list. Empty means no CORS allow headers.
 - Replace `JWT_SECRET` before using the auth example outside local development.
 - API business errors use the JSON envelope `code`, `msg`, and `reason`; most API errors are returned with HTTP 200 by convention.
@@ -115,8 +118,11 @@ make oapi-verify   # fail if generated code is out of sync (used by make verify)
 
 ## Verify
 
+Run the one-shot check that gates every commit:
+
 ```sh
-go test ./...
-go vet ./...
-golangci-lint run
+make verify   # fmt + vet + test + lint + oapi-verify
 ```
+
+Or call the underlying targets individually (`make test`, `make lint`, ...).
+See `make help` for the full list.

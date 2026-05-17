@@ -1,0 +1,335 @@
+openapi: 3.1.0
+info:
+  title: go-skeleton API
+  version: 0.1.0
+  description: |
+    Internal API contract for the go-skeleton service.
+
+    Convention:
+    - Business endpoints always return HTTP 200; success/failure is encoded in
+      the JSON body `code` field (0 = success).
+    - Infrastructure endpoints like `/health` use real HTTP status codes.
+  contact:
+    name: go-skeleton
+
+servers:
+  - url: http://127.0.0.1:3000
+    description: Local development
+
+tags:
+  - name: health
+    description: Liveness and readiness probes
+  - name: auth
+    description: Minimal JWT example
+  - name: example
+    description: Sample resource demonstrating the request flow
+  - name: meta
+    description: API metadata (spec, version)
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Health probe
+      description: |
+        Returns real HTTP status codes (200 / 503) so load balancers and
+        Kubernetes can decide on traffic. Does not follow the business
+        envelope.
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: One or more required dependencies are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /openapi.json:
+    get:
+      tags: [meta]
+      operationId: getOpenAPISpec
+      summary: Return the raw OpenAPI 3.1 spec
+      description: |
+        Returns the embedded OpenAPI 3.1 specification as JSON. Import it into
+        Postman, Bruno, Insomnia, or any tool that understands OpenAPI.
+      responses:
+        '200':
+          description: OpenAPI 3.1 spec
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /api/v1/auth/token:
+    post:
+      tags: [auth]
+      operationId: createAuthToken
+      summary: Issue a sample JWT
+      description: |
+        Available only when `JWT_SECRET` is configured. The token is signed
+        with HS256 and includes the configured issuer + TTL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTokenReq'
+      responses:
+        '200':
+          description: Business envelope. `data` holds the token on success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateTokenEnvelope'
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: getAuthMe
+      summary: Return the subject of the current Bearer token
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Business envelope. `data.subject` is set when authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeEnvelope'
+
+  /api/v1/examples:
+    get:
+      tags: [example]
+      operationId: listExamples
+      summary: List examples ordered by newest first
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: Page size. Defaults to 20 when omitted or 0.
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+          description: Page offset (rows to skip).
+      responses:
+        '200':
+          description: Business envelope. `data` holds the page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListExamplesEnvelope'
+    post:
+      tags: [example]
+      operationId: createExample
+      summary: Create an example
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExampleReq'
+      responses:
+        '200':
+          description: Business envelope. `data` holds the created example.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExampleEnvelope'
+
+  /api/v1/examples/tasks:
+    post:
+      tags: [example]
+      operationId: enqueueExampleTask
+      summary: Publish an example async task to Asynq
+      description: |
+        Returns `QUEUE_UNAVAILABLE` (code 9003) when Redis / Asynq is not
+        configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnqueueExampleTaskReq'
+      responses:
+        '200':
+          description: Business envelope. `data.queued` is true on success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnqueueExampleTaskEnvelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ---------- Health ----------
+    HealthResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, unhealthy]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, unavailable, not_configured]
+
+    # ---------- Business envelope ----------
+    Envelope:
+      type: object
+      required: [code, msg]
+      description: |
+        Standard envelope. Success is `code: 0`. Failure carries a non-zero
+        `code`, a stable `reason` slug, and optionally `metadata.trace_id`.
+      properties:
+        code:
+          type: integer
+          description: 0 on success; non-zero error code otherwise.
+        msg:
+          type: string
+        reason:
+          type: string
+          description: Stable machine-readable error reason (e.g. INVALID_PARAMS).
+        metadata:
+          type: object
+          properties:
+            trace_id:
+              type: string
+
+    # ---------- Auth ----------
+    CreateTokenReq:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          minLength: 1
+
+    CreateTokenRes:
+      type: object
+      required: [access_token, token_type]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+
+    CreateTokenEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CreateTokenRes'
+
+    MeRes:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+
+    MeEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/MeRes'
+
+    # ---------- Example ----------
+    Example:
+      type: object
+      required: [id, name, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateExampleReq:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+
+    ExampleEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Example'
+
+    ListExamplesRes:
+      type: object
+      required: [examples, total]
+      properties:
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/Example'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+
+    ListExamplesEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/ListExamplesRes'
+
+    EnqueueExampleTaskReq:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+
+    EnqueueExampleTaskRes:
+      type: object
+      required: [queued]
+      properties:
+        queued:
+          type: boolean
+
+    EnqueueExampleTaskEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/EnqueueExampleTaskRes'

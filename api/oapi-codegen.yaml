@@ -1,0 +1,15 @@
+package: oapi
+output: internal/oapi/oapi.gen.go
+generate:
+  gin-server: true
+  embedded-spec: true
+  # models 必须打开：gin-server 需要 query param struct（如 ListExamplesParams）
+  # 和 security scope 常量（BearerAuthScopes）。
+  #
+  # 单一真相约定：handler / service 不要 import 生成的业务实体（如 Example），
+  # 业务结构以 internal/service 包为准。生成的 models 仅服务于 transport 层。
+  models: true
+  strict-server: false
+  client: false
+output-options:
+  skip-prune: true

@@ -83,6 +83,27 @@ flowchart TD
     WREG --> ASYNQ["app.NewWorker + Asynq handlers"]
 ```
 
+## API Contract
+
+The service ships with an OpenAPI 3.1 spec at `api/openapi.yaml`. At runtime
+the embedded spec is served as JSON at:
+
+```
+GET /openapi.json
+```
+
+Import it into Postman, Bruno, Insomnia, or any OpenAPI-aware tool to explore
+the API. The spec is the single source of truth for request/response shapes;
+the generated `internal/oapi/oapi.gen.go` enforces it at compile time via
+`oapi.ServerInterface`.
+
+Regenerate after editing `api/openapi.yaml`:
+
+```sh
+make oapi          # regenerate internal/oapi/oapi.gen.go
+make oapi-verify   # fail if generated code is out of sync (used by make verify)
+```
+
 ## Deployment Notes
 
 - Swagger is not enabled in this skeleton. Deployment does not require `swag init`.

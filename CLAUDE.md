@@ -138,6 +138,42 @@ Go 1.25 + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 - ❌ 在 service 里 `context.Background()` 起新 ctx 调 DB → ✅ 传原 ctx；只有 fire-and-forget 后台任务才允许，且必须独立带超时。
 - ❌ 给 Worker 复制一份和 API 不同的业务逻辑 → ✅ 共享 service。
 
+## API 契约：OpenAPI 3.1
+
+**真相源是 `api/openapi.yaml`**。改接口的标准流程：
+
+1. 改 `api/openapi.yaml`。
+2. `make oapi` 重新生成 `internal/oapi/oapi.gen.go`。
+3. 改 `internal/handler/*` 让代码满足生成的 `oapi.ServerInterface`。
+   编译期保险线是 `internal/handler/openapi.go` 里的：
+   ```go
+   var _ oapi.ServerInterface = (*APIServer)(nil)
+   ```
+   yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注释。
+4. 改 `internal/router/router.go` 注册新路由（或调整中间件）。
+5. `make verify` 通过——`oapi-verify` 会用 `git diff --quiet` 检查生成产物已 commit。
+
+### 单一真相约定（重要）
+
+oapi-codegen 出于实现需要会生成业务实体（如 `oapi.Example`、`oapi.CreateExampleReq`）。**handler / service / repository 一律不要 import `internal/oapi` 包里的业务实体**。业务结构以 `internal/service` 包为准（如 `service.CreateExampleReq`）。
+
+`internal/oapi` 包对外只有两个用途：
+- `oapi.ServerInterface`：用于编译期契约保险。
+- `oapi.GetSpecJSON()`：用于 `/openapi.json` 返回 embedded spec。
+
+`internal/oapi/oapi.gen.go` 顶部标了 `DO NOT EDIT`——**不要手改它**，改 yaml 然后 `make oapi`。它会入库（和 `go.sum` 一样），CI / 队友不需要重跑生成。
+
+### 不做的事
+
+- 不生成 client SDK（内部联调用不到）。
+- 不生成 strict-server wrapper（会绕开 Gin 上下文，破坏现有 middleware）。
+- 不引入 `swaggo/swag`、`gin-swagger`、`swagger-ui` 等运行时 UI 框架——前端用 `/openapi.json` 导入 Postman / Bruno / Insomnia 即可。
+- 不用 `oapi.RegisterHandlers` 接管路由注册——业务路由仍走 `internal/router`，享受细粒度中间件控制（如 `/auth/me` 要 BearerAuth、`/auth/token` 不要）。
+
+### oapi-codegen 对 OpenAPI 3.1 的支持
+
+oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。本项目实测可用；如果未来某个 3.1 特性导致生成失败，**先看 yaml 能不能用 3.0 兼容写法表达**，不要回退到 3.0。
+
 ## 验证命令
 
 声明任务完成前必须跑过：
@@ -271,9 +307,14 @@ golangci-lint run    # 没装就先装：brew install golangci-lint
 go-example/
 ├── .env.example                配置模板（真实 .env 不入库）
 ├── .gitignore
+├── Makefile                    开发与提交前一站式入口（make help 查全部 target）
 ├── README.md
 ├── CLAUDE.md                   本文件
 ├── go.mod / go.sum             模块名 go-skeleton
+│
+├── api/                        API 契约层
+│   ├── openapi.yaml            真相源：OpenAPI 3.1 spec
+│   └── oapi-codegen.yaml       codegen 配置
 │
 ├── cmd/                        三个进程入口，main.go 只做启停
 │   ├── api/main.go             HTTP 服务
@@ -300,7 +341,8 @@ go-example/
 │   ├── handler/                HTTP 协议适配层
 │   │   ├── auth.go             /api/v1/auth/*
 │   │   ├── example.go          /api/v1/examples/*
-│   │   └── health.go           /health（用真实 HTTP 状态码）
+│   │   ├── health.go           /health（用真实 HTTP 状态码）
+│   │   └── openapi.go          /openapi.json + APIServer (满足 oapi.ServerInterface)
 │   │
 │   ├── service/                业务逻辑层（context.Context 入参）
 │   │   └── example.go
@@ -327,9 +369,12 @@ go-example/
 │   ├── task/                   Asynq 任务类型定义（API 和 Worker 共享）
 │   ├── taskqueue/              Asynq client 薄封装
 │   │   └── taskqueue.go        Queue.Available / Enqueue
-│   └── worker/                 Asynq 消费端
-│       ├── server.go           NewServer + NewRedisOpt
-│       └── handler.go          RegisterHandlers (Deps 注入)
+│   ├── worker/                 Asynq 消费端
+│   │   ├── server.go           NewServer + NewRedisOpt
+│   │   └── handler.go          RegisterHandlers (Deps 注入)
+│   │
+│   └── oapi/                   OpenAPI codegen 产物（DO NOT EDIT）
+│       └── oapi.gen.go         ServerInterface + GetSpecJSON
 │
 └── pkg/                        通用工具（严禁 import internal/）
     ├── auth/jwt.go             JWTManager（Layer 1）

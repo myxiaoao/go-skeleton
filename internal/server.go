@@ -30,6 +30,10 @@ type HTTPHandlers struct {
 	Auth    *handler.AuthHandler
 	Health  *handler.HealthHandler
 	Example *handler.ExampleHandler
+	OpenAPI *handler.OpenAPIHandler
+	// API satisfies oapi.ServerInterface at compile time, guaranteeing
+	// api/openapi.yaml stays aligned with the handlers we expose.
+	API *handler.APIServer
 }
 
 // Server owns the HTTP transport created from application dependencies.
@@ -119,10 +123,22 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	exampleRepository := repository.NewExampleRepository(db)
 	exampleService := service.NewExampleService(exampleRepository, reg.Queue)
 
+	authH := handler.NewAuthHandler(reg.Auth)
+	healthH := handler.NewHealthHandler(reg.DB, reg.Cache)
+	exampleH := handler.NewExampleHandler(exampleService)
+	openapiH := handler.NewOpenAPIHandler()
+
 	return &HTTPHandlers{
-		Auth:    handler.NewAuthHandler(reg.Auth),
-		Health:  handler.NewHealthHandler(reg.DB, reg.Cache),
-		Example: handler.NewExampleHandler(exampleService),
+		Auth:    authH,
+		Health:  healthH,
+		Example: exampleH,
+		OpenAPI: openapiH,
+		API: &handler.APIServer{
+			Auth:    authH,
+			Health:  healthH,
+			Example: exampleH,
+			OpenAPI: openapiH,
+		},
 	}
 }
 
@@ -141,6 +157,7 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	}
 
 	engine.GET("/health", handlers.Health.Health)
+	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
 	api := engine.Group("/api/v1")
 
 	var authRequired gin.HandlerFunc

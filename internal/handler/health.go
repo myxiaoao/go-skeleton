@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"go-skeleton/internal/oapi"
 	"go-skeleton/pkg/cache"
 	"go-skeleton/pkg/database"
 )
@@ -22,43 +23,45 @@ func NewHealthHandler(db *database.DBManager, cache *cache.Client) *HealthHandle
 	return &HealthHandler{db: db, cache: cache}
 }
 
-// Health returns database and cache health status.
+// Health returns database and cache health status. The response shape is
+// pinned to oapi.HealthResponse so it stays aligned with api/openapi.yaml.
 func (h *HealthHandler) Health(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
-	checks := map[string]string{}
+	checks := map[string]oapi.HealthResponseChecks{}
 	healthy := true
 
-	if h.db == nil {
-		checks["postgres"] = "not_configured"
+	switch {
+	case h.db == nil:
+		checks["postgres"] = oapi.HealthResponseChecksNotConfigured
 		healthy = false
-	} else if err := h.db.Ping(ctx); err != nil {
-		checks["postgres"] = "unavailable"
+	case h.db.Ping(ctx) != nil:
+		checks["postgres"] = oapi.HealthResponseChecksUnavailable
 		healthy = false
-	} else {
-		checks["postgres"] = "ok"
+	default:
+		checks["postgres"] = oapi.HealthResponseChecksOk
 	}
 
-	if h.cache == nil {
-		checks["redis"] = "not_configured"
-	} else if err := h.cache.Ping(ctx); err != nil {
-		checks["redis"] = "unavailable"
+	switch {
+	case h.cache == nil:
+		checks["redis"] = oapi.HealthResponseChecksNotConfigured
+	case h.cache.Ping(ctx) != nil:
+		checks["redis"] = oapi.HealthResponseChecksUnavailable
 		healthy = false
-	} else {
-		checks["redis"] = "ok"
+	default:
+		checks["redis"] = oapi.HealthResponseChecksOk
 	}
 
+	status := oapi.HealthResponseStatusOk
+	httpStatus := http.StatusOK
 	if !healthy {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "unhealthy",
-			"checks": checks,
-		})
-		return
+		status = oapi.HealthResponseStatusUnhealthy
+		httpStatus = http.StatusServiceUnavailable
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-		"checks": checks,
+	c.JSON(httpStatus, oapi.HealthResponse{
+		Status: status,
+		Checks: checks,
 	})
 }

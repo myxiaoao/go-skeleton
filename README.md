@@ -6,6 +6,8 @@ This is a clean Go service skeleton extracted from the original project shape.
 Business modules were intentionally removed; the only domain-like code left is
 the `Example` flow used to demonstrate the app layers.
 
+**Requires Go 1.26+.**
+
 ## Structure
 
 - `cmd/api`: HTTP API process.
@@ -126,3 +128,7 @@ make verify   # fmt + vet + test + lint + oapi-verify
 
 Or call the underlying targets individually (`make test`, `make lint`, ...).
 See `make help` for the full list.
+
+## License
+
+[MIT](./LICENSE).

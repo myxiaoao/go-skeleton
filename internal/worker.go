@@ -38,9 +38,6 @@ func (w *Worker) Run(ctx context.Context) error {
 	if w == nil || w.server == nil || w.mux == nil {
 		return errNilWorker
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {

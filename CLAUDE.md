@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-Go 1.25 + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
+Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## 顶层目录
 
@@ -155,11 +155,17 @@ Go 1.25 + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ### 单一真相约定（重要）
 
-oapi-codegen 出于实现需要会生成业务实体（如 `oapi.Example`、`oapi.CreateExampleReq`）。**handler / service / repository 一律不要 import `internal/oapi` 包里的业务实体**。业务结构以 `internal/service` 包为准（如 `service.CreateExampleReq`）。
+oapi-codegen 会生成两类东西，**区分对待**：
 
-`internal/oapi` 包对外只有两个用途：
+- **协议层 schema**（`oapi.HealthResponse`、`oapi.HealthResponseChecks`、`oapi.ListExamplesParams`、`oapi.BearerAuthScopes` 等）—— handler **应该**直接用，让响应/参数结构跟 yaml 强对齐。
+- **业务实体**（`oapi.Example`、`oapi.CreateExampleReq` 等业务请求/响应模型）—— handler / service / repository **不要** import；业务结构以 `internal/service` 包为准（如 `service.CreateExampleReq`、`service.ExampleService` 返回的 `*model.Example`）。
+
+判断方法：如果生成的类型只服务于 transport 层（响应外壳、query params、security scope），用它；如果它承载业务字段（id/name/created_at 这种领域属性），不用它。
+
+`internal/oapi` 包对外的关键导出：
 - `oapi.ServerInterface`：用于编译期契约保险。
 - `oapi.GetSpecJSON()`：用于 `/openapi.json` 返回 embedded spec。
+- 协议层 schema 类型：handler 可以直接用。
 
 `internal/oapi/oapi.gen.go` 顶部标了 `DO NOT EDIT`——**不要手改它**，改 yaml 然后 `make oapi`。它会入库（和 `go.sum` 一样），CI / 队友不需要重跑生成。
 
@@ -241,18 +247,7 @@ go test ./... -cover                  # 看覆盖率
 
 ## Git Workflow
 
-> ⚠️ 当前仓库**还没有 `git init`**。第一次提交前先初始化，之后所有改动都按下面的规则提交。
-
-### 初始化（仅一次）
-
-```sh
-git init
-git add .gitignore .env.example README.md CLAUDE.md \
-        cmd config internal pkg go.mod go.sum
-git commit -m "chore: initial skeleton import"
-```
-
-**不要**直接 `git add .`——根目录有 `.env`、`bin/`、`dist/`、`coverage.out` 会被 `.gitignore` 挡，但 `.DS_Store` 之类可能漏网，逐项添加更稳。
+仓库已初始化，主干 `master`，远程 `origin` = `https://github.com/myxiaoao/go-skeleton`。
 
 ### Commit message
 
@@ -260,12 +255,15 @@ git commit -m "chore: initial skeleton import"
 
 | Scope | 对应改动 |
 | --- | --- |
-| `api` | `cmd/api/`、`internal/server.go`、路由、HTTP 相关 middleware |
+| `api` | `cmd/api/`、`internal/server.go`、HTTP 路由 / middleware、`api/openapi.yaml` 契约 |
 | `worker` | `cmd/worker/`、`internal/worker.go`、`internal/worker/`、Asynq handler |
 | `migrate` | `cmd/migrate/`、迁移相关 |
 | `bootstrap` | `internal/bootstrap/`、`config/` |
 | `handler` / `service` / `repository` / `model` / `router` / `middleware` / `errcode` / `task` / `taskqueue` | 对应 `internal/*` 子包 |
 | `auth` / `cache` / `database` / `log` / `response` / `validator` | 对应 `pkg/*` 子包 |
+| `oapi` | OpenAPI codegen 配置 / 生成产物 (`api/oapi-codegen.yaml`、`internal/oapi/`) |
+| `build` | `Makefile`、构建脚本 |
+| `ci` | `.github/workflows/*`、`.github/dependabot.yml` |
 | `docs` | README、CLAUDE.md、注释 |
 | `deps` | `go.mod` / `go.sum` 调整 |
 
@@ -279,21 +277,25 @@ feat(service): example 新增分页参数校验
 - 补 TestListDefaultLimit / TestListInvalidLimit
 ```
 
-### 分支策略（有远程后再启用）
+### 分支策略
 
-- 主干 `main`。功能分支 `feat/xxx`，修复 `fix/xxx`，重构 `refactor/xxx`。
-- **不要直接 push 到 `main`**。等加远程后默认走 PR。
-- 当前还没有 CI；加 CI 前，PR 合并前本地必须跑过"验证命令"那三条。
+- 主干 `master`。功能分支 `feat/xxx`，修复 `fix/xxx`，重构 `refactor/xxx`。
+- **不要直接 push 到 `master`**——走 PR。CI（`.github/workflows/ci.yml`）会跑 `make verify`，全绿才合。
+- 不要 force push 主干。force push 任何分支前先确认本地不会丢工作。
 
-### 提交前自检（每次 commit 前）
+### 提交前自检
+
+每次 commit 前一条命令搞定：
 
 ```sh
-go vet ./...
-go test ./...
-golangci-lint run    # 没装就先装：brew install golangci-lint
+make verify   # fmt + vet + test + lint + oapi-verify
 ```
 
-任意一条挂了**不要 `--no-verify` 跳过**——按全局规则，hook 失败先修问题再重新 commit，不要 amend。
+任意一项挂了**不要 `--no-verify` 跳过**——按全局规则，hook 失败先修问题再重新 commit，不要 amend。
+
+### Stage 文件时的硬约束
+
+**不要直接 `git add .`**——`.DS_Store`、临时文件可能漏网。逐项 `git add path/...` 或用 `git add -p`。`.env`、`bin/`、`dist/`、`coverage.out` 虽在 `.gitignore` 兜底，但 stage 时仍以"知道自己加进去什么"为准。
 
 ### 禁止入库
 

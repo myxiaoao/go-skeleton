@@ -4,6 +4,8 @@
 
 这是一份从实际项目里抽离出来的 Go 服务骨架。业务模块已经清空，仅保留 `Example` 流程作为分层结构的示例。
 
+**需要 Go 1.26+。**
+
 ## 目录结构
 
 - `cmd/api`：HTTP API 进程。
@@ -117,3 +119,7 @@ make verify   # fmt + vet + test + lint + oapi-verify
 ```
 
 也可以单独跑某一项（`make test`、`make lint` 等），完整列表见 `make help`。
+
+## License
+
+[MIT](./LICENSE).

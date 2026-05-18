@@ -82,6 +82,8 @@ func messageFor(reason string) string {
 		return "too many requests"
 	case "REQUEST_TIMEOUT":
 		return "request timeout"
+	case "SERVICE_DISABLED":
+		return "endpoint is disabled by configuration"
 	case "DATABASE_ERROR":
 		return "database error"
 	case "QUEUE_UNAVAILABLE":

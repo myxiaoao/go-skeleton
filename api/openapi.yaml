@@ -73,10 +73,11 @@ paths:
       operationId: createAuthToken
       summary: Issue a sample JWT (dev-only)
       description: |
-        Available only when `JWT_SECRET` is configured AND `AUTH_DEV_TOKEN_ENABLED=true`.
-        Off by default. The endpoint signs a token for any caller-supplied
-        subject, so it MUST NOT be exposed in production. The token is signed
-        with HS256 and includes the configured issuer + TTL.
+        Always routed. When `JWT_SECRET` is configured AND
+        `AUTH_DEV_TOKEN_ENABLED=true`, signs a HS256 token for the supplied
+        subject. Otherwise the handler returns the business envelope with
+        `code=1006` / `reason=SERVICE_DISABLED` so clients can distinguish
+        "endpoint gone" from "feature off". MUST stay off in production.
       requestBody:
         required: true
         content:

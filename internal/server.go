@@ -123,7 +123,7 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	exampleRepository := repository.NewExampleRepository(db)
 	exampleService := service.NewExampleService(exampleRepository, reg.Queue)
 
-	authH := handler.NewAuthHandler(reg.Auth)
+	authH := handler.NewAuthHandler(reg.Auth, reg.Cfg.Auth.DevTokenEndpointEnabled)
 	healthH := handler.NewHealthHandler(reg.DB, reg.Cache)
 	exampleH := handler.NewExampleHandler(exampleService)
 	openapiH := handler.NewOpenAPIHandler()
@@ -165,10 +165,9 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 		authRequired = middleware.BearerAuth(reg.Auth)
 	}
 	if err := router.RegisterRoutes(api, router.Dependencies{
-		Auth:                    handlers.Auth,
-		AuthRequired:            authRequired,
-		Example:                 handlers.Example,
-		DevTokenEndpointEnabled: reg.Cfg.Auth.DevTokenEndpointEnabled,
+		Auth:         handlers.Auth,
+		AuthRequired: authRequired,
+		Example:      handlers.Example,
 	}); err != nil {
 		return nil, err
 	}

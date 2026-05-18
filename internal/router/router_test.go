@@ -50,10 +50,9 @@ func buildEngine(t *testing.T, devTokenEnabled bool) *gin.Engine {
 	}
 
 	deps := Dependencies{
-		Auth:                    &handler.AuthHandler{},
-		AuthRequired:            authRequired,
-		Example:                 &handler.ExampleHandler{},
-		DevTokenEndpointEnabled: devTokenEnabled,
+		Auth:         &handler.AuthHandler{DevTokenAvailable: devTokenEnabled},
+		AuthRequired: authRequired,
+		Example:      &handler.ExampleHandler{},
 	}
 	if err := RegisterRoutes(api, deps); err != nil {
 		t.Fatalf("RegisterRoutes: %v", err)
@@ -119,8 +118,11 @@ func TestRouterCoversAllSpecOperations(t *testing.T) {
 	}
 }
 
-func TestDevTokenEndpointDefaultDisabled(t *testing.T) {
-	engine := buildEngine(t, false) // dev token OFF (production default)
+func TestDevTokenEndpointReturnsServiceDisabledWhenOff(t *testing.T) {
+	// Route is ALWAYS registered (matches OpenAPI spec). When the dev token
+	// feature is off the handler returns a clear SERVICE_DISABLED envelope,
+	// not 404, so clients can distinguish "endpoint gone" from "off".
+	engine := buildEngine(t, false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token",
 		strings.NewReader(`{"subject":"demo"}`))
@@ -128,9 +130,12 @@ func TestDevTokenEndpointDefaultDisabled(t *testing.T) {
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 when DevTokenEndpointEnabled=false, got %d (body=%s)",
-			w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 envelope, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	// Decode the envelope without importing pkg/response (avoid cycles).
+	if body := w.Body.String(); !strings.Contains(body, "SERVICE_DISABLED") {
+		t.Fatalf("expected SERVICE_DISABLED reason in body, got %s", body)
 	}
 }
 

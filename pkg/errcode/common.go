@@ -11,6 +11,9 @@ var (
 	TooManyRequests = newError(1004, "TOO_MANY_REQUESTS")
 	// RequestTimeout means request processing exceeded the configured deadline.
 	RequestTimeout = newError(1005, "REQUEST_TIMEOUT")
+	// ServiceDisabled means the endpoint exists in the spec but is gated off
+	// by configuration (e.g. dev-only routes left disabled in production).
+	ServiceDisabled = newError(1006, "SERVICE_DISABLED")
 
 	// InternalError is the fallback for unexpected server-side errors.
 	InternalError = newError(9001, "INTERNAL_ERROR")

@@ -12,14 +12,24 @@ import (
 // AuthHandler handles the minimal JWT example flow.
 type AuthHandler struct {
 	manager *auth.JWTManager
+	// DevTokenAvailable governs POST /auth/token: when false, the endpoint
+	// stays in the OpenAPI spec and the routing table, but CreateToken
+	// returns SERVICE_DISABLED so clients see a spec-aligned error instead
+	// of 404. Exposed so router-level tests can flip it without going through
+	// the JWT manager.
+	DevTokenAvailable bool
 }
 
-// NewAuthHandler creates an AuthHandler. It returns nil when auth is not configured.
-func NewAuthHandler(manager *auth.JWTManager) *AuthHandler {
+// NewAuthHandler creates an AuthHandler. It returns nil when auth is not
+// configured.
+func NewAuthHandler(manager *auth.JWTManager, devTokenAvailable bool) *AuthHandler {
 	if manager == nil {
 		return nil
 	}
-	return &AuthHandler{manager: manager}
+	return &AuthHandler{
+		manager:           manager,
+		DevTokenAvailable: devTokenAvailable,
+	}
 }
 
 // CreateTokenReq is the request body for issuing a sample JWT.
@@ -38,10 +48,13 @@ type MeRes struct {
 	Subject string `json:"subject"`
 }
 
-// CreateToken issues a sample JWT for the given subject.
+// CreateToken issues a sample JWT for the given subject. The endpoint is
+// gated by AUTH_DEV_TOKEN_ENABLED and by the presence of a JWT manager;
+// when either is missing, it returns SERVICE_DISABLED so the OpenAPI contract
+// and runtime behavior stay aligned.
 func (h *AuthHandler) CreateToken(c *gin.Context) {
-	if h == nil || h.manager == nil {
-		response.WriteError(c, errcode.Unauthorized)
+	if h == nil || h.manager == nil || !h.DevTokenAvailable {
+		response.WriteError(c, errcode.ServiceDisabled)
 		return
 	}
 

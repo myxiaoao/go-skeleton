@@ -106,6 +106,32 @@ func TestValidateTableDriven(t *testing.T) {
 			wantErr:     true,
 			wantInclude: "RATE_LIMIT_PER_MINUTE",
 		},
+		{
+			name: "JWT_SECRET 非空时 JWT_ISSUER 必填",
+			mutate: func(c *Config) {
+				c.Auth.JWTSecret = "deadbeef"
+				c.Auth.JWTIssuer = ""
+			},
+			wantErr:     true,
+			wantInclude: "JWT_ISSUER",
+		},
+		{
+			name: "JWT_SECRET 非空时 JWT_ISSUER 只是空白也不行",
+			mutate: func(c *Config) {
+				c.Auth.JWTSecret = "deadbeef"
+				c.Auth.JWTIssuer = "  "
+			},
+			wantErr:     true,
+			wantInclude: "JWT_ISSUER",
+		},
+		{
+			name: "JWT_SECRET 为空时不校验 issuer",
+			mutate: func(c *Config) {
+				c.Auth.JWTSecret = ""
+				c.Auth.JWTIssuer = ""
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range tests {

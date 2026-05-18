@@ -17,6 +17,11 @@ type JWTConfig struct {
 }
 
 // JWTManager signs and parses HS256 JWT tokens.
+//
+// 安全提示：当 Issuer 为空字符串时，ParseToken **不**校验 iss claim。
+// 这意味着任何持有相同 secret 但用不同 iss 颁发的 token 都能通过本 manager
+// 验证。生产环境务必显式配置非空 Issuer；骨架在 config/validate.go 里强制了
+// JWT_ISSUER 在 JWT_SECRET 非空时必填，作为运维错配防御。
 type JWTManager struct {
 	secret []byte
 	issuer string

@@ -47,6 +47,15 @@ func validate(cfg *Config) error {
 		add(fmt.Sprintf("RATE_LIMIT_PER_MINUTE must be >= 0 (0=unlimited), got %d", cfg.RateLimit.RequestsPerMinute))
 	}
 
+	// JWT_SECRET 非空 → JWT_ISSUER 必须非空。pkg/auth.JWTManager 在 issuer 为空时
+	// 会**跳过** iss claim 校验，这意味着任何持有相同 secret 但用不同 iss 颁发的
+	// token 都能通过本服务验证。运维有可能 JWT_ISSUER= 显式清空覆盖 default，
+	// 这层校验把这种错配拦在启动期。
+	if strings.TrimSpace(cfg.Auth.JWTSecret) != "" &&
+		strings.TrimSpace(cfg.Auth.JWTIssuer) == "" {
+		add("JWT_ISSUER must be non-empty when JWT_SECRET is set; empty issuer disables iss claim validation")
+	}
+
 	if len(errs) == 0 {
 		return nil
 	}

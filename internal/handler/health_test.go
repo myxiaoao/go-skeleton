@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -11,6 +13,12 @@ import (
 
 	"go-skeleton/internal/oapi"
 )
+
+// healthPingerFunc 是接口测试桩；可写 healthPingerFunc(func(ctx context.Context) error{...})
+// 同时满足 healthDBPinger 和 healthCachePinger。
+type healthPingerFunc func(context.Context) error
+
+func (f healthPingerFunc) Ping(ctx context.Context) error { return f(ctx) }
 
 func TestHealthHandlerLiveReturns200WithoutDependencies(t *testing.T) {
 	// /livez must succeed even when db / cache are nil — the liveness
@@ -84,5 +92,70 @@ func TestHealthHandlerLiveIgnoresDraining(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 even when draining", w.Code)
+	}
+}
+
+func newHealthHandlerForTest(db healthDBPinger, cache healthCachePinger) *HealthHandler {
+	return &HealthHandler{db: db, cache: cache}
+}
+
+// Redis 挂掉但 Postgres 健康：should 返 200 + degraded，LB 不摘流。
+// 异步任务异常不应该让整个 pod 离线——业务大多走 DB，缓存掉了顶多变慢。
+func TestHealthHandlerReturnsDegradedWhenRedisDown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	dbOK := healthPingerFunc(func(context.Context) error { return nil })
+	redisFail := healthPingerFunc(func(context.Context) error { return errors.New("dial timeout") })
+
+	h := newHealthHandlerForTest(dbOK, redisFail)
+	router.GET("/health", h.Health)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (degraded should not flap LB)", w.Code)
+	}
+
+	var body oapi.HealthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Status != oapi.HealthResponseStatusDegraded {
+		t.Errorf("status = %q, want %q", body.Status, oapi.HealthResponseStatusDegraded)
+	}
+	if body.Checks["redis"] != oapi.HealthResponseChecksUnavailable {
+		t.Errorf("redis check = %q, want unavailable", body.Checks["redis"])
+	}
+	if body.Checks["postgres"] != oapi.HealthResponseChecksOk {
+		t.Errorf("postgres check = %q, want ok", body.Checks["postgres"])
+	}
+}
+
+// Postgres 挂掉：503 + unhealthy，LB 必须摘流——DB 不可达基本所有写都会失败。
+func TestHealthHandlerReturns503WhenDBDown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	dbFail := healthPingerFunc(func(context.Context) error { return errors.New("conn refused") })
+	redisOK := healthPingerFunc(func(context.Context) error { return nil })
+
+	h := newHealthHandlerForTest(dbFail, redisOK)
+	router.GET("/health", h.Health)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+
+	var body oapi.HealthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Status != oapi.HealthResponseStatusUnhealthy {
+		t.Errorf("status = %q, want %q", body.Status, oapi.HealthResponseStatusUnhealthy)
 	}
 }

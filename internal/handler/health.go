@@ -14,6 +14,16 @@ import (
 	"go-skeleton/pkg/database"
 )
 
+// healthDBPinger / healthCachePinger 让 /health 可测；生产实现是
+// *database.DBManager / *cache.Client，测试里可注入桩。
+type healthDBPinger interface {
+	Ping(context.Context) error
+}
+
+type healthCachePinger interface {
+	Ping(context.Context) error
+}
+
 // buildResponse mirrors the anonymous struct on oapi.HealthResponse.Build
 // so the handler doesn't construct it inline three times.
 func buildResponse() struct {
@@ -34,14 +44,23 @@ func buildResponse() struct {
 
 // HealthHandler checks infrastructure dependencies.
 type HealthHandler struct {
-	db       *database.DBManager
-	cache    *cache.Client
+	db       healthDBPinger
+	cache    healthCachePinger
 	draining *atomic.Bool
 }
 
-// NewHealthHandler creates a HealthHandler. draining 可为 nil（不参与 graceful drain 的进程）。
+// NewHealthHandler creates a HealthHandler. db 为 nil 表示 not_configured；
+// cache 为 nil 同义。draining 可为 nil（不参与 graceful drain 的进程）。
 func NewHealthHandler(db *database.DBManager, cache *cache.Client, draining *atomic.Bool) *HealthHandler {
-	return &HealthHandler{db: db, cache: cache, draining: draining}
+	h := &HealthHandler{draining: draining}
+	// 避免 typed-nil 把接口包成 non-nil。
+	if db != nil {
+		h.db = db
+	}
+	if cache != nil {
+		h.cache = cache
+	}
+	return h
 }
 
 // Live is the liveness probe — succeeds as long as the process can serve a
@@ -70,15 +89,18 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	defer cancel()
 
 	checks := map[string]oapi.HealthResponseChecks{}
-	healthy := true
+	// 关键依赖（Postgres）挂 → unhealthy → 503，LB 必须摘流。
+	// 非关键依赖（Redis）挂 → degraded → 200，LB 不摘流（缓存抖动不应触发全员重启）。
+	dbHealthy := true
+	cacheHealthy := true
 
 	switch {
 	case h.db == nil:
 		checks["postgres"] = oapi.HealthResponseChecksNotConfigured
-		healthy = false
+		dbHealthy = false
 	case h.db.Ping(ctx) != nil:
 		checks["postgres"] = oapi.HealthResponseChecksUnavailable
-		healthy = false
+		dbHealthy = false
 	default:
 		checks["postgres"] = oapi.HealthResponseChecksOk
 	}
@@ -88,16 +110,20 @@ func (h *HealthHandler) Health(c *gin.Context) {
 		checks["redis"] = oapi.HealthResponseChecksNotConfigured
 	case h.cache.Ping(ctx) != nil:
 		checks["redis"] = oapi.HealthResponseChecksUnavailable
-		healthy = false
+		cacheHealthy = false
 	default:
 		checks["redis"] = oapi.HealthResponseChecksOk
 	}
 
 	status := oapi.HealthResponseStatusOk
 	httpStatus := http.StatusOK
-	if !healthy {
+	switch {
+	case !dbHealthy:
 		status = oapi.HealthResponseStatusUnhealthy
 		httpStatus = http.StatusServiceUnavailable
+	case !cacheHealthy:
+		status = oapi.HealthResponseStatusDegraded
+		// httpStatus 保持 200：让 LB 区别 "完全挂" 和 "降级运行"。
 	}
 
 	c.JSON(httpStatus, oapi.HealthResponse{

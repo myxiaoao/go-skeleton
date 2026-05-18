@@ -12,6 +12,37 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Changed
+
+- **CORS `Access-Control-Allow-Credentials` is now opt-in**: previously the
+  middleware always wrote `Allow-Credentials: true` for whitelisted origins.
+  Stateless JWT APIs do not need it; if the whitelist ever shares Redis or
+  cookies with another internal service, this was an unnecessary attack
+  surface. New env `CORS_ALLOW_CREDENTIALS` (default `false`); set to `true`
+  only when the browser needs to auto-attach cookie/session.
+- **`service.NewExampleService` signature**: `queue ...ExampleQueue` (variadic)
+  → `queue ExampleQueue` (explicit, `nil` means queue unavailable). The
+  variadic form silently dropped a second queue argument; explicit makes
+  the API unambiguous. Internal callers and tests updated.
+- **`worker.Deps` no longer holds `*gorm.DB`**: the project rule "repository
+  is the only layer allowed to import gorm" was being undermined by the
+  worker package carrying a `DB` field for the example task. New
+  `ExampleProcessor` interface in the worker package illustrates the
+  correct path (worker → service → repository → gorm); `Deps.DB` is
+  removed and `worker/handler.go` no longer imports `gorm.io/gorm`.
+
+### Docs
+
+- `internal/middleware/timeout.go`: godoc now warns the middleware is unsafe
+  for streaming / SSE handlers (Gin's synchronous `c.Next()` + `Written()`
+  check truncates the response without writing the error envelope). The
+  current skeleton has no streaming endpoints, but the caveat documents the
+  trap before someone falls into it.
+- `internal/repository/example.go::List`: godoc notes that `Count` + `Find`
+  are independent queries under `READ COMMITTED`, so `total` is an
+  approximation. Callers needing strong consistency should wrap in
+  `InTx` + `REPEATABLE READ`.
+
 ### Fixed
 
 - **JWT issuer can be silently disabled**: `pkg/auth.JWTManager.ParseToken`

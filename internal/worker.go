@@ -11,13 +11,14 @@ import (
 	"go-skeleton/internal/worker"
 )
 
-// Worker owns the async task runtime created from application dependencies.
+// Worker 持有从 Registry 装配出来的 Asynq 异步任务运行时（server + ServeMux）。
 type Worker struct {
 	server *asynq.Server
 	mux    *asynq.ServeMux
 }
 
-// NewWorker wires async task handlers and the worker runtime.
+// NewWorker 装配异步任务 handler 和 worker 运行时。reg 不全时返 error；
+// 失败不会启动 server。
 func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 	if err := validateWorkerRegistry(reg); err != nil {
 		return nil, err
@@ -41,7 +42,8 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 	}, nil
 }
 
-// Run starts the task server until the context is canceled.
+// Run 启动 Asynq worker server，阻塞到 ctx 取消。用 errgroup 组合两个 goroutine：
+// 一个跑 server.Run，一个监听 ctx.Done 触发两阶段停服。
 func (w *Worker) Run(ctx context.Context) error {
 	if w == nil || w.server == nil || w.mux == nil {
 		return errNilWorker
@@ -56,10 +58,10 @@ func (w *Worker) Run(ctx context.Context) error {
 	})
 	group.Go(func() error {
 		<-groupCtx.Done()
-		// Two-phase stop per Asynq docs: Stop halts pulling new tasks,
-		// Shutdown waits for in-flight tasks to finish (bounded by
-		// Config.ShutdownTimeout, 8s by default). Skipping Stop would let
-		// new tasks slip in during the shutdown window and get rescheduled.
+		// Asynq 官方推荐的两阶段停服：Stop 先停拉新任务，Shutdown 再等
+		// in-flight 任务完成（受 Config.ShutdownTimeout 控制，默认 8s）。
+		// 跳过 Stop 直接 Shutdown 会让 shutdown 窗口内新任务被拉进来又被
+		// 重新调度，破坏 at-least-once 语义。
 		w.server.Stop()
 		w.server.Shutdown()
 		return nil
@@ -68,6 +70,8 @@ func (w *Worker) Run(ctx context.Context) error {
 	return group.Wait()
 }
 
+// validateWorkerRegistry 校验 Worker 装配需要的 Registry 字段都齐了。
+// Worker 必需 Redis；DB 是可选的（不依赖 DB 的任务也是合法的）。
 func validateWorkerRegistry(reg *bootstrap.Registry) error {
 	switch {
 	case reg == nil:
@@ -81,6 +85,9 @@ func validateWorkerRegistry(reg *bootstrap.Registry) error {
 	}
 }
 
+// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。当前骨架
+// 的 example handler 不需要 DB，所以只挂 Cache + Queue；真实业务参考代码
+// 内示意把 service 注入 Example 字段。
 func buildWorkerDeps(reg *bootstrap.Registry) *worker.Deps {
 	// 示意：业务任务需要 DB 时，在这里组装 service：
 	//

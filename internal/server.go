@@ -26,18 +26,21 @@ var (
 	errNilWorker     = errors.New("app: nil worker")
 )
 
-// HTTPHandlers groups pre-constructed handlers used by the HTTP server.
+// HTTPHandlers 把所有 handler 实例打包一处，方便 NewServer 一次性装配后
+// 还能被路由 / 测试拿去单独使用。API 字段是 oapi 契约检查用，绑死编译期
+// 保险线，让 api/openapi.yaml 与 handler 漂移时 build 直接失败。
 type HTTPHandlers struct {
 	Auth    *handler.AuthHandler
 	Health  *handler.HealthHandler
 	Example *handler.ExampleHandler
 	OpenAPI *handler.OpenAPIHandler
-	// API satisfies oapi.ServerInterface at compile time, guaranteeing
-	// api/openapi.yaml stays aligned with the handlers we expose.
+	// API 在编译期满足 oapi.ServerInterface，保证 api/openapi.yaml 与我们
+	// 暴露的 handler 始终对齐。
 	API *handler.APIServer
 }
 
-// Server owns the HTTP transport created from application dependencies.
+// Server 持有从 Registry 装配出来的 HTTP transport 全套：gin engine、
+// http.Server、handler 集合 + per-IP 限流器（如果开了的话）。
 type Server struct {
 	Engine      *gin.Engine
 	HTTP        *http.Server
@@ -45,7 +48,8 @@ type Server struct {
 	rateLimiter *middleware.IPRateLimiter
 }
 
-// NewServer wires HTTP handlers, middleware, and the underlying http.Server.
+// NewServer 把 handler / 中间件 / 底层 http.Server 一次性装配齐。reg 不全
+// 时返 error，让上层 fail-fast。失败不会启动 ListenAndServe。
 func NewServer(reg *bootstrap.Registry) (*Server, error) {
 	if err := validateHTTPRegistry(reg); err != nil {
 		return nil, err
@@ -70,7 +74,8 @@ func NewServer(reg *bootstrap.Registry) (*Server, error) {
 	}, nil
 }
 
-// Run starts serving HTTP requests until Shutdown is called.
+// Run 开始监听并接 HTTP 请求，直到 Shutdown 被调。屏蔽
+// http.ErrServerClosed——那是正常 Shutdown 的副产品。
 func (s *Server) Run() error {
 	if s == nil || s.HTTP == nil {
 		return errNilHTTPServer
@@ -81,7 +86,8 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// Shutdown gracefully stops the HTTP server and releases owned resources.
+// Shutdown 优雅停服：先停限流器后台 goroutine，再让 http.Server 走 graceful
+// drain（等 in-flight 请求完成）。ctx 控制 drain 超时；超时后底层会强切。
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s == nil || s.HTTP == nil {
 		return errNilHTTPServer
@@ -92,7 +98,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.HTTP.Shutdown(ctx)
 }
 
-// Close immediately closes the HTTP server and releases owned resources.
+// Close 直接关停 HTTP server，不等 in-flight 请求——给 Shutdown 超时后的
+// 强制兜底场景用，正常停服走 Shutdown。
 func (s *Server) Close() error {
 	if s == nil || s.HTTP == nil {
 		return errNilHTTPServer
@@ -106,6 +113,8 @@ func (s *Server) Close() error {
 	return nil
 }
 
+// validateHTTPRegistry 校验 HTTP 装配需要的 Registry 字段都齐了。失败的细
+// 分错误便于上层日志定位是哪个组件没装配。
 func validateHTTPRegistry(reg *bootstrap.Registry) error {
 	switch {
 	case reg == nil:
@@ -119,6 +128,9 @@ func validateHTTPRegistry(reg *bootstrap.Registry) error {
 	}
 }
 
+// newHTTPHandlers 按"handler 声明依赖、不构造依赖"的约定，集中在这里把
+// repository → service → handler 整条链 new 出来。新增模块时在这里加 4 行
+// （repo / service / handler / 挂进 HTTPHandlers）。
 func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	db := reg.DB.DB()
 	exampleRepository := repository.NewExampleRepository(db)
@@ -143,6 +155,10 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	}
 }
 
+// newEngine 构造 gin.Engine 并按"日志 → recover → 安全头 → body 限制 →
+// 超时 → CORS → 限流"的顺序挂中间件。顺序有意义：日志最外层吃到所有请求，
+// recover 必须在业务之前能兜住 panic，limiter 放最后避免限流前已经做了
+// 大量准备工作。
 func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.IPRateLimiter) (*gin.Engine, error) {
 	engine := gin.New()
 	if err := engine.SetTrustedProxies(reg.Cfg.Server.TrustedProxies); err != nil {
@@ -164,9 +180,8 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
 	api := engine.Group("/api/v1")
 
-	// Always wire BearerAuth so the OpenAPI spec and runtime routes stay
-	// aligned. When reg.Auth is nil the middleware returns Unauthorized,
-	// matching the protected-route contract instead of 404.
+	// 始终挂 BearerAuth，让 OpenAPI spec 与运行时路由对齐。reg.Auth 为 nil
+	// 时中间件返 UNAUTHORIZED，符合受保护路由契约；不要换成 404。
 	authRequired := middleware.BearerAuth(reg.Auth)
 	if err := router.RegisterRoutes(api, router.Dependencies{
 		Auth:         handlers.Auth,
@@ -179,12 +194,13 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	return engine, nil
 }
 
+// newHTTPServer 把 cfg 翻译成裸 *http.Server，单独抽出来便于改超时 / 加
+// TLS / 替换 listener 等场景。
 func newHTTPServer(cfg *config.Config, engine *gin.Engine) *http.Server {
-	// ReadHeaderTimeout: short hedge against slowloris-style header drips;
-	// independent of the per-request body deadline below.
-	// Read/WriteTimeout: a small buffer over the business RequestTimeout so
-	// the middleware-side REQUEST_TIMEOUT envelope has time to flush before
-	// the server itself cuts the connection.
+	// ReadHeaderTimeout：短超时防 slowloris 风格的 header 慢喂攻击；与下面
+	// 的 per-request body deadline 是两件独立的事。
+	// Read/WriteTimeout：业务 RequestTimeout 之上加 slack 缓冲，让中间件
+	// 端先把 REQUEST_TIMEOUT 错误信封 flush 出去，再被 http.Server 切连接。
 	const slack = 5 * time.Second
 	reqTimeout := cfg.Server.RequestTimeout
 	if reqTimeout <= 0 {

@@ -60,7 +60,11 @@ func setupRouter(repo service.ExampleRepository, queues ...service.ExampleQueue)
 		c.Next()
 	})
 
-	svc := service.NewExampleService(repo, queues...)
+	var queue service.ExampleQueue
+	if len(queues) > 0 {
+		queue = queues[0]
+	}
+	svc := service.NewExampleService(repo, queue)
 	h := NewExampleHandler(svc)
 	r.POST("/examples", h.Create)
 	r.GET("/examples", h.List)

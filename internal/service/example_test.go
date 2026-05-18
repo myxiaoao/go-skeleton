@@ -50,7 +50,7 @@ func TestCreateSuccess(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewExampleService(repo)
+	svc := NewExampleService(repo, nil)
 
 	example, err := svc.Create(context.Background(), &CreateExampleReq{Name: "test"})
 	if err != nil {
@@ -111,7 +111,7 @@ func TestCreateDatabaseError(t *testing.T) {
 			return errors.New("connection refused")
 		},
 	}
-	svc := NewExampleService(repo)
+	svc := NewExampleService(repo, nil)
 
 	_, err := svc.Create(context.Background(), &CreateExampleReq{Name: "test"})
 	if err == nil {
@@ -137,7 +137,7 @@ func TestListSuccess(t *testing.T) {
 			return examples, 2, nil
 		},
 	}
-	svc := NewExampleService(repo)
+	svc := NewExampleService(repo, nil)
 
 	res, err := svc.List(context.Background(), &ListExamplesReq{Limit: 10, Offset: 0})
 	if err != nil {
@@ -159,7 +159,7 @@ func TestListDefaultLimit(t *testing.T) {
 			return nil, 0, nil
 		},
 	}
-	svc := NewExampleService(repo)
+	svc := NewExampleService(repo, nil)
 
 	_, err := svc.List(context.Background(), &ListExamplesReq{Limit: 0})
 	if err != nil {
@@ -176,7 +176,7 @@ func TestListDatabaseError(t *testing.T) {
 			return nil, 0, errors.New("timeout")
 		},
 	}
-	svc := NewExampleService(repo)
+	svc := NewExampleService(repo, nil)
 
 	_, err := svc.List(context.Background(), &ListExamplesReq{Limit: 10})
 	if err == nil {

@@ -44,12 +44,11 @@ type ExampleService struct {
 }
 
 // NewExampleService creates an ExampleService with the given repository.
-func NewExampleService(repo ExampleRepository, queue ...ExampleQueue) *ExampleService {
-	var q ExampleQueue
-	if len(queue) > 0 {
-		q = queue[0]
-	}
-	return &ExampleService{repo: repo, queue: q}
+// queue 可以为 nil 表示队列不可用——EnqueueTask 此时会返 errcode.QueueUnavailable，
+// 而不是 panic。原签名用 variadic 接收可选 queue，但调用方传多个时第 2 个起会
+// 被静默忽略，造成 API 歧义；显式参数更清晰。
+func NewExampleService(repo ExampleRepository, queue ExampleQueue) *ExampleService {
+	return &ExampleService{repo: repo, queue: queue}
 }
 
 // CreateExampleReq is the request body for creating an example.

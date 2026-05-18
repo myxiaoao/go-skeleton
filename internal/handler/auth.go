@@ -20,12 +20,11 @@ type AuthHandler struct {
 	DevTokenAvailable bool
 }
 
-// NewAuthHandler creates an AuthHandler. It returns nil when auth is not
-// configured.
+// NewAuthHandler creates an AuthHandler. A nil manager is allowed: the
+// resulting handler still satisfies the OpenAPI contract (POST /auth/token
+// stays routed) but CreateToken will return SERVICE_DISABLED until a JWT
+// manager is configured.
 func NewAuthHandler(manager *auth.JWTManager, devTokenAvailable bool) *AuthHandler {
-	if manager == nil {
-		return nil
-	}
 	return &AuthHandler{
 		manager:           manager,
 		DevTokenAvailable: devTokenAvailable,

@@ -58,6 +58,37 @@ func TestAuthHandlerCreateToken(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerCreateTokenReturnsServiceDisabledWhenManagerMissing(t *testing.T) {
+	validator.InitValidator()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	// nil manager simulates JWT_SECRET unset. Route must still be reachable
+	// and return SERVICE_DISABLED so the OpenAPI contract (always routed)
+	// holds at runtime.
+	router.POST("/auth/token", NewAuthHandler(nil, true).CreateToken)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/token",
+		strings.NewReader(`{"subject":"subject-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 envelope, got %d", rec.Code)
+	}
+
+	var body response.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Code != errcode.ServiceDisabled.Code() {
+		t.Fatalf("code = %d, want %d", body.Code, errcode.ServiceDisabled.Code())
+	}
+	if body.Reason != errcode.ServiceDisabled.Reason() {
+		t.Fatalf("reason = %q, want %q", body.Reason, errcode.ServiceDisabled.Reason())
+	}
+}
+
 func TestAuthHandlerCreateTokenReturnsServiceDisabledWhenGated(t *testing.T) {
 	validator.InitValidator()
 	manager, err := auth.NewJWTManager(auth.JWTConfig{

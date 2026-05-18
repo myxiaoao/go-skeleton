@@ -27,8 +27,9 @@ func registerAuthRoutes(r *gin.RouterGroup, deps Dependencies) {
 
 	authRoutes := r.Group("/auth")
 	// POST /auth/token is always registered so the OpenAPI spec and runtime
-	// routes match. When the dev-token endpoint is disabled the handler
-	// itself returns SERVICE_DISABLED (see AuthHandler.CreateToken).
+	// routes match. When the JWT manager is missing or the dev-token endpoint
+	// is disabled, the handler returns SERVICE_DISABLED instead of 404 (see
+	// AuthHandler.CreateToken).
 	authRoutes.POST("/token", deps.Auth.CreateToken)
 	if deps.AuthRequired != nil {
 		authRoutes.GET("/me", deps.AuthRequired, deps.Auth.Me)

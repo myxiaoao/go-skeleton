@@ -161,10 +161,10 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
 	api := engine.Group("/api/v1")
 
-	var authRequired gin.HandlerFunc
-	if reg.Auth != nil {
-		authRequired = middleware.BearerAuth(reg.Auth)
-	}
+	// Always wire BearerAuth so the OpenAPI spec and runtime routes stay
+	// aligned. When reg.Auth is nil the middleware returns Unauthorized,
+	// matching the protected-route contract instead of 404.
+	authRequired := middleware.BearerAuth(reg.Auth)
 	if err := router.RegisterRoutes(api, router.Dependencies{
 		Auth:         handlers.Auth,
 		AuthRequired: authRequired,

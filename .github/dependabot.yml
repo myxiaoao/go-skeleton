@@ -36,3 +36,19 @@ updates:
     labels:
       - dependencies
       - github-actions
+
+  # Docker base image: 关注 Dockerfile 的 FROM golang:... 这种 base 镜像 CVE。
+  # 跟 gomod / actions 一样每周扫一次；major 升级仍走 PR review，不自动合。
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(docker)"
+    labels:
+      - dependencies
+      - docker

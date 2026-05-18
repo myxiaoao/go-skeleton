@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -8,53 +10,76 @@ import (
 )
 
 // Load reads all configuration from environment variables. Call after LoadEnv.
-func Load() *Config {
-	port := getEnvOrDefault("SERVER_PORT", ":3000")
-	ginMode := getEnvOrDefault("GIN_MODE", "release")
-	logLevel := getEnvOrDefault("LOG_LEVEL", "info")
-	logFormat := getEnvOrDefault("LOG_FORMAT", "json")
-	stacktraceLevel := getEnvOrDefault("LOG_STACKTRACE_LEVEL", "error")
+// Returns the first batch of parse errors via errors.Join; the partially
+// populated *Config is still returned so callers can log it before exiting.
+func Load() (*Config, error) {
+	var errs []error
+	collect := func(err error) {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 
-	return &Config{
+	cfg := &Config{
 		Server: ServerConfig{
-			Port:           port,
-			GinMode:        ginMode,
+			Port:           getEnvOrDefault("SERVER_PORT", ":3000"),
+			GinMode:        getEnvOrDefault("GIN_MODE", "release"),
 			TrustedProxies: parseCSV(os.Getenv("TRUSTED_PROXIES")),
-			RequestTimeout: durationEnv("REQUEST_TIMEOUT", 30*time.Second),
 		},
 		Postgres: PostgresConfig{
-			DSN:             os.Getenv("POSTGRES"),
-			LogLevel:        os.Getenv("GORM_LOG_LEVEL"),
-			MaxIdleConns:    intEnv("DB_MAX_IDLE_CONNS", 15),
-			MaxOpenConns:    intEnv("DB_MAX_OPEN_CONNS", 30),
-			ConnMaxLifetime: durationEnv("DB_CONN_MAX_LIFETIME", 30*time.Minute),
-			ConnMaxIdleTime: durationEnv("DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
+			DSN:      os.Getenv("POSTGRES"),
+			LogLevel: os.Getenv("GORM_LOG_LEVEL"),
 		},
 		Redis: RedisConfig{
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
-			CacheDB:  intEnv("REDIS_CACHE_DB", 0),
-			QueueDB:  intEnv("REDIS_QUEUE_DB", 6),
 		},
 		Auth: AuthConfig{
 			JWTSecret: os.Getenv("JWT_SECRET"),
 			JWTIssuer: getEnvOrDefault("JWT_ISSUER", "go-skeleton"),
-			JWTTTL:    durationEnv("JWT_TTL", 24*time.Hour),
 		},
 		Cors: CorsConfig{
 			AllowOrigins: parseCSV(os.Getenv("CORS_ALLOW_ORIGINS")),
 		},
 		Log: LogConfig{
-			Level:           logLevel,
-			Format:          logFormat,
-			StacktraceLevel: stacktraceLevel,
-			AuditEnabled:    boolEnv("AUDIT_LOG_ENABLED", true),
+			Level:           getEnvOrDefault("LOG_LEVEL", "info"),
+			Format:          getEnvOrDefault("LOG_FORMAT", "json"),
+			StacktraceLevel: getEnvOrDefault("LOG_STACKTRACE_LEVEL", "error"),
 			AuditExcludes:   parseCSV(os.Getenv("AUDIT_LOG_EXCLUDE_PATHS")),
 		},
-		RateLimit: RateLimitConfig{
-			RequestsPerMinute: intEnv("RATE_LIMIT_PER_MINUTE", 0),
-		},
 	}
+
+	var err error
+	cfg.Server.RequestTimeout, err = durationEnv("REQUEST_TIMEOUT", 30*time.Second)
+	collect(err)
+
+	cfg.Postgres.MaxIdleConns, err = intEnv("DB_MAX_IDLE_CONNS", 15)
+	collect(err)
+	cfg.Postgres.MaxOpenConns, err = intEnv("DB_MAX_OPEN_CONNS", 30)
+	collect(err)
+	cfg.Postgres.ConnMaxLifetime, err = durationEnv("DB_CONN_MAX_LIFETIME", 30*time.Minute)
+	collect(err)
+	cfg.Postgres.ConnMaxIdleTime, err = durationEnv("DB_CONN_MAX_IDLE_TIME", 5*time.Minute)
+	collect(err)
+
+	cfg.Redis.CacheDB, err = intEnv("REDIS_CACHE_DB", 0)
+	collect(err)
+	cfg.Redis.QueueDB, err = intEnv("REDIS_QUEUE_DB", 6)
+	collect(err)
+
+	cfg.Auth.JWTTTL, err = durationEnv("JWT_TTL", 24*time.Hour)
+	collect(err)
+
+	cfg.Log.AuditEnabled, err = boolEnv("AUDIT_LOG_ENABLED", true)
+	collect(err)
+
+	cfg.RateLimit.RequestsPerMinute, err = intEnv("RATE_LIMIT_PER_MINUTE", 0)
+	collect(err)
+
+	if len(errs) > 0 {
+		return cfg, fmt.Errorf("config: invalid environment variables: %w", errors.Join(errs...))
+	}
+	return cfg, nil
 }
 
 func getEnvOrDefault(key, fallback string) string {
@@ -76,38 +101,38 @@ func parseCSV(value string) []string {
 	return out
 }
 
-func intEnv(key string, fallback int) int {
+func intEnv(key string, fallback int) (int, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := strconv.Atoi(raw)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, raw, err)
 	}
-	return parsed
+	return parsed, nil
 }
 
-func boolEnv(key string, fallback bool) bool {
+func boolEnv(key string, fallback bool) (bool, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := strconv.ParseBool(raw)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, raw, err)
 	}
-	return parsed
+	return parsed, nil
 }
 
-func durationEnv(key string, fallback time.Duration) time.Duration {
+func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, raw, err)
 	}
-	return parsed
+	return parsed, nil
 }

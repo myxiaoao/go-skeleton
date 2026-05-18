@@ -30,7 +30,10 @@ type httpServerLifecycle interface {
 
 func main() {
 	config.LoadEnv("cmd/api/.env")
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		panic(fmt.Sprintf("load config: %v", err))
+	}
 	if err := bootstrap.InitRuntime(cfg, "api"); err != nil {
 		panic(fmt.Sprintf("init runtime: %v", err))
 	}

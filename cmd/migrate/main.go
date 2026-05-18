@@ -16,7 +16,10 @@ import (
 
 func main() {
 	config.LoadEnv("cmd/migrate/.env")
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		panic(fmt.Sprintf("load config: %v", err))
+	}
 	if err := bootstrap.InitRuntime(cfg, "migrate"); err != nil {
 		panic(fmt.Sprintf("init runtime: %v", err))
 	}

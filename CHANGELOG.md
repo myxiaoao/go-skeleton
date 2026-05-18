@@ -57,45 +57,60 @@ Commit prefixes follow the convention in `CLAUDE.md`
   reuse the same default-message table without forking it; `INTERNAL_ERROR`
   picks up its own message instead of falling through to "operation
   failed".
-- **启动期依赖探针 fail-fast**：`internal/bootstrap/{api,worker}.go::InitXxx`
-  打开 DB / Redis 后立即 Ping（`STARTUP_PROBE_TIMEOUT=5s`），失败即释放
-  资源并退出非零；让 systemd 在错配时直接重启留指标。
-- **pprof debug 端点**：`internal/router/pprof.go` + `PPROF_ENABLED=false /
-  PPROF_ADDR=127.0.0.1:6060`。单独 mux + 独立监听，便于网络层隔离；
-  生产默认关，临时 SSH 隧道 + `go tool pprof` 访问，runbook 加排障流程。
-- **Graceful drain + `/health 503`**：`Registry.Draining *atomic.Bool` 作为
-  进程级 graceful 信号；`cmd/api/main.go` SIGTERM 后翻 draining + `sleep
-  GRACEFUL_DRAIN`（默认 10s）让 LB 摘流再 `Shutdown`。`/livez` 不受影响。
-- **`/health` 分级 degraded**：`HealthResponse.status` 加 `degraded`
-  枚举值（向后兼容）。DB 挂 → unhealthy + 503（LB 摘流）；Redis 挂
-  → degraded + 200（LB 不摘流，缓存抖动不应让 pod 离线）。
-- **Recovery 中间件 trace_id 兜底**：`middleware/recovery.go` panic 日志
-  显式 `zap.String("trace_id", c.GetString(...))`，让中间件顺序被调换时
-  字段仍然存在（值可空），方便采集端用同一 query 抓 panic。
-- **`make new-endpoint NAME=Foo`**：`scripts/new-endpoint.sh` 拷贝
-  `internal/{handler,service,repository,model,task}/example.go` 5 份，
-  仅在新文件里 sed 替换 `Example→<Name>`，打印 3 步手动装配提示。
-- **`config.Load()` 末尾跑 `validate()`**：`config/validate.go` 集中校验
-  `RequestTimeout > 0`、`GracefulDrain >= 0`、`DB_MAX_OPEN_CONNS > 0`（DSN
-  非空时）、`WORKER_CONCURRENCY > 0`（Queues 非空时）、`RATE_LIMIT_PER_MINUTE
-  >= 0`；启动期把错配拦在 `cmd/main`。
-- **`make mod-upgrade`**：`scripts/mod-upgrade.sh` 用 `go list -m -u -json`
-  + `jq` 过滤直接依赖，按 semver MAJOR 分档（major / v0.x 改动仅打印不升；
-  patch / minor 自动 `go get` → `go mod tidy` → `make verify`，失败即
-  `git checkout -- go.mod go.sum` 回滚）。
-- **systemd `Type=notify` + `WatchdogSec=30s` + `LimitNOFILE=65535`**：新增
-  `pkg/sdnotify`（build tag `linux` 真实 sd_notify、其他平台 noop stub），
-  `cmd/api/main.go` 起协程发 `READY=1` 和 `WATCHDOG=1` 心跳。新增 deps
-  `github.com/coreos/go-systemd/v22`。Worker / migrate unit 不动。
-- **CI `validate-systemd-units` job**：`.github/workflows/ci.yml` 新增独立
-  job 跑 `sudo systemd-analyze verify deploy/systemd/*.service`，unit 语法错
-  push 即知。
-- **runbook 线上 P0 排错速查表**：`docs/runbook.md` 末尾 11 行表格，按现象
-  对一行"第一个该跑的命令"（journalctl / ss / Asynqmon / pg_stat_activity
-  / `/proc/$pid/limits` 等）。
-- **`.golangci.yml` 显式 `errcheck`**：v2 默认已 enable，显式声明使报告更
-  明确；`settings.errcheck.exclude-functions` 列 `gin.Context.Error` 和
-  `fmt.Fprint*` 为故意忽略，避免引导写无意义 `_ =` 赋值。
+- **Startup dependency probe (fail-fast)**: `internal/bootstrap/{api,worker}.go::InitXxx`
+  pings DB / Redis immediately after opening them (`STARTUP_PROBE_TIMEOUT=5s`);
+  on failure it releases the resources and exits non-zero, so systemd
+  restarts on misconfiguration instead of running degraded.
+- **pprof debug endpoint**: `internal/router/pprof.go` + `PPROF_ENABLED=false /
+  PPROF_ADDR=127.0.0.1:6060`. Separate mux and listener for network-layer
+  isolation; off in production by default, accessed via SSH tunnel +
+  `go tool pprof`. Runbook gained an "open pprof" troubleshooting section.
+- **Graceful drain + `/health 503`**: `Registry.Draining *atomic.Bool` acts as
+  the process-wide graceful signal; on SIGTERM `cmd/api/main.go` flips it
+  and sleeps `GRACEFUL_DRAIN` (default 10s) so the LB can pull the pod out
+  of rotation before `Shutdown`. `/livez` is unaffected.
+- **`/health` tiered status (`degraded`)**: `HealthResponse.status` adds a
+  `degraded` enum value (backwards-compatible). DB down → `unhealthy` + 503
+  (LB drains); Redis down → `degraded` + 200 (LB keeps the pod, since cache
+  flaps shouldn't take the pod offline).
+- **Recovery middleware trace_id fallback**: `middleware/recovery.go` panic
+  log explicitly adds `zap.String("trace_id", c.GetString(...))`, so the
+  field is always present (possibly empty) even if middleware ordering is
+  reshuffled and `applog.FromContext` can't pick it up from ctx.
+- **`make new-endpoint NAME=Foo`**: `scripts/new-endpoint.sh` copies
+  `internal/{handler,service,repository,model,task}/example.go` five times,
+  `sed`-renames `Example` → `<Name>` only inside the new files, and prints
+  the three manual wiring steps (openapi.yaml, server.go, router.go).
+- **`config.Load()` validation pass**: `config/validate.go` centralises
+  startup constraints — `RequestTimeout > 0`, `GracefulDrain >= 0`,
+  `DB_MAX_OPEN_CONNS > 0` (when DSN is non-empty), `WORKER_CONCURRENCY > 0`
+  (when Queues is non-empty), `RATE_LIMIT_PER_MINUTE >= 0`. Misconfiguration
+  fails fast in `cmd/main` rather than at first business request.
+- **`make mod-upgrade`**: `scripts/mod-upgrade.sh` parses `go list -m -u
+  -json` via `jq`, classifies direct deps by semver MAJOR (major / v0.x
+  bumps print only; patch / minor auto-applied via `go get` → `go mod tidy`
+  → `make verify`; any failure triggers `git checkout -- go.mod go.sum`
+  rollback).
+- **systemd `Type=notify` + `WatchdogSec=30s` + `LimitNOFILE=65535`**: new
+  `pkg/sdnotify` package — `linux` build tag does the real sd_notify,
+  other platforms ship a noop stub. `cmd/api/main.go` runs a goroutine
+  emitting `READY=1` and periodic `WATCHDOG=1`. Adds dep
+  `github.com/coreos/go-systemd/v22`. Worker / migrate units unchanged.
+- **CI `validate-systemd-units` job**: `.github/workflows/ci.yml` adds a
+  dedicated job that runs `sudo systemd-analyze verify
+  deploy/systemd/*.service` against placeholder targets (dummy binaries,
+  env file, user) so unit-file syntax / `Type=notify` consistency errors
+  fail on push.
+- **Runbook P0 troubleshooting table**: `docs/runbook.md` gained an 11-row
+  matrix mapping symptoms ("API won't start", "OOM restart", "watchdog
+  restart", "FD exhaustion", "/health degraded vs 503", …) to the first
+  command to run (journalctl / ss / Asynqmon / pg_stat_activity /
+  `/proc/$pid/limits` etc.).
+- **`.golangci.yml` explicit `errcheck`**: enabled explicitly (v2 has it
+  on by default; the explicit declaration makes lint reports clearer);
+  `settings.errcheck.exclude-functions` lists `gin.Context.Error` and
+  `fmt.Fprint*` as intentionally ignored, to avoid encouraging meaningless
+  `_ =` assignments.
 
 ### Changed
 

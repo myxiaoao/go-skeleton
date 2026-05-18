@@ -87,14 +87,14 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 例外：`/livez` 与 `/health` 用真实 HTTP 状态码（200 / 503），给 LB 和 K8s 探针用；`/livez` 是 liveness（永远 200），`/health` 是 readiness（依赖不可用时 503）。
 
-新增错误码：去 `pkg/errcode/common.go` 加一个 `newError(code, "REASON")` 常量，并在 `pkg/response/response.go` 的 `messageFor` 里补默认英文文案。
+新增错误码：去 `pkg/errcode/common.go` 加一个 `newError(code, "REASON")` 常量，并在 `pkg/response/response.go` 的 `MessageFor` 里补默认英文文案，并跑 `make docs-errcodes` 重新生成 `docs/errcodes.md`。
 
 ## i18n
 
 **当前未实现**。如果未来加，按下面这套约定来，不要散落到各层：
 
 - 翻译文件统一放 `config/i18n/locales/{lang}.json`，key 用 `errcode` 的 `Reason`（如 `INVALID_PARAMS`）。
-- 在 `pkg/response` 的 `messageFor` 内根据 `Accept-Language` 切换文案，handler 和 service **不**自己拼语言相关字符串。
+- 在 `pkg/response` 的 `MessageFor` 内根据 `Accept-Language` 切换文案，handler 和 service **不**自己拼语言相关字符串。
 - `pkg/validator` 的 binding 错误翻译也走同一套机制，不要硬编码中文。
 
 ## JWT 鉴权
@@ -213,7 +213,7 @@ oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。
 声明任务完成前必须跑过：
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify（每步打横幅，便于定位失败）
+make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅，便于定位失败）
 ```
 
 需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
@@ -318,7 +318,7 @@ feat(service): example 新增分页参数校验
 每次 commit 前一条命令搞定：
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify
+make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
 ```
 
 任意一项挂了**不要 `--no-verify` 跳过**——按通用规则，hook 失败先修问题再重新 commit，不要 amend。

@@ -98,7 +98,7 @@ Steps to take after cloning this repo as the starting point of a new service:
 5. Make sure CI is happy:
 
    ```sh
-   make verify   # fmt + vet + test + lint + oapi-verify
+   make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
    ```
 
 ## Runtime Dependencies
@@ -233,7 +233,7 @@ Optimised as a cheat sheet for both AI assistants and new contributors.
 Run the one-shot check that gates every commit:
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify
+make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
 ```
 
 Or call the underlying targets individually (`make test`, `make lint`, ...).

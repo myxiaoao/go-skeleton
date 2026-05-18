@@ -22,7 +22,7 @@ go run ./cmd/migrate
 ## 提交前必跑
 
 ```sh
-make verify        # fmt + vet + test + lint + oapi-verify（每步有横幅）
+make verify        # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步有横幅）
 ```
 
 任意一步挂了，看最后一个红色 `=== STEP FAILED: xxx ===` 横幅就知道挂在哪。**不要用 `--no-verify` 跳过 hook**。

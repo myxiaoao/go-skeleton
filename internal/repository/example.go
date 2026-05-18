@@ -20,22 +20,24 @@ import (
 	"go-skeleton/internal/model"
 )
 
-// ExampleRepository persists examples.
+// ExampleRepository 落 example 数据。持有默认 *gorm.DB；事务里通过
+// dbFromContext 切换到 ctx 上挂的事务句柄。
 type ExampleRepository struct {
 	db *gorm.DB
 }
 
-// NewExampleRepository creates an ExampleRepository.
+// NewExampleRepository 构造 ExampleRepository。db 由 internal/server.go 装配。
 func NewExampleRepository(db *gorm.DB) *ExampleRepository {
 	return &ExampleRepository{db: db}
 }
 
-// Create stores an example.
+// Create 插一条 example，并把生成的 ID / 时间戳回填到入参 example 上。
+// 走 dbFromContext 让事务里嵌套调用复用同一条事务连接。
 func (r *ExampleRepository) Create(ctx context.Context, example *model.Example) error {
 	return dbFromContext(ctx, r.db).WithContext(ctx).Create(example).Error
 }
 
-// List returns examples ordered by newest first plus the total row count.
+// List 按 id DESC 返回分页 example 列表 + 总行数。
 //
 // **快照一致性说明：** Count 和 Find 是两条独立查询，在 PostgreSQL 默认的
 // `READ COMMITTED` 隔离级别下，两条查询之间发生的写入会让返回值不一致

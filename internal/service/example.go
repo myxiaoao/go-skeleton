@@ -25,40 +25,47 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// ExampleRepository is the persistence dependency used by ExampleService.
+// ExampleRepository 是 ExampleService 持久化层的接口边界。接口就近定义在
+// service 包里（不放 repository 包），这样测试时可以 inline mock，且
+// repository 实现自然满足。
 type ExampleRepository interface {
 	Create(ctx context.Context, example *model.Example) error
 	List(ctx context.Context, limit, offset int) ([]model.Example, int64, error)
 }
 
-// ExampleQueue is the async task queue boundary used by ExampleService.
+// ExampleQueue 是 ExampleService 的异步任务队列接口边界。具体由
+// internal/taskqueue.Queue 实现；service 故意不直接拿 *asynq.Client，避免
+// 测试要拉 Redis。
 type ExampleQueue interface {
 	Available() bool
 	Enqueue(ctx context.Context, t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
-// ExampleService handles the example application flow.
+// ExampleService 承载 example 资源的业务规则：参数校验、调 repository
+// 落库、调 queue 投递异步任务。所有公开方法的 ctx 必须从 handler 一路
+// 传下来（不能 context.Background 替换）。
 type ExampleService struct {
 	repo  ExampleRepository
 	queue ExampleQueue
 }
 
-// NewExampleService creates an ExampleService with the given repository.
-// queue 可以为 nil 表示队列不可用——EnqueueTask 此时会返 errcode.QueueUnavailable，
-// 而不是 panic。原签名用 variadic 接收可选 queue，但调用方传多个时第 2 个起会
-// 被静默忽略，造成 API 歧义；显式参数更清晰。
+// NewExampleService 构造 ExampleService。queue 可以为 nil 表示队列不可用——
+// EnqueueTask 此时会返 errcode.QueueUnavailable，而不是 panic。原签名用
+// variadic 接收可选 queue，但调用方传多个时第 2 个起会被静默忽略，造成 API
+// 歧义；显式参数更清晰。
 func NewExampleService(repo ExampleRepository, queue ExampleQueue) *ExampleService {
 	return &ExampleService{repo: repo, queue: queue}
 }
 
-// CreateExampleReq is the request body for creating an example.
-// Name max length is aligned with the GORM column (varchar(255)) so overlong
-// input surfaces as INVALID_PARAMS instead of a DB-side failure.
+// CreateExampleReq 是创建 example 的请求体。Name 长度上限对齐 GORM 字段
+// （varchar(255)），让超长输入在 binding 阶段就返 INVALID_PARAMS，不是等
+// DB 抛 SQL 错。
 type CreateExampleReq struct {
 	Name string `json:"name" binding:"required,max=255"`
 }
 
-// Create creates a new example.
+// Create 落一条 example。底层错误统一记日志 + 返 errcode.DatabaseError，
+// 不把 GORM 内部错误字符串透给客户端（信息泄漏 + 协议不稳定）。
 func (s *ExampleService) Create(ctx context.Context, req *CreateExampleReq) (*model.Example, error) {
 	example := model.Example{Name: req.Name}
 	if err := s.repo.Create(ctx, &example); err != nil {
@@ -68,18 +75,21 @@ func (s *ExampleService) Create(ctx context.Context, req *CreateExampleReq) (*mo
 	return &example, nil
 }
 
-// EnqueueExampleTaskReq is the request body for publishing an example task.
-// Name shares the example table column constraint (varchar(255)).
+// EnqueueExampleTaskReq 是投递 example 异步任务的请求体。Name 长度对齐
+// example 表字段约束（varchar(255)）。
 type EnqueueExampleTaskReq struct {
 	Name string `json:"name" binding:"required,max=255"`
 }
 
-// EnqueueExampleTaskRes is the response for publishing an example task.
+// EnqueueExampleTaskRes 是异步任务投递的响应：Queued=true 表示已入队，
+// 任务结果由 worker 异步处理，HTTP 这条调用并不等待结果。
 type EnqueueExampleTaskRes struct {
 	Queued bool `json:"queued"`
 }
 
-// EnqueueTask publishes an example async task.
+// EnqueueTask 把 example 任务投到 Asynq 队列。队列没配置或不可用时返
+// QUEUE_UNAVAILABLE；构造任务 / 入队失败返 QUEUE_ERROR。两者都带 trace_id
+// 串到 worker 侧日志，便于排查"消息丢了到底是哪边"。
 func (s *ExampleService) EnqueueTask(ctx context.Context, req *EnqueueExampleTaskReq) (*EnqueueExampleTaskRes, error) {
 	if s.queue == nil || !s.queue.Available() {
 		return nil, errcode.QueueUnavailable
@@ -97,19 +107,22 @@ func (s *ExampleService) EnqueueTask(ctx context.Context, req *EnqueueExampleTas
 	return &EnqueueExampleTaskRes{Queued: true}, nil
 }
 
-// ListExamplesReq is the request query for listing examples.
+// ListExamplesReq 是分页列表的查询参数。limit 上限 100 防止单次返回过大；
+// offset 没设上限——业务约定 offset 分页只用于小数据集，大数据集应走 cursor。
 type ListExamplesReq struct {
 	Limit  int `form:"limit" binding:"omitempty,min=1,max=100"`
 	Offset int `form:"offset" binding:"omitempty,min=0"`
 }
 
-// ListExamplesRes is the response for listing examples.
+// ListExamplesRes 是分页列表响应。total 在默认 READ COMMITTED 下是近似值，
+// 见 repository.List 的快照一致性说明。
 type ListExamplesRes struct {
 	Examples []model.Example `json:"examples"`
 	Total    int64           `json:"total"`
 }
 
-// List returns a paginated list of examples.
+// List 返回分页 example 列表。Limit 缺省给 20 是项目内约定，让前端不传
+// 也有可用默认值；想改默认值前先看一下分页 UI 设计。
 func (s *ExampleService) List(ctx context.Context, req *ListExamplesReq) (*ListExamplesRes, error) {
 	if req.Limit == 0 {
 		req.Limit = 20

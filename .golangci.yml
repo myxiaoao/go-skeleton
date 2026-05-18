@@ -50,6 +50,23 @@ formatters:
       - internal/oapi
 
 linters:
+  # 显式开 errcheck：v2 默认就包含，但显式 enable 在 lint 报告里更明确，且
+  # 配套 settings.errcheck.exclude-functions 列出"故意忽略返回值"的常见点。
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      # 这些函数返回的 error 在多数业务里是无意义的：
+      # - gin.Context.Error 只是把 err 塞 c.Errors 链供后续中间件读，写日志侧
+      #   已经在 Recovery / handler 里处理过；
+      # - fmt.Fprint* 写 ResponseWriter / Stderr 的 error 在我们的场景不可控；
+      # - http.Server.Shutdown 的 err 已由 cmd/api/main.go 走 applog.Warn 接住，
+      #   多余的 errcheck 报警会引导写没必要的 _ = 赋值。
+      exclude-functions:
+        - (*github.com/gin-gonic/gin.Context).Error
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
   exclusions:
     paths:
       - internal/oapi

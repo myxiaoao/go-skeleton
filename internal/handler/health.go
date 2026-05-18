@@ -24,8 +24,8 @@ type healthCachePinger interface {
 	Ping(context.Context) error
 }
 
-// buildResponse mirrors the anonymous struct on oapi.HealthResponse.Build
-// so the handler doesn't construct it inline three times.
+// buildResponse 镜像 oapi.HealthResponse.Build 上的匿名 struct，避免 handler
+// 内三处地方都写一份内联字面量。
 func buildResponse() struct {
 	BuildTime string `json:"build_time"`
 	Commit    string `json:"commit"`
@@ -42,14 +42,16 @@ func buildResponse() struct {
 	}
 }
 
-// HealthHandler checks infrastructure dependencies.
+// HealthHandler 实现 K8s 风格的探活：/livez（liveness）+ /health（readiness）。
+// 持有 db / cache 的 ping 接口和 draining 信号；后者由 main 在 SIGTERM 时翻
+// true，用来让 /health 提前返 503 让 LB 摘流。
 type HealthHandler struct {
 	db       healthDBPinger
 	cache    healthCachePinger
 	draining *atomic.Bool
 }
 
-// NewHealthHandler creates a HealthHandler. db 为 nil 表示 not_configured；
+// NewHealthHandler 构造 HealthHandler。db 为 nil 表示 not_configured；
 // cache 为 nil 同义。draining 可为 nil（不参与 graceful drain 的进程）。
 func NewHealthHandler(db *database.DBManager, cache *cache.Client, draining *atomic.Bool) *HealthHandler {
 	h := &HealthHandler{draining: draining}
@@ -63,9 +65,11 @@ func NewHealthHandler(db *database.DBManager, cache *cache.Client, draining *ato
 	return h
 }
 
-// Live is the liveness probe — succeeds as long as the process can serve a
-// request. Must not touch DB / Redis: a failure here causes Kubernetes to
-// restart the pod, which is the wrong response when downstreams flap.
+// Live 是 liveness 探针——只要进程还能接请求就返 200。
+//
+// 故意不碰 DB / Redis：liveness 失败会让 K8s 重启 Pod，而下游抖动时重启
+// 是错的响应（重启不能让外部 DB 复活，反而扩大故障面）。下游探活属于
+// readiness（/health）的职责。
 func (h *HealthHandler) Live(c *gin.Context) {
 	c.JSON(http.StatusOK, oapi.LivenessResponse{
 		Status:  "ok",
@@ -73,10 +77,9 @@ func (h *HealthHandler) Live(c *gin.Context) {
 	})
 }
 
-// Health is the readiness probe — returns 503 when required dependencies
-// are unavailable, so the load balancer can pull the pod out of rotation
-// without restarting it. The response shape is pinned to oapi.HealthResponse
-// so it stays aligned with api/openapi.yaml.
+// Health 是 readiness 探针——关键依赖不可用时返 503，LB 借此把 Pod 摘出
+// 轮询而不重启它（区别于 liveness）。响应结构绑死到 oapi.HealthResponse，
+// 保证和 api/openapi.yaml 不漂移。
 func (h *HealthHandler) Health(c *gin.Context) {
 	// graceful drain：SIGTERM 后 main 先翻 draining=true，让 LB 在 GracefulDrain
 	// 窗口内摘流，再退出 HTTP server，避免请求被半途切断。

@@ -9,21 +9,19 @@ import (
 	"go-skeleton/pkg/response"
 )
 
-// AuthHandler handles the minimal JWT example flow.
+// AuthHandler 处理最小化的 JWT 示例流程：颁发 token + 鉴权后查询当前 subject。
 type AuthHandler struct {
 	manager *auth.JWTManager
-	// DevTokenAvailable governs POST /auth/token: when false, the endpoint
-	// stays in the OpenAPI spec and the routing table, but CreateToken
-	// returns SERVICE_DISABLED so clients see a spec-aligned error instead
-	// of 404. Exposed so router-level tests can flip it without going through
-	// the JWT manager.
+	// DevTokenAvailable 控制 POST /auth/token 的可用性：值为 false 时端点仍
+	// 留在 OpenAPI spec 和路由表，但 CreateToken 返回 SERVICE_DISABLED；这样
+	// 客户端拿到的是契约一致的错误码而不是 404。导出字段方便路由层测试不走
+	// 真正 JWT manager 就能切换该端点开关。
 	DevTokenAvailable bool
 }
 
-// NewAuthHandler creates an AuthHandler. A nil manager is allowed: the
-// resulting handler still satisfies the OpenAPI contract (POST /auth/token
-// stays routed) but CreateToken will return SERVICE_DISABLED until a JWT
-// manager is configured.
+// NewAuthHandler 构造 AuthHandler。manager 为 nil 也允许：handler 仍满足
+// OpenAPI 契约（POST /auth/token 仍注册），CreateToken 在 manager 配齐之前
+// 返回 SERVICE_DISABLED。
 func NewAuthHandler(manager *auth.JWTManager, devTokenAvailable bool) *AuthHandler {
 	return &AuthHandler{
 		manager:           manager,
@@ -31,26 +29,25 @@ func NewAuthHandler(manager *auth.JWTManager, devTokenAvailable bool) *AuthHandl
 	}
 }
 
-// CreateTokenReq is the request body for issuing a sample JWT.
+// CreateTokenReq 是颁发示例 JWT 的请求体。
 type CreateTokenReq struct {
 	Subject string `json:"subject" binding:"required"`
 }
 
-// CreateTokenRes is the response body for a sample JWT.
+// CreateTokenRes 是示例 JWT 的响应体。
 type CreateTokenRes struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
 }
 
-// MeRes is the response body for the protected auth example.
+// MeRes 是受保护示例端点 /auth/me 的响应体。
 type MeRes struct {
 	Subject string `json:"subject"`
 }
 
-// CreateToken issues a sample JWT for the given subject. The endpoint is
-// gated by AUTH_DEV_TOKEN_ENABLED and by the presence of a JWT manager;
-// when either is missing, it returns SERVICE_DISABLED so the OpenAPI contract
-// and runtime behavior stay aligned.
+// CreateToken 给指定 subject 颁发示例 JWT。端点由 AUTH_DEV_TOKEN_ENABLED
+// 和 JWT manager 是否配置两个条件共同把关；任一缺失就返 SERVICE_DISABLED，
+// 让 OpenAPI 契约与运行时行为对齐。
 func (h *AuthHandler) CreateToken(c *gin.Context) {
 	if h == nil || h.manager == nil || !h.DevTokenAvailable {
 		response.WriteError(c, errcode.ServiceDisabled)
@@ -75,7 +72,8 @@ func (h *AuthHandler) CreateToken(c *gin.Context) {
 	})
 }
 
-// Me returns the subject from a valid Bearer token.
+// Me 返回当前有效 Bearer token 携带的 subject，用于前端"我是谁"探活。
+// subject 由 BearerAuth 中间件预先写进 ctx，handler 这里只是取出来。
 func (h *AuthHandler) Me(c *gin.Context) {
 	response.WriteSuccess(c, MeRes{Subject: middleware.AuthSubject(c)})
 }

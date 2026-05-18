@@ -17,17 +17,18 @@ import (
 	"go-skeleton/pkg/response"
 )
 
-// ExampleHandler handles HTTP requests for examples.
+// ExampleHandler 处理 example 资源的 HTTP 请求。所有业务规则委托给 svc，
+// 自己只做参数绑定 + 响应包装。
 type ExampleHandler struct {
 	svc *service.ExampleService
 }
 
-// NewExampleHandler creates an ExampleHandler.
+// NewExampleHandler 构造 ExampleHandler。svc 由 internal/server.go 装配。
 func NewExampleHandler(svc *service.ExampleService) *ExampleHandler {
 	return &ExampleHandler{svc: svc}
 }
 
-// Create handles POST /api/v1/examples.
+// Create 处理 POST /api/v1/examples：创建一条 example 记录。
 func (h *ExampleHandler) Create(c *gin.Context) {
 	var req service.CreateExampleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,7 +45,8 @@ func (h *ExampleHandler) Create(c *gin.Context) {
 	response.WriteSuccess(c, example)
 }
 
-// List handles GET /api/v1/examples.
+// List 处理 GET /api/v1/examples：返回分页列表 + total（近似值，
+// 见 repository.List 的快照一致性说明）。
 func (h *ExampleHandler) List(c *gin.Context) {
 	var req service.ListExamplesReq
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -61,7 +63,8 @@ func (h *ExampleHandler) List(c *gin.Context) {
 	response.WriteSuccess(c, res)
 }
 
-// EnqueueTask handles POST /api/v1/examples/tasks.
+// EnqueueTask 处理 POST /api/v1/examples/tasks：把示例任务推到 Asynq 队列，
+// 真正的执行逻辑在 internal/worker 包里消费。队列没配置时返 QUEUE_UNAVAILABLE。
 func (h *ExampleHandler) EnqueueTask(c *gin.Context) {
 	var req service.EnqueueExampleTaskReq
 	if err := c.ShouldBindJSON(&req); err != nil {

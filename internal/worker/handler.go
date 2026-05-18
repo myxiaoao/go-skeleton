@@ -25,7 +25,7 @@ import (
 // service 实例，worker handler 调接口完成业务。
 type ExampleProcessor interface{}
 
-// Deps collects shared dependencies for async task handlers.
+// Deps 收拢所有异步任务 handler 共用的依赖。
 //
 // 故意**不**包含 *gorm.DB：repository 是项目里唯一允许 import gorm 的层
 // （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
@@ -39,7 +39,8 @@ type Deps struct {
 	Queue   *taskqueue.Queue
 }
 
-// HandleExampleTask processes the example async task.
+// HandleExampleTask 消费 example 异步任务。当前 demo 仅打日志，真实业务
+// 会改成调 Example service 接口完成持久化 / 外部调用。
 func (d *Deps) HandleExampleTask(ctx context.Context, t *asynq.Task) error {
 	var p task.ExamplePayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
@@ -53,7 +54,9 @@ func (d *Deps) HandleExampleTask(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
-// RegisterHandlers registers all async task handlers on mux.
+// RegisterHandlers 把所有异步任务 handler 注册到 mux 上。注册 TraceMiddleware
+// 让 task 调用链自带 trace_id；deps 为 nil 兜底成空 Deps，让 mux.Handle 注
+// 册路径仍然完整。
 func RegisterHandlers(mux *asynq.ServeMux, deps *Deps) {
 	if mux == nil {
 		return

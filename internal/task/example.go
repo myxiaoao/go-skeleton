@@ -18,17 +18,21 @@ import (
 )
 
 const (
-	// TypeExampleTask identifies the example async task.
+	// TypeExampleTask 是 example 异步任务的类型标识，asynq 按此 string 路由到
+	// 对应 handler；格式约定 "<domain>:<verb>"，新增任务沿用这种命名。
 	TypeExampleTask = "example:run"
 )
 
-// ExamplePayload is the payload for the example task.
+// ExamplePayload 是 example 任务的 JSON payload。TraceID 由 API 端填，让
+// worker 消费时跟 HTTP 链路串成一条 trace。
 type ExamplePayload struct {
 	Name    string `json:"name"`
 	TraceID string `json:"trace_id,omitempty"`
 }
 
-// NewExampleTask creates a new example task for async processing.
+// NewExampleTask 构造一个待入队的 example 任务，附带 MaxRetry(5)。traceID
+// 用 variadic 是为了让无 trace 上下文的调用方（脚本 / 测试）可以省略，
+// 但只取第一个；多传会被静默忽略，保持调用面简单。
 func NewExampleTask(name string, traceID ...string) (*asynq.Task, error) {
 	p := ExamplePayload{Name: name}
 	if len(traceID) > 0 {

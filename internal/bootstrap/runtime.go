@@ -9,7 +9,9 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// InitRuntime initializes process-wide runtime settings.
+// InitRuntime 设置进程级运行时：gin 模式 + 全局 zap logger。
+// service 可选，传 "api" / "worker" / "migrate" 会写进 logger 的 service
+// 字段，方便日志采集端按进程区分。
 func InitRuntime(cfg *config.Config, service ...string) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")

@@ -11,7 +11,7 @@ import (
 	"go-skeleton/pkg/validator"
 )
 
-// InitAPI initializes resources required by the HTTP API process.
+// InitAPI 装配 HTTP API 进程需要的全部资源（DB / Cache / Auth / Queue）。
 //
 // 顺序：先打开依赖 → 立刻做 fail-fast 探针 → 再装配上层。
 // 任何探针失败都立即 Close 已开资源、返回 error。

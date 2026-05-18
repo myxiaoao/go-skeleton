@@ -15,7 +15,9 @@ import (
 	"go-skeleton/pkg/database"
 )
 
-// Registry holds shared runtime resources initialized at process startup.
+// Registry 持有进程启动期一次性初始化、整个生命周期共享的运行时资源。
+// API / Worker / Migrate 三个进程各自有 InitXxx 装配自己需要的字段，没
+// 用到的字段保持 nil。Close 统一释放，按"后开先关"顺序。
 type Registry struct {
 	Cfg   *config.Config
 	DB    *database.DBManager
@@ -35,7 +37,9 @@ func newRegistry() *Registry {
 	return &Registry{Draining: &atomic.Bool{}}
 }
 
-// Close releases resources owned by the registry.
+// Close 释放 Registry 持有的所有资源。错误用 errors.Join 聚合返回——某条
+// 失败不影响后续资源关闭，避免一处异常导致连接泄漏。关闭顺序：先 queue
+// 客户端（停止入队） → cache → database（让正在写的事务先完成）。
 func (r *Registry) Close() error {
 	if r == nil {
 		return nil
@@ -60,6 +64,9 @@ func (r *Registry) Close() error {
 	return errors.Join(errs...)
 }
 
+// initDatabase 从 cfg 翻译出 database.Config 后建 GORM 实例。DSN 为空时
+// database.Init 会返回带 nil DB 的 manager，由上层 InitAPI / InitWorker
+// 决定是否致命。
 func initDatabase(cfg *config.Config) (*database.DBManager, error) {
 	return database.Init(database.Config{
 		DSN:             cfg.Postgres.DSN,
@@ -71,6 +78,8 @@ func initDatabase(cfg *config.Config) (*database.DBManager, error) {
 	})
 }
 
+// initCache 在 REDIS_ADDR 配置时构造 cache 客户端；否则返回 nil（不报错），
+// 让仅依赖 DB 的部署形态可以不带 Redis。
 func initCache(cfg *config.Config) (*cache.Client, error) {
 	if strings.TrimSpace(cfg.Redis.Addr) == "" {
 		return nil, nil
@@ -82,6 +91,8 @@ func initCache(cfg *config.Config) (*cache.Client, error) {
 	})
 }
 
+// initAuth 在 JWT_SECRET 配置时构造 JWTManager；否则返回 nil 让
+// middleware.BearerAuth 走 UNAUTHORIZED 兜底分支（不致命）。
 func initAuth(cfg *config.Config) (*auth.JWTManager, error) {
 	if strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
 		return nil, nil
@@ -93,6 +104,9 @@ func initAuth(cfg *config.Config) (*auth.JWTManager, error) {
 	})
 }
 
+// newAsynqClient 在 Redis 配置就绪时构造 asynq 入队客户端，用 QueueDB 编号
+// 区别于 cache（cfg.Redis.CacheDB）；没配 Redis 返回 nil，让上层 taskqueue
+// 包认作 unavailable。
 func newAsynqClient(cfg *config.Config) *asynq.Client {
 	if cfg == nil || strings.TrimSpace(cfg.Redis.Addr) == "" {
 		return nil

@@ -12,7 +12,8 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// NewRedisOpt creates the Redis connection config used by asynq.
+// NewRedisOpt 构造 asynq 用的 Redis 连接配置。集中在这里，让 API（入队）
+// 和 Worker（消费）共用一份连接参数定义。
 func NewRedisOpt(addr, password string, db int) asynq.RedisClientOpt {
 	return asynq.RedisClientOpt{
 		Addr:     addr,
@@ -21,8 +22,8 @@ func NewRedisOpt(addr, password string, db int) asynq.RedisClientOpt {
 	}
 }
 
-// ServerConfig groups Asynq tuning knobs into a single argument. Defaults
-// kick in via config.Load when the corresponding env vars are unset.
+// ServerConfig 把 Asynq 调参集中成一个入参对象。默认值由 config.Load 在对
+// 应 env 缺失时补；这里只做透传，不再 fallback。
 type ServerConfig struct {
 	Concurrency    int
 	Queues         map[string]int
@@ -30,7 +31,8 @@ type ServerConfig struct {
 	RetryMaxDelay  time.Duration
 }
 
-// NewServer creates an asynq worker server with the given tuning.
+// NewServer 按 ServerConfig 构造 asynq worker server。RetryDelayFunc 走自定
+// 义的 computeRetryDelay（带溢出守卫），ErrorHandler 把失败任务串到 zap 日志。
 func NewServer(redisOpt asynq.RedisClientOpt, sc ServerConfig) *asynq.Server {
 	baseDelay := sc.RetryBaseDelay
 	if baseDelay <= 0 {
@@ -109,7 +111,9 @@ func taskRuntimeMetadataFromContext(ctx context.Context) taskRuntimeMetadata {
 	return meta
 }
 
-// TraceMiddleware restores trace_id from task payloads and logs task lifecycle events.
+// TraceMiddleware 从 task payload 里恢复 API 端写入的 trace_id（NewExampleTask
+// 会把当前 ctx 的 trace_id 写进 payload），并打 task 生命周期日志，让队列
+// 消费端跟 HTTP 链路用同一个 trace_id 串起来。
 func TraceMiddleware(next asynq.Handler) asynq.Handler {
 	return traceMiddleware(next, taskRuntimeMetadataFromContext)
 }

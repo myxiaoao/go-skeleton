@@ -11,7 +11,7 @@ import (
 	"go-skeleton/pkg/database"
 )
 
-// InitWorker initializes resources required by the async worker process.
+// InitWorker 装配异步 worker 进程需要的全部资源（Cache / 可选 DB / Queue）。
 //
 // 顺序：先打开依赖 → 立刻做 fail-fast 探针 → 再装队列。
 // Worker 必须能连 Redis；DB 可选（只有需要的 handler 才依赖）。

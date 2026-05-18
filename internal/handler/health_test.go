@@ -21,10 +21,9 @@ type healthPingerFunc func(context.Context) error
 func (f healthPingerFunc) Ping(ctx context.Context) error { return f(ctx) }
 
 func TestHealthHandlerLiveReturns200WithoutDependencies(t *testing.T) {
-	// /livez must succeed even when db / cache are nil — the liveness
-	// probe answers "process is alive", not "downstreams are healthy".
-	// Failure here would cause Kubernetes to restart the pod on every
-	// transient DB / Redis blip, which is the wrong response.
+	// /livez 即使 db / cache 都是 nil 也必须返 200——liveness 探针只回答
+	// "进程还活着"，不是"下游都健康"。失败会触发 K8s 在每次 DB / Redis 抖动
+	// 时重启 Pod，是错的响应。
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	h := NewHealthHandler(nil, nil, nil)

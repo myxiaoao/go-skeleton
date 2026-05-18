@@ -42,9 +42,9 @@ func TestTimeoutEmitsRequestTimeoutEnvelope(t *testing.T) {
 	engine := gin.New()
 	engine.Use(Timeout(20 * time.Millisecond))
 	engine.GET("/slow", func(c *gin.Context) {
-		// Block until the request context is canceled (deadline exceeded).
+		// 阻塞到 request ctx 被取消（达到 deadline）。
 		<-c.Request.Context().Done()
-		// Do NOT write a response — let the middleware translate the deadline.
+		// **不要**写响应——让中间件把 deadline 转成 REQUEST_TIMEOUT 信封。
 	})
 
 	w := httptest.NewRecorder()
@@ -67,13 +67,13 @@ func TestTimeoutEmitsRequestTimeoutEnvelope(t *testing.T) {
 }
 
 func TestTimeoutDoesNotOverrideHandlerResponse(t *testing.T) {
-	// If the handler did write something (even a slow stream), we must not
-	// rewrite the response: it would corrupt an already-flushed body.
+	// 如果 handler 已经写过响应（哪怕是慢流），就不能再覆盖——已经 flush
+	// 的 body 被改写会导致响应体损坏。
 	engine := gin.New()
 	engine.Use(Timeout(20 * time.Millisecond))
 	engine.GET("/written", func(c *gin.Context) {
 		c.JSON(http.StatusCreated, gin.H{"ok": true})
-		// Now block past the deadline, but the response is already on the wire.
+		// 这里阻塞到超时；但响应已经写出去了。
 		<-c.Request.Context().Done()
 	})
 
@@ -90,7 +90,7 @@ func TestTimeoutDisabledWhenZero(t *testing.T) {
 	engine.Use(Timeout(0))
 	called := false
 	engine.GET("/zero", func(c *gin.Context) {
-		// No deadline should be attached.
+		// timeout=0 时不应给 ctx 挂 deadline。
 		if _, ok := c.Request.Context().Deadline(); ok {
 			t.Error("expected no deadline when timeout=0")
 		}
@@ -110,26 +110,26 @@ func TestTimeoutDisabledWhenZero(t *testing.T) {
 }
 
 func TestTimeoutIgnoresCancelFromOtherSources(t *testing.T) {
-	// Make sure we only emit REQUEST_TIMEOUT for DeadlineExceeded,
-	// not arbitrary Canceled errors.
+	// 确认中间件**只**在 DeadlineExceeded 时返 REQUEST_TIMEOUT，普通
+	// Canceled error 不触发——避免上游主动取消被误报成超时。
 	engine := gin.New()
 	engine.Use(Timeout(50 * time.Millisecond))
 	engine.GET("/cancel", func(c *gin.Context) {
 		ctx, cancel := context.WithCancel(c.Request.Context())
 		cancel()
 		_ = ctx
-		// Handler wrote nothing; ctx is canceled (not deadline-exceeded).
+		// handler 啥都没写；ctx 是被 cancel 而不是 deadline-exceeded。
 	})
 
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/cancel", nil))
 
-	// Since the request's own context did not exceed deadline, middleware
-	// must NOT inject REQUEST_TIMEOUT. Gin defaults to 200 with empty body.
+	// 因为 request ctx 没超 deadline，中间件**不应**注入 REQUEST_TIMEOUT。
+	// Gin 默认会返 200 + 空 body。
 	if w.Code == http.StatusOK && w.Body.Len() == 0 {
 		return
 	}
-	// Any non-timeout envelope is also fine; what we forbid is REQUEST_TIMEOUT.
+	// 任何非超时的响应信封都可接受；我们禁止的是把 REQUEST_TIMEOUT 误注入。
 	var resp response.Response
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err == nil &&
 		resp.Code == errcode.RequestTimeout.Code() {

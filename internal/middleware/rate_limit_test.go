@@ -161,7 +161,7 @@ func TestIPRateLimiterStopIsIdempotent(t *testing.T) {
 	limiter.Stop()
 }
 
-// helpers ----------------------------------------------------------------
+// 辅助函数 -----------------------------------------------------------------
 
 func buildRateLimitRouter(l *IPRateLimiter) *gin.Engine {
 	r := gin.New()

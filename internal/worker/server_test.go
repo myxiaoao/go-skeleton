@@ -123,7 +123,7 @@ func TestTraceMiddlewareSurfacesHandlerError(t *testing.T) {
 	}
 }
 
-// helpers ----------------------------------------------------------------
+// 辅助函数 -----------------------------------------------------------------
 
 func containsField(fields []zap.Field, key, wantStr string) bool {
 	for _, f := range fields {

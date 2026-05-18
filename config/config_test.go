@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// envSet sets env vars for the duration of a test and restores them on cleanup.
+// envSet 在测试期间设置一组 env 变量，t.Cleanup 会自动恢复。
 func envSet(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for k, v := range kv {
@@ -15,7 +15,8 @@ func envSet(t *testing.T, kv map[string]string) {
 }
 
 func TestLoadAllDefaults(t *testing.T) {
-	// Wipe variables that might be set by parent process so defaults win.
+	// 清空可能从父进程继承下来的 env，让默认值生效——否则本地 shell 里
+	// export 过 SERVER_PORT 等变量会污染默认值断言。
 	for _, k := range []string{
 		"SERVER_PORT", "GIN_MODE", "REQUEST_TIMEOUT",
 		"POSTGRES", "GORM_LOG_LEVEL",
@@ -146,9 +147,8 @@ func TestLoadReturnsErrorOnGarbageInput(t *testing.T) {
 }
 
 func TestLoadStillReturnsConfigOnError(t *testing.T) {
-	// Even with bad env, Load returns a populated *Config so the caller can
-	// log/debug before fail-fast exit. Verify defaults are applied for the
-	// bad keys.
+	// 即使遇到坏 env，Load 也会返回部分填好的 *Config，让 caller 在 fail-fast
+	// 退出前先 log / 调试。这里验证坏 key 对应字段已经回落到默认值。
 	envSet(t, map[string]string{
 		"DB_MAX_OPEN_CONNS": "abc",
 	})

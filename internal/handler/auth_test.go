@@ -62,9 +62,8 @@ func TestAuthHandlerCreateTokenReturnsServiceDisabledWhenManagerMissing(t *testi
 	validator.InitValidator()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	// nil manager simulates JWT_SECRET unset. Route must still be reachable
-	// and return SERVICE_DISABLED so the OpenAPI contract (always routed)
-	// holds at runtime.
+	// nil manager 模拟 JWT_SECRET 未设。路由仍然必须可达并返 SERVICE_DISABLED，
+	// 让运行时与 OpenAPI 契约（端点始终注册）保持一致。
 	router.POST("/auth/token", NewAuthHandler(nil, true).CreateToken)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/token",

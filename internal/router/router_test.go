@@ -21,21 +21,21 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-// buildEngine wires the routes the same way internal/server.go does, minus
-// the DB/Redis-dependent handlers. Handler instances may be empty structs
-// because we only care about routing, not response bodies.
+// buildEngine 模拟 internal/server.go 的路由装配，去掉真正依赖 DB / Redis
+// 的 handler。Handler 实例可以是空 struct——本测试只关心路由能不能命中，
+// 不验证响应体内容。
 func buildEngine(t *testing.T, devTokenEnabled bool) *gin.Engine {
 	t.Helper()
 
 	engine := gin.New()
-	// Catch panics from handlers that lack real DB/Redis dependencies. We only
-	// care that the route is reachable — a 500 still proves "not 404".
+	// 兜底 handler 因缺 DB / Redis 触发的 panic。本测试只在意路由可达——拿到
+	// 500 也算证明"不是 404"，路由是命中的。
 	engine.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
 		c.AbortWithStatus(http.StatusInternalServerError)
 	}))
 
-	// /livez, /health and /openapi.json are wired outside the API group in
-	// server.go — mirror that here so spec→route coverage stays honest.
+	// /livez、/health、/openapi.json 在 server.go 里挂在 API group 之外，这里
+	// 镜像同样的挂法，让 spec → route 覆盖检查诚实可靠。
 	healthH := &handler.HealthHandler{}
 	engine.GET("/livez", healthH.Live)
 	engine.GET("/health", healthH.Health)
@@ -44,7 +44,7 @@ func buildEngine(t *testing.T, devTokenEnabled bool) *gin.Engine {
 	api := engine.Group("/api/v1")
 
 	authRequired := func(c *gin.Context) {
-		// stand-in BearerAuth: 401 when no Authorization header.
+		// 模拟 BearerAuth：没 Authorization 头就返 401。
 		if c.GetHeader("Authorization") == "" {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
@@ -68,8 +68,8 @@ type opEntry struct {
 	path   string
 }
 
-// specOperations walks the embedded OpenAPI spec and returns (method, path)
-// tuples for every declared operation.
+// specOperations 遍历 embed 的 OpenAPI spec，把每条操作返成 (method, path)
+// 元组。用于验证 spec 里声明的路径都在路由表注册了。
 func specOperations(t *testing.T) []opEntry {
 	t.Helper()
 	spec, err := oapi.GetSpec()
@@ -109,7 +109,7 @@ func TestRouterCoversAllSpecOperations(t *testing.T) {
 		t.Run(op.method+" "+op.path, func(t *testing.T) {
 			req := httptest.NewRequest(op.method, op.path, strings.NewReader(`{}`))
 			req.Header.Set("Content-Type", "application/json")
-			// Pass a stand-in token so authRequired middleware lets us through.
+			// 塞一个占位 token，让 authRequired 中间件放行。
 			req.Header.Set("Authorization", "Bearer stub")
 			w := httptest.NewRecorder()
 			engine.ServeHTTP(w, req)
@@ -122,9 +122,9 @@ func TestRouterCoversAllSpecOperations(t *testing.T) {
 }
 
 func TestDevTokenEndpointReturnsServiceDisabledWhenOff(t *testing.T) {
-	// Route is ALWAYS registered (matches OpenAPI spec). When the dev token
-	// feature is off the handler returns a clear SERVICE_DISABLED envelope,
-	// not 404, so clients can distinguish "endpoint gone" from "off".
+	// 路由**始终**注册（与 OpenAPI spec 对齐）。dev-token 关掉时 handler 返
+	// 明确的 SERVICE_DISABLED 信封，而不是 404，让前端能区分"端点没了"和
+	// "端点关了"两种状态。
 	engine := buildEngine(t, false)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token",
@@ -136,7 +136,7 @@ func TestDevTokenEndpointReturnsServiceDisabledWhenOff(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected HTTP 200 envelope, got %d (body=%s)", w.Code, w.Body.String())
 	}
-	// Decode the envelope without importing pkg/response (avoid cycles).
+	// 解响应信封但不 import pkg/response，避免循环依赖。
 	if body := w.Body.String(); !strings.Contains(body, "SERVICE_DISABLED") {
 		t.Fatalf("expected SERVICE_DISABLED reason in body, got %s", body)
 	}
@@ -145,7 +145,7 @@ func TestDevTokenEndpointReturnsServiceDisabledWhenOff(t *testing.T) {
 func TestProtectedRouteRequiresBearer(t *testing.T) {
 	engine := buildEngine(t, true)
 
-	// /api/v1/auth/me declares security: bearerAuth in spec → must 401 sans token.
+	// /api/v1/auth/me 在 spec 里声明了 security: bearerAuth → 没 token 必须 401。
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)

@@ -21,9 +21,11 @@ func TestLoadAllDefaults(t *testing.T) {
 		"POSTGRES", "GORM_LOG_LEVEL",
 		"DB_MAX_IDLE_CONNS", "DB_MAX_OPEN_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 		"REDIS_ADDR", "REDIS_PASSWORD", "REDIS_CACHE_DB", "REDIS_QUEUE_DB",
-		"JWT_SECRET", "JWT_ISSUER", "JWT_TTL",
+		"JWT_SECRET", "JWT_ISSUER", "JWT_TTL", "AUTH_DEV_TOKEN_ENABLED",
 		"LOG_LEVEL", "LOG_FORMAT", "LOG_STACKTRACE_LEVEL", "AUDIT_LOG_ENABLED", "AUDIT_LOG_EXCLUDE_PATHS",
 		"CORS_ALLOW_ORIGINS", "RATE_LIMIT_PER_MINUTE", "TRUSTED_PROXIES",
+		"WORKER_CONCURRENCY", "WORKER_QUEUES",
+		"WORKER_RETRY_BASE_DELAY", "WORKER_RETRY_MAX_DELAY",
 	} {
 		t.Setenv(k, "")
 	}
@@ -54,10 +56,24 @@ func TestLoadAllDefaults(t *testing.T) {
 		{"Log.StacktraceLevel", cfg.Log.StacktraceLevel, "error"},
 		{"Log.AuditEnabled", cfg.Log.AuditEnabled, true},
 		{"RateLimit.RequestsPerMinute", cfg.RateLimit.RequestsPerMinute, 0},
+		{"Auth.DevTokenEndpointEnabled", cfg.Auth.DevTokenEndpointEnabled, false},
+		{"Worker.Concurrency", cfg.Worker.Concurrency, 10},
+		{"Worker.RetryBaseDelay", cfg.Worker.RetryBaseDelay, 5 * time.Second},
+		{"Worker.RetryMaxDelay", cfg.Worker.RetryMaxDelay, time.Hour},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
 			t.Errorf("%s = %#v, want %#v", c.name, c.got, c.want)
+		}
+	}
+
+	wantQueues := map[string]int{"critical": 6, "default": 3, "low": 1}
+	if len(cfg.Worker.Queues) != len(wantQueues) {
+		t.Errorf("Worker.Queues = %#v, want %#v", cfg.Worker.Queues, wantQueues)
+	}
+	for k, v := range wantQueues {
+		if cfg.Worker.Queues[k] != v {
+			t.Errorf("Worker.Queues[%s] = %d, want %d", k, cfg.Worker.Queues[k], v)
 		}
 	}
 }

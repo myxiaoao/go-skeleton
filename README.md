@@ -162,6 +162,22 @@ make oapi          # regenerate internal/oapi/oapi.gen.go
 make oapi-verify   # fail if generated code is out of sync (used by make verify)
 ```
 
+## Production Checklist
+
+Tick these off before pointing real traffic at this service:
+
+- [ ] Replace `JWT_SECRET` with a high-entropy value (≥ 32 bytes, e.g. `openssl rand -base64 48`).
+- [ ] Set `AUTH_DEV_TOKEN_ENABLED=false` (the route stays registered and returns `SERVICE_DISABLED`).
+- [ ] Set `GIN_MODE=release` so Gin omits debug-mode warnings.
+- [ ] Set `LOG_FORMAT=json` (the console format is human-friendly but unparseable by log shippers).
+- [ ] Make `CORS_ALLOW_ORIGINS` an explicit allow-list; never leave it on `*` or as a wide pattern.
+- [ ] Configure `TRUSTED_PROXIES` to match your load balancer; otherwise `c.ClientIP()` returns the wrong address and rate limits / audit logs lose accuracy.
+- [ ] Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget.
+- [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do not point liveness at `/health` — a DB blip would restart healthy pods.
+- [ ] Size `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections` budget. The defaults (30 / 15 / 30m) are tuned for development, not production.
+- [ ] Run `go run ./cmd/migrate` (or your replacement migration tool) before the API process starts.
+- [ ] Decide on the worker process: deploy it separately if any `*/tasks` endpoints are reachable, otherwise queued tasks accumulate without consumers.
+
 ## Deployment Notes
 
 - The OpenAPI spec is generated at build time from `api/openapi.yaml`; the
@@ -182,6 +198,13 @@ make verify   # fmt + vet + test + lint + oapi-verify
 
 Or call the underlying targets individually (`make test`, `make lint`, ...).
 See `make help` for the full list.
+
+## Changelog
+
+User-visible changes are tracked in [CHANGELOG.md](./CHANGELOG.md), kept by
+hand in the [Keep a Changelog](https://keepachangelog.com/) format. No
+automation — just append to the `Unreleased` section as part of the PR that
+makes the change.
 
 ## License
 

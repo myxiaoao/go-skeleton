@@ -23,8 +23,17 @@ func NewHealthHandler(db *database.DBManager, cache *cache.Client) *HealthHandle
 	return &HealthHandler{db: db, cache: cache}
 }
 
-// Health returns database and cache health status. The response shape is
-// pinned to oapi.HealthResponse so it stays aligned with api/openapi.yaml.
+// Live is the liveness probe — succeeds as long as the process can serve a
+// request. Must not touch DB / Redis: a failure here causes Kubernetes to
+// restart the pod, which is the wrong response when downstreams flap.
+func (h *HealthHandler) Live(c *gin.Context) {
+	c.JSON(http.StatusOK, oapi.LivenessResponse{Status: "ok"})
+}
+
+// Health is the readiness probe — returns 503 when required dependencies
+// are unavailable, so the load balancer can pull the pod out of rotation
+// without restarting it. The response shape is pinned to oapi.HealthResponse
+// so it stays aligned with api/openapi.yaml.
 func (h *HealthHandler) Health(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()

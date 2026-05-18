@@ -30,6 +30,11 @@ func (s *APIServer) GetHealth(c *gin.Context) {
 	s.Health.Health(c)
 }
 
+// GetLivez implements oapi.ServerInterface.
+func (s *APIServer) GetLivez(c *gin.Context) {
+	s.Health.Live(c)
+}
+
 // CreateAuthToken implements oapi.ServerInterface.
 func (s *APIServer) CreateAuthToken(c *gin.Context) {
 	s.Auth.CreateToken(c)

@@ -56,6 +56,11 @@ func (w *Worker) Run(ctx context.Context) error {
 	})
 	group.Go(func() error {
 		<-groupCtx.Done()
+		// Two-phase stop per Asynq docs: Stop halts pulling new tasks,
+		// Shutdown waits for in-flight tasks to finish (bounded by
+		// Config.ShutdownTimeout, 8s by default). Skipping Stop would let
+		// new tasks slip in during the shutdown window and get rescheduled.
+		w.server.Stop()
 		w.server.Shutdown()
 		return nil
 	})

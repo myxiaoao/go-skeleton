@@ -27,15 +27,33 @@ tags:
     description: API metadata (spec, version)
 
 paths:
+  /livez:
+    get:
+      tags: [health]
+      operationId: getLivez
+      summary: Liveness probe
+      description: |
+        Always returns 200 as long as the process is running. Use this for
+        Kubernetes liveness probes — failure here will restart the pod, so
+        it must not depend on external systems like DB or Redis.
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LivenessResponse'
+
   /health:
     get:
       tags: [health]
       operationId: getHealth
-      summary: Health probe
+      summary: Readiness probe (DB + Redis health)
       description: |
         Returns real HTTP status codes (200 / 503) so load balancers and
-        Kubernetes can decide on traffic. Does not follow the business
-        envelope.
+        Kubernetes can decide on traffic. Use this for readiness probes —
+        failure removes the pod from the LB without restarting it. Does not
+        follow the business envelope.
       responses:
         '200':
           description: Service is healthy
@@ -182,6 +200,15 @@ components:
 
   schemas:
     # ---------- Health ----------
+    LivenessResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Always "ok" — the probe is hard-coded to succeed.
+          example: ok
+
     HealthResponse:
       type: object
       required: [status, checks]

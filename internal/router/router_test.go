@@ -34,8 +34,11 @@ func buildEngine(t *testing.T, devTokenEnabled bool) *gin.Engine {
 		c.AbortWithStatus(http.StatusInternalServerError)
 	}))
 
-	// /health and /openapi.json are wired outside the API group in server.go.
-	engine.GET("/health", (&handler.HealthHandler{}).Health)
+	// /livez, /health and /openapi.json are wired outside the API group in
+	// server.go — mirror that here so spec→route coverage stays honest.
+	healthH := &handler.HealthHandler{}
+	engine.GET("/livez", healthH.Live)
+	engine.GET("/health", healthH.Health)
 	engine.GET("/openapi.json", handler.NewOpenAPIHandler().Spec)
 
 	api := engine.Group("/api/v1")

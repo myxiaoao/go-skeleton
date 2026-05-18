@@ -32,3 +32,6 @@ jobs:
 
       - name: Verify
         run: make verify
+
+      - name: Race detector
+        run: make test-race

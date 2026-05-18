@@ -154,6 +154,22 @@ make oapi          # 重新生成 internal/oapi/oapi.gen.go
 make oapi-verify   # 生成产物与 yaml 不一致时失败（make verify 会调用）
 ```
 
+## 上线前检查清单
+
+把真实流量打进来之前，请逐项核对：
+
+- [ ] `JWT_SECRET` 替换成高熵随机值（≥ 32 字节，例：`openssl rand -base64 48`）。
+- [ ] `AUTH_DEV_TOKEN_ENABLED=false`（路由仍然注册，会返回 `SERVICE_DISABLED`）。
+- [ ] `GIN_MODE=release`，避免 Gin 打 debug 模式警告。
+- [ ] `LOG_FORMAT=json`（console 格式人类可读但日志采集器解析不了）。
+- [ ] `CORS_ALLOW_ORIGINS` 显式枚举，不要留空、不要 `*`。
+- [ ] `TRUSTED_PROXIES` 配置成实际的 LB 网段，否则 `c.ClientIP()` 取错，限流和审计日志都失真。
+- [ ] `RATE_LIMIT_PER_MINUTE` 设置成非零值，匹配业务流量预算。
+- [ ] K8s liveness 接 `/livez`，readiness 接 `/health`。**不要**把 liveness 指向 `/health`——DB 抖一下会把健康 Pod 杀掉重启。
+- [ ] 根据实例规格和 Postgres `max_connections` 调 `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME`，默认值（30 / 15 / 30m）是开发档位，不是生产档位。
+- [ ] API 启动前先跑 `go run ./cmd/migrate`（或者你换的迁移工具）。
+- [ ] 想清楚是否部署 worker 进程：有 `*/tasks` 接口暴露但没消费者，任务会越堆越多。
+
 ## 部署说明
 
 - OpenAPI spec 在构建期就已从 `api/openapi.yaml` 生成完毕，`internal/oapi/oapi.gen.go` 入库，部署时不需要再跑 codegen。
@@ -171,6 +187,10 @@ make verify   # fmt + vet + test + lint + oapi-verify
 ```
 
 也可以单独跑某一项（`make test`、`make lint` 等），完整列表见 `make help`。
+
+## Changelog
+
+变更记录见 [CHANGELOG.md](./CHANGELOG.md)，按 [Keep a Changelog](https://keepachangelog.com/) 格式手工维护。不引入自动化工具——做改动时顺手把变更追加到 `Unreleased` 段即可。
 
 ## License
 

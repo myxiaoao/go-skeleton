@@ -157,6 +157,7 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 		engine.Use(rl.Middleware())
 	}
 
+	engine.GET("/livez", handlers.Health.Live)
 	engine.GET("/health", handlers.Health.Health)
 	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
 	api := engine.Group("/api/v1")

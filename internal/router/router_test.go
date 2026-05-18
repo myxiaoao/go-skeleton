@@ -99,7 +99,7 @@ func specOperations(t *testing.T) []opEntry {
 }
 
 func TestRouterCoversAllSpecOperations(t *testing.T) {
-	engine := buildEngine(t, true) // enable dev token to cover full spec
+	engine := buildEngine(t, true) // 打开 dev token 才能覆盖 spec 里全部端点
 	ops := specOperations(t)
 	if len(ops) == 0 {
 		t.Fatal("spec yielded zero operations; check oapi.GetSpec")

@@ -128,9 +128,9 @@ func TestLoadHonorsOverrides(t *testing.T) {
 
 func TestLoadReturnsErrorOnGarbageInput(t *testing.T) {
 	envSet(t, map[string]string{
-		"DB_MAX_OPEN_CONNS": "abc",   // int parse fail
-		"REQUEST_TIMEOUT":   "30",    // missing unit -> ParseDuration fail
-		"AUDIT_LOG_ENABLED": "maybe", // bool parse fail
+		"DB_MAX_OPEN_CONNS": "abc",   // 整数解析失败
+		"REQUEST_TIMEOUT":   "30",    // 缺单位 → ParseDuration 失败
+		"AUDIT_LOG_ENABLED": "maybe", // bool 解析失败
 	})
 
 	_, err := Load()
@@ -195,11 +195,11 @@ func TestQueueWeightsEnvParses(t *testing.T) {
 
 func TestQueueWeightsEnvRejectsGarbage(t *testing.T) {
 	cases := []string{
-		"critical",     // missing :weight
-		"critical:abc", // non-numeric weight
-		"critical:0",   // non-positive weight
-		":3",           // empty name
-		"critical:",    // empty weight
+		"critical",     // 缺 :weight 部分
+		"critical:abc", // 权重不是数字
+		"critical:0",   // 权重非正
+		":3",           // 名字为空
+		"critical:",    // 权重为空
 	}
 	for _, raw := range cases {
 		t.Run(raw, func(t *testing.T) {

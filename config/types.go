@@ -33,6 +33,12 @@ type ServerConfig struct {
 	PprofAddr string
 	// WatchdogInterval 是 sd_notify WATCHDOG=1 心跳周期；非 Linux 平台 stub 不调用。
 	WatchdogInterval time.Duration
+	// SecurityHeadersEnabled 控制是否在响应里写 X-Content-Type-Options /
+	// X-Frame-Options / Referrer-Policy。默认 true，纯 JSON API 没有副作用。
+	SecurityHeadersEnabled bool
+	// BodyMaxBytes 限制单次请求 body 体积。0 = 不限；>0 时 handler 读 body
+	// 超过会被 http.MaxBytesReader 截断成 INVALID_PARAMS。
+	BodyMaxBytes int64
 }
 
 // PostgresConfig holds database connection settings.

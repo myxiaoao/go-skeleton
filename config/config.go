@@ -61,6 +61,10 @@ func Load() (*Config, error) {
 	cfg.Server.PprofAddr = getEnvOrDefault("PPROF_ADDR", "127.0.0.1:6060")
 	cfg.Server.WatchdogInterval, err = durationEnv("WATCHDOG_INTERVAL", 10*time.Second)
 	collect(err)
+	cfg.Server.SecurityHeadersEnabled, err = boolEnv("SECURITY_HEADERS_ENABLED", true)
+	collect(err)
+	cfg.Server.BodyMaxBytes, err = int64Env("BODY_MAX_BYTES", 1<<20)
+	collect(err)
 
 	cfg.Postgres.MaxIdleConns, err = intEnv("DB_MAX_IDLE_CONNS", 15)
 	collect(err)
@@ -166,6 +170,18 @@ func intEnv(key string, fallback int) (int, error) {
 		return fallback, nil
 	}
 	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback, fmt.Errorf("%s=%q: %w", key, raw, err)
+	}
+	return parsed, nil
+}
+
+func int64Env(key string, fallback int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return fallback, fmt.Errorf("%s=%q: %w", key, raw, err)
 	}

@@ -151,6 +151,8 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 
 	engine.Use(middleware.TraceLogger(reg.Cfg.Log.AuditEnabled, reg.Cfg.Log.AuditExcludes))
 	engine.Use(middleware.Recovery())
+	engine.Use(middleware.SecurityHeaders(reg.Cfg.Server.SecurityHeadersEnabled))
+	engine.Use(middleware.MaxBodyBytes(reg.Cfg.Server.BodyMaxBytes))
 	engine.Use(middleware.Timeout(reg.Cfg.Server.RequestTimeout))
 	engine.Use(middleware.CORS(reg.Cfg.Cors.AllowOrigins, reg.Cfg.Cors.AllowCredentials))
 	if rl != nil {
@@ -195,5 +197,9 @@ func newHTTPServer(cfg *config.Config, engine *gin.Engine) *http.Server {
 		ReadTimeout:       reqTimeout + slack,
 		WriteTimeout:      reqTimeout + slack,
 		IdleTimeout:       60 * time.Second,
+		// MaxHeaderBytes 限制 HTTP header 总大小，防御恶意客户端用超大 header
+		// 拖垮内存。1MB 远超正常 Cookie + Authorization 用量；body 由
+		// middleware.MaxBodyBytes 单独控制。
+		MaxHeaderBytes: 1 << 20,
 	}
 }

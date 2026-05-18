@@ -12,6 +12,9 @@ import (
 )
 
 // InitWorker initializes resources required by the async worker process.
+//
+// 顺序：先打开依赖 → 立刻做 fail-fast 探针 → 再装队列。
+// Worker 必须能连 Redis；DB 可选（只有需要的 handler 才依赖）。
 func InitWorker(cfg *config.Config) (*Registry, error) {
 	if cfg == nil {
 		return nil, errors.New("config is nil")
@@ -33,8 +36,22 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 	if strings.TrimSpace(cfg.Postgres.DSN) != "" {
 		dbMgr, err = initDatabase(cfg)
 		if err != nil {
+			closeQuiet(cacheClient.Close)
 			return nil, fmt.Errorf("init worker database: %w", err)
 		}
+	}
+
+	// 避免 typed-nil 把 interface 包成 non-nil：dbMgr 可能为 nil。
+	var dbProbe dbPinger
+	if dbMgr != nil {
+		dbProbe = dbMgr
+	}
+	if err := probeDependencies(cfg, dbProbe, cacheClient); err != nil {
+		if dbMgr != nil {
+			closeQuiet(dbMgr.Close)
+		}
+		closeQuiet(cacheClient.Close)
+		return nil, err
 	}
 
 	queueClient := newAsynqClient(cfg)

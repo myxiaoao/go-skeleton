@@ -20,6 +20,19 @@ type ServerConfig struct {
 	GinMode        string
 	TrustedProxies []string
 	RequestTimeout time.Duration
+
+	// StartupProbeTimeout 是 bootstrap 阶段 DB/Redis Ping 的硬超时；
+	// 超时即视为依赖不可达，进程 fail-fast 退出。
+	StartupProbeTimeout time.Duration
+	// GracefulDrain 收到 SIGTERM 后让 /health 先返 503 的窗口，给 LB
+	// 摘流时间；之后再 Shutdown HTTP server。0 = 不 drain。
+	GracefulDrain time.Duration
+	// PprofEnabled 决定是否启动独立的 pprof debug 端点。生产环境只在排障时打开。
+	PprofEnabled bool
+	// PprofAddr 是 pprof 监听地址，**只**绑 loopback 用 SSH 隧道连过去。
+	PprofAddr string
+	// WatchdogInterval 是 sd_notify WATCHDOG=1 心跳周期；非 Linux 平台 stub 不调用。
+	WatchdogInterval time.Duration
 }
 
 // PostgresConfig holds database connection settings.

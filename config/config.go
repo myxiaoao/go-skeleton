@@ -52,6 +52,15 @@ func Load() (*Config, error) {
 	var err error
 	cfg.Server.RequestTimeout, err = durationEnv("REQUEST_TIMEOUT", 30*time.Second)
 	collect(err)
+	cfg.Server.StartupProbeTimeout, err = durationEnv("STARTUP_PROBE_TIMEOUT", 5*time.Second)
+	collect(err)
+	cfg.Server.GracefulDrain, err = durationEnv("GRACEFUL_DRAIN", 10*time.Second)
+	collect(err)
+	cfg.Server.PprofEnabled, err = boolEnv("PPROF_ENABLED", false)
+	collect(err)
+	cfg.Server.PprofAddr = getEnvOrDefault("PPROF_ADDR", "127.0.0.1:6060")
+	cfg.Server.WatchdogInterval, err = durationEnv("WATCHDOG_INTERVAL", 10*time.Second)
+	collect(err)
 
 	cfg.Postgres.MaxIdleConns, err = intEnv("DB_MAX_IDLE_CONNS", 15)
 	collect(err)

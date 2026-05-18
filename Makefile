@@ -35,6 +35,14 @@ OAPI_CODEGEN_VERSION  ?= v2.7.0
 # 避免短 module name（go-skeleton 不含 dot）被误判成 stdlib 的老坑。
 GCI_VERSION           ?= v0.14.0
 GOFUMPT_VERSION       ?= v0.10.0
+# 安全扫描工具。govulncheck 查已公布的 CVE；gosec 静态扫描代码里的安全反模式
+# （硬编码密钥、SQL 拼接、不安全的随机数等）。两者跑独立 target，不进 verify
+# 默认链路——CVE 数据库更新会让 verify 变成 flaky；CI 单独跑 make sec。
+GOVULNCHECK_VERSION   ?= v1.1.4
+GOSEC_VERSION         ?= v2.22.0
+# air：本地热重载。仅在 make watch 时按需安装，不进 init 默认链路，
+# 避免新人 clone 后被强制装一个开发期可选工具。
+AIR_VERSION           ?= v1.62.0
 
 .PHONY: help
 help: ## 列出所有可用 target
@@ -50,6 +58,11 @@ init: ## 安装/对齐辅助工具到 pin 版本（已是 pin 版本则跳过）
 	@$(MAKE) --no-print-directory _ensure-gci
 	@$(MAKE) --no-print-directory _ensure-gofumpt
 	@echo "init done."
+
+.PHONY: hooks-install
+hooks-install: ## 把 .githooks/pre-commit 接入本地 git（每个 clone 各装一次）
+	git config core.hooksPath .githooks
+	@echo "hooks installed. 取消：git config --unset core.hooksPath"
 
 # Compares the installed tool version against the pinned version and
 # reinstalls when they differ. Keeps team / CI reproducible: a stale
@@ -134,6 +147,11 @@ dev-reset: ## 停止并销毁数据卷（破坏性：DB / Redis 数据会丢）
 dev-logs: ## 跟随本地依赖容器日志
 	$(COMPOSE) logs -f
 
+.PHONY: dev-asynqmon
+dev-asynqmon: ## 启动 Asynqmon Web UI（http://127.0.0.1:8980；profile=debug）
+	$(COMPOSE) --profile debug up -d asynqmon
+	@echo "asynqmon -> http://127.0.0.1:8980 (生产请勿暴露此端口)"
+
 # ---------- OpenAPI codegen ----------
 
 OAPI_SPEC   := api/openapi.yaml
@@ -153,6 +171,26 @@ oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
 .PHONY: docs-verify
 docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
 	@bash scripts/docs-verify.sh
+
+.PHONY: docs-deploy-check
+docs-deploy-check: ## 校验 docs/deploy.md 与 deploy/systemd/*.service 一致
+	@bash scripts/deploy-doc-verify.sh
+
+.PHONY: docs-errcodes
+docs-errcodes: ## 重新生成 docs/errcodes.md（源：pkg/errcode + pkg/response.MessageFor）
+	$(GO) run scripts/gen-errcodes.go
+
+.PHONY: docs-errcodes-verify
+docs-errcodes-verify: docs-errcodes ## 校验 docs/errcodes.md 与代码同步
+	@if ! git diff --quiet -- docs/errcodes.md; then \
+		echo ""; \
+		echo "ERROR: docs/errcodes.md is out of sync."; \
+		echo "       Run 'make docs-errcodes' and commit the result."; \
+		echo ""; \
+		git --no-pager diff -- docs/errcodes.md | head -40; \
+		exit 1; \
+	fi
+	@echo "docs-errcodes-verify: docs/errcodes.md is in sync."
 
 .PHONY: oapi-verify
 oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
@@ -194,6 +232,25 @@ stop-api: ## 显式终止占用 API_PORT 的进程（kill -9）
 .PHONY: run-worker
 run-worker: ## 启动 Asynq 消费者
 	$(GO) run ./cmd/worker
+
+.PHONY: _ensure-air
+_ensure-air:
+	@want="$(AIR_VERSION)"; \
+	if ! command -v air >/dev/null 2>&1; then \
+		echo "Installing air $$want..."; \
+		$(GO) install github.com/air-verse/air@$$want; \
+	else \
+		echo "air: ok"; \
+	fi
+
+.PHONY: watch
+watch: ## 用 air 热重载跑 API（保存 .go 文件自动重启）
+	@$(MAKE) --no-print-directory _ensure-air
+	@if lsof -ti:$(API_PORT) >/dev/null 2>&1; then \
+		echo "ERROR: port $(API_PORT) is busy. Run 'make stop-api' to free it, or set API_PORT=<other>."; \
+		exit 1; \
+	fi
+	air -c .air.toml
 
 .PHONY: run-migrate
 run-migrate: ## 跑 GORM AutoMigrate（需要 POSTGRES 配置）
@@ -317,14 +374,66 @@ lint: ## golangci-lint run（需要先 make init）
 	}
 	golangci-lint run
 
+# ---------- 安全扫描 ----------
+#
+# 跟 verify 解耦：CVE 库更新 / gosec 升级会让原来通过的代码突然失败，
+# 把它绑进 verify 会让本地提交体验抖动。本地按需 `make sec`，CI 单跑。
+
+.PHONY: _ensure-govulncheck
+_ensure-govulncheck:
+	@want="$(GOVULNCHECK_VERSION)"; \
+	if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "Installing govulncheck $$want..."; \
+		$(GO) install golang.org/x/vuln/cmd/govulncheck@$$want; \
+	else \
+		echo "govulncheck: ok"; \
+	fi
+
+.PHONY: _ensure-gosec
+_ensure-gosec:
+	@want="$(GOSEC_VERSION)"; \
+	if ! command -v gosec >/dev/null 2>&1; then \
+		echo "Installing gosec $$want..."; \
+		$(GO) install github.com/securego/gosec/v2/cmd/gosec@$$want; \
+	else \
+		echo "gosec: ok"; \
+	fi
+
+.PHONY: vuln
+vuln: ## govulncheck 扫已知 CVE
+	@$(MAKE) --no-print-directory _ensure-govulncheck
+	govulncheck ./...
+
+.PHONY: gosec
+gosec: ## gosec 静态扫描安全反模式（排除 oapi.gen.go / _test.go）
+	@$(MAKE) --no-print-directory _ensure-gosec
+	gosec -quiet -exclude-generated -exclude-dir=dist -exclude-dir=bin ./...
+
+.PHONY: sec
+sec: vuln gosec ## 安全扫描一站式（govulncheck + gosec）
+
 # ---------- 测试 ----------
+#
+# 测试分两档：
+#   - 单元测试：默认跑，不依赖外部资源（DB/Redis 用 mock 或 DryRun）。
+#   - 集成测试：文件首行 `//go:build integration`，需要真实 Postgres+Redis，
+#     默认 go test 会跳过它们，避免 CI / 队友本地跑不通。
+#
+# 写集成测试的模板：
+#   //go:build integration
+#   package xxx_test
+# 然后 `make test-integration` 触发；需要先起 `make dev-up`。
 
 .PHONY: test
-test: ## 跑全部测试
+test: ## 跑单元测试（不含 integration tag）
 	$(GO) test ./...
 
+.PHONY: test-integration
+test-integration: ## 跑集成测试（需要 make dev-up 起 Postgres + Redis）
+	$(GO) test -tags=integration -count=1 ./...
+
 .PHONY: test-race
-test-race: ## 跑测试并开启 race detector
+test-race: ## 跑单元测试并开启 race detector
 	$(GO) test -race ./...
 
 .PHONY: cover
@@ -336,13 +445,15 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + oapi-verify + docs-verify）
+verify: ## 提交前一站式校验（fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify）
 	@$(MAKE) --no-print-directory _verify-step STEP=fmt
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
 	@$(MAKE) --no-print-directory _verify-step STEP=lint
 	@$(MAKE) --no-print-directory _verify-step STEP=oapi-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-verify
+	@$(MAKE) --no-print-directory _verify-step STEP=docs-deploy-check
+	@$(MAKE) --no-print-directory _verify-step STEP=docs-errcodes-verify
 	@printf '\033[32m=== verify OK ===\033[0m\n'
 
 # Prints a banner before each step so AI assistants and humans can spot

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 问题 / 用法咨询
+    url: https://github.com/myxiaoao/go-skeleton/discussions
+    about: 不确定是 bug 还是新需求？先去 Discussions 讨论。

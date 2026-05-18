@@ -1,0 +1,45 @@
+# air 热重载配置。仅给 make watch 用，CI / 生产不读这份文件。
+#
+# 调整方法：
+#   - 想加监听目录：append 到 include_dir。
+#   - 想跳过某种文件：append 到 exclude_regex。
+#   - 想换 cmd（比如调试 worker）：临时改 cmd 或复制本文件成 .air.worker.toml
+#     然后 air -c .air.worker.toml。
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # 默认监听 cmd/api。换成 ./cmd/worker 可调试 worker（注意端口冲突）。
+  cmd = "go build -o ./tmp/main ./cmd/api"
+  bin = "./tmp/main"
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml"]
+  # 排除生成产物、构建产物、测试缓存目录，避免触发误重启。
+  exclude_dir = [
+    "tmp",
+    "bin",
+    "dist",
+    "deploy",
+    "docs",
+    ".github",
+    ".git",
+    "coverage",
+  ]
+  exclude_regex = ["_test\\.go$", "oapi\\.gen\\.go$"]
+  exclude_unchanged = true
+  delay = 500            # ms; 文件变更后等待，合并多次保存
+  kill_delay = "3s"      # 给 graceful shutdown 留时间
+  send_interrupt = true  # 用 SIGINT 而不是 SIGKILL，触发优雅关闭
+  stop_on_error = true
+
+[log]
+  time = true
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

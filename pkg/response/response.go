@@ -31,7 +31,7 @@ func ErrorResponse(c *gin.Context, errorCode errcode.Error) Response {
 	return Response{
 		Code:     errorCode.Code(),
 		Reason:   reason,
-		Message:  messageFor(reason),
+		Message:  MessageFor(reason),
 		Metadata: buildMetadata(c),
 	}
 }
@@ -70,7 +70,9 @@ func WriteValidationError(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, BuildValidationErrorResponse(c, err))
 }
 
-func messageFor(reason string) string {
+// MessageFor returns the default English message bound to an errcode reason.
+// 导出供 scripts/gen-errcodes.go 复用同一份文案表，避免重复维护。
+func MessageFor(reason string) string {
 	switch reason {
 	case "INVALID_PARAMS":
 		return "invalid request parameters"
@@ -84,6 +86,8 @@ func messageFor(reason string) string {
 		return "request timeout"
 	case "SERVICE_DISABLED":
 		return "endpoint is disabled by configuration"
+	case "INTERNAL_ERROR":
+		return "internal server error"
 	case "DATABASE_ERROR":
 		return "database error"
 	case "QUEUE_UNAVAILABLE":

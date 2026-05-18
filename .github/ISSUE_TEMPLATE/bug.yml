@@ -1,0 +1,73 @@
+name: Bug report
+description: 报告一个可复现的 bug
+title: "bug: <一句话标题>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量给出**最小可复现步骤**，方便定位。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 现象描述
+      description: 实际看到什么 / 期望看到什么
+      placeholder: |
+        实际:
+        期望:
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 步骤越具体越好；附上请求 payload / curl 命令
+      placeholder: |
+        1. 起 make dev-up
+        2. go run ./cmd/migrate
+        3. go run ./cmd/api
+        4. curl ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: "`./bin/api -version` 输出，或 commit SHA"
+      placeholder: "v0.2.0 / 9923c88"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: process
+    attributes:
+      label: 涉及进程
+      multiple: true
+      options:
+        - cmd/api
+        - cmd/worker
+        - cmd/migrate
+        - 部署（systemd / Docker）
+        - 其它
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 错误信息
+      description: 贴关键日志（注意脱敏，删掉 token / 密码 / 真实 DSN）
+      render: text
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 运行环境
+      placeholder: |
+        Go: go1.26.x
+        OS: ubuntu 22.04 / macOS 14.x
+        Postgres: 16
+        Redis: 7

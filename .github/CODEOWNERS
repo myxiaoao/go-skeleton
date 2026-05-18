@@ -1,0 +1,30 @@
+# CODEOWNERS 模板
+#
+# 复制 skeleton 后，把 @myxiaoao 替换成实际的 GitHub 用户名 / 团队（如 @your-org/backend）。
+# 多个 owner 用空格分隔；按 GitHub 规则，靠后的更具体规则覆盖前面。
+# 启用方法：在 repo Settings → Branches → Branch protection 勾选 "Require review from Code Owners"。
+
+# 默认：兜底
+*                                @myxiaoao
+
+# 契约层：改 OpenAPI 影响所有客户端，强制 owner review
+/api/openapi.yaml                @myxiaoao
+/api/oapi-codegen.yaml           @myxiaoao
+/internal/oapi/                  @myxiaoao
+
+# 部署 / 基础设施：风险高
+/Dockerfile                      @myxiaoao
+/docker-compose.yml              @myxiaoao
+/deploy/                         @myxiaoao
+/.github/workflows/              @myxiaoao
+/Makefile                        @myxiaoao
+/scripts/                        @myxiaoao
+
+# 跨进程公共代码
+/pkg/                            @myxiaoao
+/internal/bootstrap/             @myxiaoao
+/config/                         @myxiaoao
+
+# 项目规则：改这两份等于改全局约束
+/CLAUDE.md                       @myxiaoao
+/AGENTS.md                       @myxiaoao

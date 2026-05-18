@@ -1,5 +1,17 @@
 package repository
 
+// Example repository 教学模板：repository 是**唯一**允许写 GORM 的层
+//
+//   - 所有查询都用 dbFromContext(ctx, r.db).WithContext(ctx)，让 trace_id /
+//     超时 / 取消信号一路传下去，**不要**用 context.Background() 替换。
+//   - 事务用 InTx(ctx, db, fn) + dbFromContext(ctx, r.db)，事务边界由 service
+//     决定，repository 只负责被复用。
+//   - service 通过包内定义的 ExampleRepository 接口依赖本类型，不要 export
+//     gorm.io/gorm 给 service 看到。
+//
+// 集成测试模板见 example_integration_test.go（//go:build integration），
+// 跑 make test-integration 触发。
+
 import (
 	"context"
 

@@ -14,6 +14,57 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **PR / Issue templates**: `.github/pull_request_template.md` and
+  `.github/ISSUE_TEMPLATE/{bug,feature,config}.yml` with the project's
+  hard rules baked into the checklists (no testify/Wire, msg→message,
+  oapi sync, env example sync, …).
+- **CODEOWNERS template** at `.github/CODEOWNERS` covering OpenAPI,
+  deploy, CI, `pkg/`, bootstrap, and the AGENTS.md / CLAUDE.md rule files.
+- **`make sec`** wires `govulncheck` + `gosec` (versions pinned in the
+  Makefile). Decoupled from `make verify` to avoid CVE-database churn
+  causing flaky local runs; `.github/workflows/security.yml` schedules a
+  weekly scan and supports manual dispatch.
+- **Integration test build tag**: `make test-integration` runs only
+  `//go:build integration` files; `make test` and CI stay fast.
+  `internal/repository/example_integration_test.go` is the template.
+- **`make docs-deploy-check`** (and a verify-step) keeps `docs/deploy.md`
+  in sync with `deploy/systemd/*.service` — paths, `EnvironmentFile`,
+  `User=` / `Group=`, and referenced unit filenames cross-checked by
+  `scripts/deploy-doc-verify.sh`.
+- **`docs/errcodes.md`** generated from `pkg/errcode` + `pkg/response.MessageFor`
+  via `scripts/gen-errcodes.go`. `make docs-errcodes` regenerates;
+  `make docs-errcodes-verify` (run by `make verify`) fails when out of
+  sync, so adding an errcode without docs trips CI.
+- **`make watch`** runs the API with `air` hot reload (`.air.toml`).
+  `air` is installed on first use, kept off the default `make init`
+  path; `tmp/` ignored.
+- **`docker compose --profile debug up -d asynqmon`** (and `make
+  dev-asynqmon`) exposes the Asynq Web UI on `127.0.0.1:8980`. Off by
+  default; the profile keeps it out of the regular `make dev-up`.
+- **Pre-commit hook template** at `.githooks/pre-commit` + `make
+  hooks-install`. Runs `make fmt vet`, blocks `.env` / `*.pem` /
+  `credentials.json` from being staged, supports `FULL=1` opt-in for a
+  full `make verify`.
+- **Example teaching headers**: every `internal/{handler,service,
+  repository,model,task}/example.go` now opens with a short package-doc
+  comment explaining what that layer is allowed and forbidden to do, so
+  new contributors and AI assistants can mirror the pattern.
+- **`.env.example` self-documentation**: every variable now has a 1-3
+  line comment explaining purpose, legal values, and the production
+  default to aim for. `/livez` also added to `AUDIT_LOG_EXCLUDE_PATHS`
+  alongside `/health`.
+- `pkg/response.MessageFor` exported so `scripts/gen-errcodes.go` can
+  reuse the same default-message table without forking it; `INTERNAL_ERROR`
+  picks up its own message instead of falling through to "operation
+  failed".
+
+### Changed
+
+- `make verify` chain now also runs `docs-deploy-check` and
+  `docs-errcodes-verify` so doc drift fails fast.
+
+### Added
+
 - `scripts/rename.sh` one-shot rename helper. Pass
   `NEW_MODULE NEW_SHORTNAME`; it rewrites Go imports, `go.mod`, Makefile
   vars, `.env.example`, `.golangci.yml`, OpenAPI title, systemd unit file

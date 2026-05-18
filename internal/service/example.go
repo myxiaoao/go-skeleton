@@ -1,5 +1,18 @@
 package service
 
+// Example service 教学模板：service 层承载业务规则
+//
+//   - 入参用 context.Context，**禁止 *gin.Context**（worker 也要复用 service）。
+//   - 依赖通过 NewXxxService(...) 注入；本文件用 ExampleRepository / ExampleQueue
+//     接口隔离，方便测试（参见 example_test.go 的 inline mock 写法）。
+//   - 错误统一返 errcode.XxxError，配合 applog.FromContext(ctx).Error(..., zap.Error(err))
+//     把底层错误写日志，不要返 fmt.Errorf 字符串。
+//   - 业务流程可以跨多个 repository / queue，但**不要**直接调用 GORM 链式 API
+//     （那是 repository 的活）。
+//
+// 加新错误码：去 pkg/errcode/common.go 加变量 + 在 pkg/response.MessageFor 加 case +
+// 跑 make docs-errcodes 重新生成 docs/errcodes.md。
+
 import (
 	"context"
 

@@ -1,0 +1,40 @@
+name: Feature request
+description: 提议新功能 / 增强
+title: "feat: <一句话标题>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        在提需求前请确认：这是 skeleton 通用能力还是业务定制？后者建议在你自己 fork 的项目里实现。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题
+      description: 描述场景与痛点，不要直接跳到方案
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的方案
+      description: 大致 API / 行为；如果有多种选择请列出权衡
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案
+      description: 你考虑过的其它做法，以及为什么没选
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 范围确认
+      options:
+        - label: 这是 skeleton 通用能力（不是某个具体业务定制）
+        - label: 不需要引入新的重量级依赖（如 Wire / testify / Kafka 等）
+        - label: 如果改契约，会同步更新 `api/openapi.yaml` + `.env.example`

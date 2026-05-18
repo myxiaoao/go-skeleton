@@ -17,6 +17,7 @@ Thumbs.db
 # Go build / test artifacts
 bin/
 dist/
+tmp/
 vendor/
 *.test
 *.out

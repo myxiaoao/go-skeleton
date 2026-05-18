@@ -82,7 +82,7 @@ func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
 
 func TestMessageForCoversEveryDeclaredReason(t *testing.T) {
 	// Every reason exported from pkg/errcode/common.go should have a default
-	// English message in messageFor (avoid the "operation failed" tar pit).
+	// English message in MessageFor (avoid the "operation failed" tar pit).
 	declared := []string{
 		errcode.InvalidParams.Reason(),
 		errcode.Unauthorized.Reason(),
@@ -94,8 +94,8 @@ func TestMessageForCoversEveryDeclaredReason(t *testing.T) {
 		errcode.QueueError.Reason(),
 	}
 	for _, r := range declared {
-		if msg := messageFor(r); msg == "" || msg == "operation failed" {
-			t.Errorf("reason %q: messageFor returned generic %q", r, msg)
+		if msg := MessageFor(r); msg == "" || msg == "operation failed" {
+			t.Errorf("reason %q: MessageFor returned generic %q", r, msg)
 		}
 	}
 }

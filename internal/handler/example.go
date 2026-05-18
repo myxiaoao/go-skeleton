@@ -1,5 +1,15 @@
 package handler
 
+// Example handler 教学模板：handler 层只做三件事
+//
+//  1. 参数绑定 / 校验（c.ShouldBind...，失败走 response.BuildValidationErrorResponse）。
+//  2. 调 service（传 c.Request.Context()，不要传 *gin.Context）。
+//  3. 用 response.WriteSuccess / response.WriteError 转协议。
+//
+// **禁止**在 handler 里写业务规则、拼接错误字符串、直接连数据库。
+// 复制这个文件做新 endpoint 时，先在 api/openapi.yaml 加路径 + 跑 make oapi，
+// 再补 handler → service → repository → model。
+
 import (
 	"github.com/gin-gonic/gin"
 

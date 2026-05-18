@@ -37,6 +37,24 @@ services:
       timeout: 3s
       retries: 10
 
+  # Asynqmon：Asynq 官方 Web UI，看队列堆积 / 失败任务 / 重试历史。
+  # 默认不启动（profiles: debug），要用时：
+  #   docker compose --profile debug up -d asynqmon
+  # 然后访问 http://127.0.0.1:8980 。
+  # 生产**绝对不要**暴露这个端口；它没有内置鉴权。
+  asynqmon:
+    image: hibiken/asynqmon:latest
+    container_name: go-skeleton-asynqmon
+    restart: unless-stopped
+    profiles: ["debug"]
+    command:
+      - "--redis-addr=redis:6379"
+    ports:
+      - "127.0.0.1:8980:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

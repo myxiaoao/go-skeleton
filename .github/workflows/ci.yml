@@ -35,3 +35,20 @@ jobs:
 
       - name: Race detector
         run: make test-race
+
+  validate-systemd-units:
+    name: validate-systemd-units
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      # systemd-analyze verify 在 ubuntu-latest runner 上可用：systemd 是 PID 1，
+      # /etc/systemd 完备。若未来环境变了（如 nix-based），可降级为仅 grep 关键字段
+      # 或加 `sudo apt-get install -y systemd`。
+      - name: Verify systemd unit syntax
+        run: |
+          set -e
+          for unit in deploy/systemd/*.service; do
+            echo "=== $unit ==="
+            sudo systemd-analyze verify "$unit"
+          done

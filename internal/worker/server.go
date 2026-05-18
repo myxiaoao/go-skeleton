@@ -45,10 +45,7 @@ func NewServer(redisOpt asynq.RedisClientOpt, sc ServerConfig) *asynq.Server {
 		Concurrency: sc.Concurrency,
 		Queues:      sc.Queues,
 		RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
-			delay := time.Duration(1<<uint(n)) * baseDelay
-			if delay > maxDelay {
-				delay = maxDelay
-			}
+			delay := computeRetryDelay(n, baseDelay, maxDelay)
 			logger := applog.L()
 			if traceID := task.TraceIDFromPayload(t.Payload()); traceID != "" {
 				logger = logger.With(zap.String("trace_id", traceID))
@@ -63,6 +60,29 @@ func NewServer(redisOpt asynq.RedisClientOpt, sc ServerConfig) *asynq.Server {
 		},
 		ErrorHandler: asynq.ErrorHandlerFunc(logTaskFailed),
 	})
+}
+
+// computeRetryDelay 计算 asynq retry 的指数 backoff：min(2^n * base, max)。
+//
+// 防溢出：time.Duration 是 int64 纳秒，2^n 在 n 增长时会很快超过 int64 范围；
+// 一旦溢出 `1<<n` 变负数，乘以 baseDelay 后 `delay > maxDelay` 比较失败
+// （负数小于正数），返回负 duration 给 asynq 会触发未定义行为。所以一旦
+// n 大到指数会溢出，直接返回 maxDelay 兜底。
+//
+// 阈值 30：base=5s 时 2^30*5s ≈ 170 年远超 maxDelay=1h；asynq 默认 maxRetry=25
+// 已经够富余。下界 0 是合法的（首次失败 attempt=0）。
+func computeRetryDelay(n int, base, max time.Duration) time.Duration {
+	if n < 0 {
+		n = 0
+	}
+	if n >= 30 {
+		return max
+	}
+	delay := time.Duration(1<<uint(n)) * base
+	if delay <= 0 || delay > max {
+		return max
+	}
+	return delay
 }
 
 type taskRuntimeMetadata struct {

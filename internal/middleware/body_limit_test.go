@@ -14,7 +14,7 @@ func newBodyLimitTestEngine(limit int64) *gin.Engine {
 	engine := gin.New()
 	engine.Use(MaxBodyBytes(limit))
 	engine.POST("/", func(c *gin.Context) {
-		var body []byte = make([]byte, 0, 1024)
+		body := make([]byte, 0, 1024)
 		buf := make([]byte, 256)
 		for {
 			n, err := c.Request.Body.Read(buf)

@@ -3,9 +3,9 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 
-	"go-skeleton/internal/errcode"
 	"go-skeleton/internal/middleware"
 	"go-skeleton/pkg/auth"
+	"go-skeleton/pkg/errcode"
 	"go-skeleton/pkg/response"
 )
 

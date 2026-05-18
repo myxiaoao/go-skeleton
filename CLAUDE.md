@@ -17,7 +17,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 | `internal/router/` | URL → handler 映射 | 不构造依赖、不做初始化 |
 | `internal/handler/` `service/` `repository/` `model/` | 分层业务代码 | 见下文"分层规则" |
 | `internal/middleware/` | Gin 中间件 | 错误响应走 `response.ErrorResponse` |
-| `internal/errcode/` | 业务错误码 | 只在这里定义新错误，不在 service/handler 内联构造 |
+| `pkg/errcode/` | 业务错误码 | 只在这里定义新错误，不在 service/handler 内联构造 |
 | `internal/task/` | Asynq 任务类型定义 | API 和 Worker 共享 |
 | `internal/worker/` | Asynq 消费端的 handler 实现 | 复用 `service`/`repository`，不要重写业务逻辑 |
 | `internal/taskqueue/` | Asynq client 的薄封装 | service 通过 `ExampleQueue` 这种接口依赖它，不直接 import asynq |
@@ -76,7 +76,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 例外：`/health` 用真实 HTTP 状态码（200 / 503），给 LB 和 K8s 探针用。
 
-新增错误码：去 `internal/errcode/common.go` 加一个 `newError(code, "REASON")` 常量，并在 `pkg/response/response.go` 的 `messageFor` 里补默认英文文案。
+新增错误码：去 `pkg/errcode/common.go` 加一个 `newError(code, "REASON")` 常量，并在 `pkg/response/response.go` 的 `messageFor` 里补默认英文文案。
 
 ## i18n
 
@@ -127,9 +127,9 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## pkg/ 边界
 
-`pkg/{auth,cache,database,log,response,validator}` 是通用工具。改这些包之前确认：
+`pkg/{auth,cache,database,errcode,log,response,validator}` 是通用工具。改这些包之前确认：
 
-- 不引入对 `internal/` 任何包的依赖（`pkg/response` 引用 `internal/errcode` 是历史例外，不要扩散；新加包不要这么做）。
+- **严禁** import `internal/` 下任何包。`pkg` 内部互相 import 合法（`pkg/response` 依赖 `pkg/errcode` 就是这样）。
 - 接口稳定优先于功能堆叠，因为理论上可以被其他项目复用。
 
 ## 写代码时常犯的错（已知会触发返工）
@@ -261,8 +261,8 @@ go test ./... -cover                  # 看覆盖率
 | `worker` | `cmd/worker/`、`internal/worker.go`、`internal/worker/`、Asynq handler |
 | `migrate` | `cmd/migrate/`、迁移相关 |
 | `bootstrap` | `internal/bootstrap/`、`config/` |
-| `handler` / `service` / `repository` / `model` / `router` / `middleware` / `errcode` / `task` / `taskqueue` | 对应 `internal/*` 子包 |
-| `auth` / `cache` / `database` / `log` / `response` / `validator` | 对应 `pkg/*` 子包 |
+| `handler` / `service` / `repository` / `model` / `router` / `middleware` / `task` / `taskqueue` | 对应 `internal/*` 子包 |
+| `auth` / `cache` / `database` / `errcode` / `log` / `response` / `validator` | 对应 `pkg/*` 子包 |
 | `oapi` | OpenAPI codegen 配置 / 生成产物 (`api/oapi-codegen.yaml`、`internal/oapi/`) |
 | `build` | `Makefile`、构建脚本 |
 | `ci` | `.github/workflows/*`、`.github/dependabot.yml` |
@@ -366,10 +366,6 @@ go-example/
 │   │   ├── recovery.go
 │   │   └── timeout.go
 │   │
-│   ├── errcode/                业务错误码集中地
-│   │   ├── type.go             Error 类型
-│   │   └── common.go           InvalidParams / Unauthorized / ...
-│   │
 │   ├── task/                   Asynq 任务类型定义（API 和 Worker 共享）
 │   ├── taskqueue/              Asynq client 薄封装
 │   │   └── taskqueue.go        Queue.Available / Enqueue
@@ -384,6 +380,7 @@ go-example/
     ├── auth/jwt.go             JWTManager（Layer 1）
     ├── cache/                  Redis client 封装
     ├── database/               GORM 初始化 + 健康检查
+    ├── errcode/                业务错误码集中地（type.go + common.go）
     ├── log/                    zap logger + trace_id ctx helper
     ├── response/response.go    统一响应 (code/msg/reason/data/metadata)
     └── validator/              binding 错误翻译

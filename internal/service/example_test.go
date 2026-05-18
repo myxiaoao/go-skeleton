@@ -8,8 +8,8 @@ import (
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 
-	"go-skeleton/internal/errcode"
 	"go-skeleton/internal/model"
+	"go-skeleton/pkg/errcode"
 	applog "go-skeleton/pkg/log"
 )
 

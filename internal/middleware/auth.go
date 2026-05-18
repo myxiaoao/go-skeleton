@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"go-skeleton/internal/errcode"
 	"go-skeleton/pkg/auth"
+	"go-skeleton/pkg/errcode"
 	"go-skeleton/pkg/response"
 )
 

@@ -13,9 +13,9 @@ import (
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 
-	"go-skeleton/internal/errcode"
 	"go-skeleton/internal/model"
 	"go-skeleton/internal/service"
+	"go-skeleton/pkg/errcode"
 	applog "go-skeleton/pkg/log"
 	"go-skeleton/pkg/response"
 	"go-skeleton/pkg/validator"

@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 
-	"go-skeleton/internal/errcode"
+	"go-skeleton/pkg/errcode"
 	customvalidator "go-skeleton/pkg/validator"
 )
 

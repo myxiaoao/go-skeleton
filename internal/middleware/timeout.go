@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"go-skeleton/internal/errcode"
+	"go-skeleton/pkg/errcode"
 	"go-skeleton/pkg/response"
 )
 

@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"go-skeleton/internal/errcode"
+	"go-skeleton/pkg/errcode"
 	applog "go-skeleton/pkg/log"
 	"go-skeleton/pkg/response"
 	"go-skeleton/pkg/validator"

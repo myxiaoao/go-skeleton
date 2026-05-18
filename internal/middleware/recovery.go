@@ -11,7 +11,8 @@ import (
 	"go-skeleton/pkg/response"
 )
 
-// Recovery catches panics and returns the standard API error envelope.
+// Recovery 拦 handler 里的 panic，转成标准错误信封（INTERNAL_ERROR）返回
+// 客户端，同时把堆栈打到日志便于排障。
 //
 // applog.FromContext 已经会把 ctx 里的 trace_id 注入 logger，这里再显式
 // zap.String 一次是冗余兜底——如果有人调换中间件顺序把 Recovery 排到

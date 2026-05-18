@@ -16,6 +16,7 @@ import (
 	"go-skeleton/internal/repository"
 	"go-skeleton/internal/router"
 	"go-skeleton/internal/service"
+	"go-skeleton/pkg/metrics"
 )
 
 var (
@@ -155,10 +156,13 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	}
 }
 
-// newEngine 构造 gin.Engine 并按"日志 → recover → 安全头 → body 限制 →
-// 超时 → CORS → 限流"的顺序挂中间件。顺序有意义：日志最外层吃到所有请求，
-// recover 必须在业务之前能兜住 panic，limiter 放最后避免限流前已经做了
-// 大量准备工作。
+// newEngine 构造 gin.Engine 并按"日志 → metrics → recover → 安全头 →
+// body 限制 → 超时 → CORS → 限流"的顺序挂中间件。顺序有意义：
+//   - 日志最外层吃到所有请求；
+//   - metrics 紧贴日志，能观测到所有进入的请求，包括被后续中间件拒掉的
+//     （例如限流后 429），这样 Grafana 看到的 QPS 就是真实入站量；
+//   - recover 必须在业务之前能兜住 panic；
+//   - limiter 放最后避免限流前已经做了大量准备工作。
 func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.IPRateLimiter) (*gin.Engine, error) {
 	engine := gin.New()
 	if err := engine.SetTrustedProxies(reg.Cfg.Server.TrustedProxies); err != nil {
@@ -166,6 +170,13 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	}
 
 	engine.Use(middleware.TraceLogger(reg.Cfg.Log.AuditEnabled, reg.Cfg.Log.AuditExcludes))
+
+	var metricsReg *metrics.Registry
+	if reg.Cfg.Server.MetricsEnabled {
+		metricsReg = metrics.New("api")
+		engine.Use(metricsReg.HTTPMiddleware())
+	}
+
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.SecurityHeaders(reg.Cfg.Server.SecurityHeadersEnabled))
 	engine.Use(middleware.MaxBodyBytes(reg.Cfg.Server.BodyMaxBytes))
@@ -178,6 +189,12 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	engine.GET("/livez", handlers.Health.Live)
 	engine.GET("/health", handlers.Health.Health)
 	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
+	// /metrics 故意挂在 /api/v1 之外、且不走 BearerAuth：Prometheus / Grafana
+	// Agent 抓数据时不该带业务身份。生产环境靠网络层（不暴露公网 + LB
+	// allowlist）保护，本地开发直接 curl 即可。
+	if metricsReg != nil {
+		engine.GET("/metrics", gin.WrapH(metricsReg.Handler()))
+	}
 	api := engine.Group("/api/v1")
 
 	// 始终挂 BearerAuth，让 OpenAPI spec 与运行时路由对齐。reg.Auth 为 nil

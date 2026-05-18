@@ -69,6 +69,8 @@ func Load() (*Config, error) {
 	collect(err)
 	cfg.Server.BodyMaxBytes, err = int64Env("BODY_MAX_BYTES", 1<<20)
 	collect(err)
+	cfg.Server.MetricsEnabled, err = boolEnv("METRICS_ENABLED", true)
+	collect(err)
 
 	cfg.Postgres.MaxIdleConns, err = intEnv("DB_MAX_IDLE_CONNS", 15)
 	collect(err)

@@ -40,6 +40,10 @@ type ServerConfig struct {
 	// BodyMaxBytes 限制单次请求 body 体积。0 = 不限；>0 时 handler 读 body
 	// 超过会被 http.MaxBytesReader 截断成 INVALID_PARAMS。
 	BodyMaxBytes int64
+	// MetricsEnabled 决定是否暴露 /metrics（Prometheus pull 端点）+ 挂 HTTP
+	// 指标中间件。默认 true；关掉只在某些非常受限的部署形态（如不希望任何
+	// 调试端点）用。生产保持默认。
+	MetricsEnabled bool
 }
 
 // PostgresConfig 是数据库连接配置。DSN 为空时所有 DB 相关功能均不启用，

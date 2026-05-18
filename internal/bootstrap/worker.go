@@ -23,6 +23,8 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 		return nil, errors.New("redis address is required for worker")
 	}
 
+	var cleanups []func() error
+
 	cacheClient, err := cache.NewClient(cache.RedisConfig{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
@@ -31,14 +33,16 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init worker cache: %w", err)
 	}
+	cleanups = append(cleanups, cacheClient.Close)
 
 	var dbMgr *database.DBManager
 	if strings.TrimSpace(cfg.Postgres.DSN) != "" {
 		dbMgr, err = initDatabase(cfg)
 		if err != nil {
-			closeQuiet(cacheClient.Close)
+			runCleanups(cleanups)
 			return nil, fmt.Errorf("init worker database: %w", err)
 		}
+		cleanups = append(cleanups, dbMgr.Close)
 	}
 
 	// 避免 typed-nil 把 interface 包成 non-nil：dbMgr 可能为 nil。
@@ -47,10 +51,7 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 		dbProbe = dbMgr
 	}
 	if err := probeDependencies(cfg, dbProbe, cacheClient); err != nil {
-		if dbMgr != nil {
-			closeQuiet(dbMgr.Close)
-		}
-		closeQuiet(cacheClient.Close)
+		runCleanups(cleanups)
 		return nil, err
 	}
 

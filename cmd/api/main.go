@@ -114,7 +114,7 @@ func main() {
 		}
 	}
 
-	if _, err := shutdownWebServer(server, errCh, gracefulShutdownTimeout, serverExitWaitTimeout); err != nil {
+	if err := shutdownWebServer(server, errCh, gracefulShutdownTimeout, serverExitWaitTimeout); err != nil {
 		applog.L().Error("web server shutdown failed", zap.Error(err))
 	}
 
@@ -127,7 +127,7 @@ func main() {
 	}
 }
 
-func shutdownWebServer(server httpServerLifecycle, errCh <-chan error, shutdownTimeout, waitTimeout time.Duration) (bool, error) {
+func shutdownWebServer(server httpServerLifecycle, errCh <-chan error, shutdownTimeout, waitTimeout time.Duration) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
@@ -140,14 +140,13 @@ func shutdownWebServer(server httpServerLifecycle, errCh <-chan error, shutdownT
 		}
 	}
 
-	exitErr := waitForServerExit(errCh, waitTimeout)
-	if exitErr != nil {
+	if exitErr := waitForServerExit(errCh, waitTimeout); exitErr != nil {
 		if errors.Is(exitErr, errServerExitTimeout) {
 			applog.L().Warn("web server exit wait timed out", zap.Error(exitErr))
 		} else {
 			applog.L().Error("web server exited with error", zap.Error(exitErr))
 		}
-		return forced, exitErr
+		return exitErr
 	}
 
 	if forced {
@@ -155,7 +154,7 @@ func shutdownWebServer(server httpServerLifecycle, errCh <-chan error, shutdownT
 	} else {
 		applog.L().Info("graceful shutdown completed")
 	}
-	return forced, nil
+	return nil
 }
 
 func waitForServerExit(errCh <-chan error, timeout time.Duration) error {

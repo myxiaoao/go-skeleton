@@ -45,10 +45,15 @@ func main() {
 	config.LoadEnv("cmd/api/.env")
 	cfg, err := config.Load()
 	if err != nil {
-		panic(fmt.Sprintf("load config: %v", err))
+		// logger 还没初始化，走 stderr + 非零退出码，避免 panic 的 stack
+		// trace 污染日志让 SRE 误以为是 bug。启动期配置错属于"预期内的
+		// fail-fast"。
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
 	if err := bootstrap.InitRuntime(cfg, "api"); err != nil {
-		panic(fmt.Sprintf("init runtime: %v", err))
+		fmt.Fprintf(os.Stderr, "init runtime: %v\n", err)
+		os.Exit(1)
 	}
 	defer func() { _ = applog.Sync() }()
 

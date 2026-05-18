@@ -28,10 +28,12 @@ func main() {
 	config.LoadEnv("cmd/migrate/.env")
 	cfg, err := config.Load()
 	if err != nil {
-		panic(fmt.Sprintf("load config: %v", err))
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
 	if err := bootstrap.InitRuntime(cfg, "migrate"); err != nil {
-		panic(fmt.Sprintf("init runtime: %v", err))
+		fmt.Fprintf(os.Stderr, "init runtime: %v\n", err)
+		os.Exit(1)
 	}
 	defer func() { _ = applog.Sync() }()
 

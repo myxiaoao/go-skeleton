@@ -251,7 +251,7 @@ Remaining "go-skeleton" mentions are intentional and need a manual pass:
     docker-compose.yml). Keep or strip as you like.
   - systemd Documentation= URLs pointing at the upstream skeleton repo.
     Change to your repo URL.
-  - README / README_zh / docs/*.md that describe "the skeleton". Adjust
+  - README / README_en / docs/*.md that describe "the skeleton". Adjust
     to describe your service.
 
 Next steps:

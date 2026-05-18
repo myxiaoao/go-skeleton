@@ -1,61 +1,58 @@
 # Go Skeleton
 
-[中文](./README_zh.md) | **English**
+**中文** | [English](./README_en.md)
 
-This is a clean Go service skeleton extracted from the original project shape.
-Business modules were intentionally removed; the only domain-like code left is
-the `Example` flow used to demonstrate the app layers.
+这是一份从实际项目里抽离出来的 Go 服务骨架。业务模块已经清空，仅保留 `Example` 流程作为分层结构的示例。
 
-**Requires Go 1.26+.**
+**需要 Go 1.26+。**
 
-## Structure
+## 目录结构
 
-- `cmd/api`: HTTP API process.
-- `cmd/worker`: Asynq worker process.
-- `cmd/migrate`: minimal GORM migration entrypoint for the example table.
-- `config`: environment loading and typed configuration values.
-- `internal/bootstrap`: process-level resource initialization and lifecycle.
-- `internal`: application wiring, routes, middleware, and example layers.
-- `pkg`: reusable infrastructure helpers, including generic JWT auth.
+- `cmd/api`：HTTP API 进程。
+- `cmd/worker`：Asynq worker 进程。
+- `cmd/migrate`：example 表的最小化 GORM 迁移入口。
+- `config`：环境变量加载与配置类型。
+- `internal/bootstrap`：进程级资源初始化与生命周期管理。
+- `internal`：应用装配、路由、中间件以及 example 分层代码。
+- `pkg`：通用基础设施工具，包含通用 JWT 鉴权。
 
-## Run
+## 运行
 
-The fastest path on a fresh clone:
+新仓库最快上手路径：
 
 ```sh
 cp .env.example .env
-make dev-up          # boots Postgres + Redis via docker compose
-go run ./cmd/migrate # creates the example table
-go run ./cmd/api     # serves on :3000
+make dev-up          # 用 docker compose 起 Postgres + Redis
+go run ./cmd/migrate # 建 example 表
+go run ./cmd/api     # 监听 :3000
 ```
 
-Run the worker when Redis is configured:
+配置好 Redis 后运行 worker：
 
 ```sh
 go run ./cmd/worker
 ```
 
-Stop the local dependencies (data volumes are preserved):
+停掉本地依赖（数据卷保留）：
 
 ```sh
 make dev-down
 ```
 
-Or build a container image from the included multi-stage `Dockerfile`:
+或者用仓库自带的 multi-stage `Dockerfile` 构建镜像：
 
 ```sh
-make docker-build        # build go-skeleton-api:dev (default CMD_TARGET=api)
-make docker-run          # run it locally, talking to make dev-up dependencies
+make docker-build        # 构建 go-skeleton-api:dev（默认 CMD_TARGET=api）
+make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
 ```
 
-`CMD_TARGET=worker make docker-build` and `CMD_TARGET=migrate make docker-build`
-reuse the same `Dockerfile` for the other two processes.
+`CMD_TARGET=worker make docker-build`、`CMD_TARGET=migrate make docker-build` 复用同一个 `Dockerfile` 打另外两个进程的镜像。
 
-## Using this Skeleton
+## 复制 skeleton 后要改什么
 
-Steps to take after cloning this repo as the starting point of a new service:
+把这个仓库当作新服务的起点时，请按下面的顺序改：
 
-1. Run the one-shot rename script to re-brand everything in one go:
+1. 跑一次性 rename 脚本，把所有 `go-skeleton` 字样换掉：
 
    ```sh
    ./scripts/rename.sh github.com/your-org/your-service your-service
@@ -63,56 +60,54 @@ Steps to take after cloning this repo as the starting point of a new service:
    #                    NEW_MODULE                      NEW_SHORTNAME
    ```
 
-   This rewrites Go imports, `go.mod`, Makefile vars, `.env.example`,
-   `.golangci.yml`, OpenAPI title, systemd unit filenames + contents,
-   `docker-compose` container names, JWT issuer defaults, and test fixtures.
-   It runs `make fmt + vet + test + lint + docs-verify` to confirm the
-   rewrite builds and lints, then prints a small list of remaining manual
-   touch-ups (Documentation= URLs in systemd units, comments referencing
-   the skeleton's history).
+   脚本会改：Go import、`go.mod`、Makefile 变量、`.env.example`、
+   `.golangci.yml`、OpenAPI title、systemd unit 文件名+内容、
+   `docker-compose` 容器名、JWT issuer 默认值、测试 fixture；
+   结束前会跑 `make fmt + vet + test + lint + docs-verify` 确认没问题，
+   再列出需要手改的少量残留（systemd 里的 Documentation= 上游 URL、
+   注释里的 skeleton 历史说明）。
 
-   After reviewing the diff and committing, delete the script:
+   审 diff、commit 之后把脚本删掉：
 
    ```sh
    git rm scripts/rename.sh && git commit -m 'chore: drop rename script (one-shot)'
    ```
 
-2. Set production-safe values in `.env`:
-   - `JWT_SECRET` (mandatory; the default is a placeholder)
-   - `POSTGRES`, `REDIS_ADDR` if not using `make dev-up`
+2. 在 `.env` 里替换生产安全的值：
+   - `JWT_SECRET`（必改，默认值是占位符）
+   - 不用 `make dev-up` 时改 `POSTGRES`、`REDIS_ADDR`
 
-3. Delete or rename the `Example` module once your real module is wired up:
-   - `internal/handler/example.go`, `internal/service/example.go`,
-     `internal/repository/example.go`, `internal/model/example.go`
-   - `internal/task/example.go`, `internal/worker/handler.go` (Asynq registration)
-   - The `/api/v1/examples*` paths in `api/openapi.yaml`
-   - Tests that reference `Example`
+3. 真实模块跑通后，删掉或改名 `Example` 模块：
+   - `internal/handler/example.go`、`internal/service/example.go`、
+     `internal/repository/example.go`、`internal/model/example.go`
+   - `internal/task/example.go`、`internal/worker/handler.go`（Asynq 注册处）
+   - `api/openapi.yaml` 里的 `/api/v1/examples*` 路径
+   - 引用 `Example` 的测试
 
-4. Add a new module by copying the `Example` shape:
-   - Define the request/response in `api/openapi.yaml`, run `make oapi`.
-   - Add `handler` → `service` → `repository` → `model` files matching the pattern.
-   - Wire it in `internal/server.go::newHTTPHandlers` and `internal/router/router.go`.
-   - Worker side: register the task in `internal/task/` and the handler in
-     `internal/worker/handler.go`.
+4. 按 `Example` 模板新增模块：
+   - 在 `api/openapi.yaml` 里加 request/response，跑 `make oapi`
+   - 按 handler → service → repository → model 的分层补文件
+   - 在 `internal/server.go::newHTTPHandlers` 装配、`internal/router/router.go` 注册路由
+   - Worker 端：在 `internal/task/` 定义任务类型，在 `internal/worker/handler.go` 注册 handler
 
-5. Make sure CI is happy:
+5. 保证 CI 全绿：
 
    ```sh
    make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
    ```
 
-## Runtime Dependencies
+## 运行时依赖
 
-- The API process requires `POSTGRES`.
-- Redis is optional for the API process. When configured, it enables cache and queue publishing.
-- The worker process requires `REDIS_ADDR`.
-- Postgres is optional for the worker process.
-- JWT auth example routes are enabled when `JWT_SECRET` is configured.
+- API 进程必需 `POSTGRES`。
+- Redis 对 API 进程可选；配置后会启用缓存与异步任务投递。
+- Worker 进程必需 `REDIS_ADDR`。
+- Postgres 对 worker 进程可选。
+- 配置 `JWT_SECRET` 后才会启用 JWT 示例路由。
 
-## Example API
+## 示例 API
 
-Issue a sample JWT (dev-only endpoint, off by default — set
-`AUTH_DEV_TOKEN_ENABLED=true` in your local `.env` to enable):
+签发示例 JWT（dev-only 端点，默认关闭——在本地 `.env` 设
+`AUTH_DEV_TOKEN_ENABLED=true` 才暴露）：
 
 ```sh
 curl -X POST http://127.0.0.1:3000/api/v1/auth/token \
@@ -120,14 +115,14 @@ curl -X POST http://127.0.0.1:3000/api/v1/auth/token \
   -d '{"subject":"demo"}'
 ```
 
-Call the protected example endpoint:
+调用需要鉴权的示例接口：
 
 ```sh
 curl http://127.0.0.1:3000/api/v1/auth/me \
   -H "Authorization: Bearer <access_token>"
 ```
 
-Publish the sample async task when Redis is configured:
+Redis 已配置时投递示例异步任务：
 
 ```sh
 curl -X POST http://127.0.0.1:3000/api/v1/examples/tasks \
@@ -135,7 +130,7 @@ curl -X POST http://127.0.0.1:3000/api/v1/examples/tasks \
   -d '{"name":"demo"}'
 ```
 
-## Startup Flow
+## 启动流程
 
 ```mermaid
 flowchart TD
@@ -152,99 +147,79 @@ flowchart TD
     WREG --> ASYNQ["app.NewWorker + Asynq handlers"]
 ```
 
-## API Contract
+## API 契约
 
-The service ships with an OpenAPI 3.1 spec at `api/openapi.yaml`. At runtime
-the embedded spec is served as JSON at:
+服务自带一份 OpenAPI 3.1 spec，位于 `api/openapi.yaml`。运行时通过下面的端点返回内嵌的 spec：
 
 ```
 GET /openapi.json
 ```
 
-Import it into Postman, Bruno, Insomnia, or any OpenAPI-aware tool to explore
-the API. The spec is the single source of truth for request/response shapes;
-the generated `internal/oapi/oapi.gen.go` enforces it at compile time via
-`oapi.ServerInterface`.
+把它导入 Postman / Bruno / Insomnia 或任意支持 OpenAPI 的工具即可浏览接口。spec 是请求/响应结构的唯一真相源；生成的 `internal/oapi/oapi.gen.go` 通过 `oapi.ServerInterface` 在编译期强制对齐。
 
-Regenerate after editing `api/openapi.yaml`:
+修改 `api/openapi.yaml` 后重新生成：
 
 ```sh
-make oapi          # regenerate internal/oapi/oapi.gen.go
-make oapi-verify   # fail if generated code is out of sync (used by make verify)
+make oapi          # 重新生成 internal/oapi/oapi.gen.go
+make oapi-verify   # 生成产物与 yaml 不一致时失败（make verify 会调用）
 ```
 
-## Production Checklist
+## 上线前检查清单
 
-Tick these off before pointing real traffic at this service:
+把真实流量打进来之前，请逐项核对：
 
-- [ ] Replace `JWT_SECRET` with a high-entropy value (≥ 32 bytes, e.g. `openssl rand -base64 48`).
-- [ ] Set `AUTH_DEV_TOKEN_ENABLED=false` (the route stays registered and returns `SERVICE_DISABLED`).
-- [ ] Set `GIN_MODE=release` so Gin omits debug-mode warnings.
-- [ ] Set `LOG_FORMAT=json` (the console format is human-friendly but unparseable by log shippers).
-- [ ] Make `CORS_ALLOW_ORIGINS` an explicit allow-list; never leave it on `*` or as a wide pattern.
-- [ ] Configure `TRUSTED_PROXIES` to match your load balancer; otherwise `c.ClientIP()` returns the wrong address and rate limits / audit logs lose accuracy.
-- [ ] Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget.
-- [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do not point liveness at `/health` — a DB blip would restart healthy pods.
-- [ ] Size `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections` budget. The defaults (30 / 15 / 30m) are tuned for development, not production.
-- [ ] Run `go run ./cmd/migrate` (or your replacement migration tool) before the API process starts.
-- [ ] Decide on the worker process: deploy it separately if any `*/tasks` endpoints are reachable, otherwise queued tasks accumulate without consumers.
+- [ ] `JWT_SECRET` 替换成高熵随机值（≥ 32 字节，例：`openssl rand -base64 48`）。
+- [ ] `AUTH_DEV_TOKEN_ENABLED=false`（路由仍然注册，会返回 `SERVICE_DISABLED`）。
+- [ ] `GIN_MODE=release`，避免 Gin 打 debug 模式警告。
+- [ ] `LOG_FORMAT=json`（console 格式人类可读但日志采集器解析不了）。
+- [ ] `CORS_ALLOW_ORIGINS` 显式枚举，不要留空、不要 `*`。
+- [ ] `TRUSTED_PROXIES` 配置成实际的 LB 网段，否则 `c.ClientIP()` 取错，限流和审计日志都失真。
+- [ ] `RATE_LIMIT_PER_MINUTE` 设置成非零值，匹配业务流量预算。
+- [ ] K8s liveness 接 `/livez`，readiness 接 `/health`。**不要**把 liveness 指向 `/health`——DB 抖一下会把健康 Pod 杀掉重启。
+- [ ] 根据实例规格和 Postgres `max_connections` 调 `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME`，默认值（30 / 15 / 30m）是开发档位，不是生产档位。
+- [ ] API 启动前先跑 `go run ./cmd/migrate`（或者你换的迁移工具）。
+- [ ] 想清楚是否部署 worker 进程：有 `*/tasks` 接口暴露但没消费者，任务会越堆越多。
 
-## Deployment
+## 部署
 
-Two supported paths:
+支持两种路径：
 
-### Container
+### 容器
 
-Use the multi-stage [`Dockerfile`](./Dockerfile) (`make docker-build` /
-`make docker-run`). The same Dockerfile produces images for `api`, `worker`,
-and `migrate` via the `CMD_TARGET` build-arg.
+走 multi-stage [`Dockerfile`](./Dockerfile)（`make docker-build` / `make docker-run`）。同一份 Dockerfile 通过 `CMD_TARGET` build-arg 也能打 `worker` / `migrate` 镜像。
 
-### Binary (systemd)
+### 二进制 + systemd
 
-Static Linux binaries are produced with `make build-linux` (or `make release`
-to also produce tarballs + `SHA256SUMS`). Step-by-step host setup, systemd
-unit installation, rolling upgrades, rollback, and journald log queries are
-in [`docs/deploy.md`](./docs/deploy.md).
+`make build-linux` 出 Linux 静态二进制（`make release` 顺便打 tarball + `SHA256SUMS`）。主机初始化、systemd unit 安装、滚动升级、回滚、journald 日志查询的完整步骤见 [`docs/deploy.md`](./docs/deploy.md)。
 
-GitHub Releases attach `linux-amd64` / `linux-arm64` tarballs automatically
-on every `v*` tag push (see [`.github/workflows/release.yml`](./.github/workflows/release.yml)).
-Binaries embed `version`, `commit`, and `build_time` via ldflags — surfaces
-via `<binary> -version`, the `/livez` `version` field, and the `/health`
-`build` object.
+每次推 `v*` tag 时 GitHub Actions 会自动发布 `linux-amd64` / `linux-arm64` tarball（见 [`.github/workflows/release.yml`](./.github/workflows/release.yml)）。二进制通过 ldflags 内嵌 `version` / `commit` / `build_time`，能从 `<binary> -version`、`/livez` 的 `version` 字段、`/health` 的 `build` 对象三处读到。
 
-### Notes (both paths)
+### 通用约定（两条路径都适用）
 
-- The OpenAPI spec is generated at build time from `api/openapi.yaml`; the
-  generated `internal/oapi/oapi.gen.go` is checked into the repo, so deployment
-  does not need to run codegen.
-- `CORS_ALLOW_ORIGINS` is a comma-separated allow list. Empty means no CORS allow headers.
-- Replace `JWT_SECRET` before using the auth example outside local development.
-- API business errors use the JSON envelope `code`, `message`, and `reason`; most API errors are returned with HTTP 200 by convention.
-- `/livez` is the liveness probe (always 200); `/health` is the readiness probe and returns 503 when required dependencies are unavailable.
+- OpenAPI spec 在构建期就已从 `api/openapi.yaml` 生成完毕，`internal/oapi/oapi.gen.go` 入库，部署时不需要再跑 codegen。
+- `CORS_ALLOW_ORIGINS` 是逗号分隔的白名单；留空表示不下发 CORS 响应头。
+- 离开本地开发前请替换 `JWT_SECRET`。
+- 业务接口的错误用 JSON 信封 `code` / `message` / `reason` 返回；按约定，绝大多数 API 错误也用 HTTP 200。
+- `/livez` 是 liveness 探针（永远 200），`/health` 是 readiness 探针，依赖不可用时返回 503。
 
 ## Runbook
 
-Common machine-executable commands (add endpoint, add task, run specific
-tests, troubleshoot) are collected in [`docs/runbook.md`](./docs/runbook.md).
-Optimised as a cheat sheet for both AI assistants and new contributors.
+高频执行命令（新增 endpoint / 新增任务 / 跑特定测试 / 排错等）整理在
+[`docs/runbook.md`](./docs/runbook.md)，按 cheat sheet 风格写，AI 助手和新人都好用。
 
-## Verify
+## 校验
 
-Run the one-shot check that gates every commit:
+提交前跑一站式检查：
 
 ```sh
 make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
 ```
 
-Or call the underlying targets individually (`make test`, `make lint`, ...).
-See `make help` for the full list.
+也可以单独跑某一项（`make test`、`make lint` 等），完整列表见 `make help`。
 
 ## Changelog
 
-User-visible changes are tracked in [CHANGELOG.md](./CHANGELOG.md), kept by
-hand in the [Keep a Changelog](https://keepachangelog.com/) format. No
-automation — just append to the `Unreleased` section as part of the PR that
-makes the change.
+变更记录见 [CHANGELOG.md](./CHANGELOG.md)，按 [Keep a Changelog](https://keepachangelog.com/) 格式手工维护。不引入自动化工具——做改动时顺手把变更追加到 `Unreleased` 段即可。
 
 ## License
 

@@ -11,6 +11,7 @@ type Config struct {
 	Cors      CorsConfig
 	Log       LogConfig
 	RateLimit RateLimitConfig
+	Worker    WorkerConfig
 }
 
 // ServerConfig holds HTTP server settings.
@@ -68,4 +69,16 @@ type LogConfig struct {
 // RateLimitConfig holds per-IP rate limit settings.
 type RateLimitConfig struct {
 	RequestsPerMinute int
+}
+
+// WorkerConfig holds Asynq worker tuning knobs.
+type WorkerConfig struct {
+	// Concurrency is the number of asynq workers processing tasks in parallel.
+	Concurrency int
+	// Queues maps queue name to weight, parsed from "name:weight,name:weight".
+	Queues map[string]int
+	// RetryBaseDelay is the seed for exponential backoff (delay = base * 2^n).
+	RetryBaseDelay time.Duration
+	// RetryMaxDelay caps backoff so it does not grow without bound.
+	RetryMaxDelay time.Duration
 }

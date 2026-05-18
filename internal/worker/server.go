@@ -21,19 +21,33 @@ func NewRedisOpt(addr, password string, db int) asynq.RedisClientOpt {
 	}
 }
 
-// NewServer creates an asynq worker server.
-func NewServer(redisOpt asynq.RedisClientOpt) *asynq.Server {
+// ServerConfig groups Asynq tuning knobs into a single argument. Defaults
+// kick in via config.Load when the corresponding env vars are unset.
+type ServerConfig struct {
+	Concurrency    int
+	Queues         map[string]int
+	RetryBaseDelay time.Duration
+	RetryMaxDelay  time.Duration
+}
+
+// NewServer creates an asynq worker server with the given tuning.
+func NewServer(redisOpt asynq.RedisClientOpt, sc ServerConfig) *asynq.Server {
+	baseDelay := sc.RetryBaseDelay
+	if baseDelay <= 0 {
+		baseDelay = 5 * time.Second
+	}
+	maxDelay := sc.RetryMaxDelay
+	if maxDelay <= 0 {
+		maxDelay = time.Hour
+	}
+
 	return asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: 10,
-		Queues: map[string]int{
-			"critical": 6,
-			"default":  3,
-			"low":      1,
-		},
+		Concurrency: sc.Concurrency,
+		Queues:      sc.Queues,
 		RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
-			delay := time.Duration(1<<uint(n)) * 5 * time.Second
-			if delay > time.Hour {
-				delay = time.Hour
+			delay := time.Duration(1<<uint(n)) * baseDelay
+			if delay > maxDelay {
+				delay = maxDelay
 			}
 			logger := applog.L()
 			if traceID := task.TraceIDFromPayload(t.Payload()); traceID != "" {

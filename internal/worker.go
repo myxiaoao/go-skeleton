@@ -28,8 +28,16 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 	worker.RegisterHandlers(mux, deps)
 
 	return &Worker{
-		server: worker.NewServer(worker.NewRedisOpt(reg.Cfg.Redis.Addr, reg.Cfg.Redis.Password, reg.Cfg.Redis.QueueDB)),
-		mux:    mux,
+		server: worker.NewServer(
+			worker.NewRedisOpt(reg.Cfg.Redis.Addr, reg.Cfg.Redis.Password, reg.Cfg.Redis.QueueDB),
+			worker.ServerConfig{
+				Concurrency:    reg.Cfg.Worker.Concurrency,
+				Queues:         reg.Cfg.Worker.Queues,
+				RetryBaseDelay: reg.Cfg.Worker.RetryBaseDelay,
+				RetryMaxDelay:  reg.Cfg.Worker.RetryMaxDelay,
+			},
+		),
+		mux: mux,
 	}, nil
 }
 

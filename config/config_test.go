@@ -149,6 +149,53 @@ func TestLoadStillReturnsConfigOnError(t *testing.T) {
 	}
 }
 
+func TestQueueWeightsEnvDefaults(t *testing.T) {
+	t.Setenv("WORKER_QUEUES", "")
+	got, err := queueWeightsEnv("WORKER_QUEUES", map[string]int{"default": 1})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["default"] != 1 {
+		t.Fatalf("got %#v, want default:1 fallback", got)
+	}
+}
+
+func TestQueueWeightsEnvParses(t *testing.T) {
+	t.Setenv("WORKER_QUEUES", "critical:6, default:3 , low:1")
+	got, err := queueWeightsEnv("WORKER_QUEUES", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]int{"critical": 6, "default": 3, "low": 1}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("got[%s]=%d, want %d", k, got[k], v)
+		}
+	}
+}
+
+func TestQueueWeightsEnvRejectsGarbage(t *testing.T) {
+	cases := []string{
+		"critical",     // missing :weight
+		"critical:abc", // non-numeric weight
+		"critical:0",   // non-positive weight
+		":3",           // empty name
+		"critical:",    // empty weight
+	}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("WORKER_QUEUES", raw)
+			_, err := queueWeightsEnv("WORKER_QUEUES", nil)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", raw)
+			}
+		})
+	}
+}
+
 func TestParseCSVHandlesWhitespaceAndEmpties(t *testing.T) {
 	got := parseCSV(" a, b ,, c,  ")
 	want := []string{"a", "b", "c"}

@@ -162,6 +162,10 @@ new-endpoint: ## 拷贝 5 文件骨架（handler/service/repo/model/task）；NA
 	fi
 	@bash scripts/new-endpoint.sh "$(NAME)"
 
+.PHONY: mod-upgrade
+mod-upgrade: ## 干跑：列出可升的直接依赖（patch/minor）。APPLY=1 真升 + verify + 失败回滚
+	@bash scripts/mod-upgrade.sh
+
 # ---------- OpenAPI codegen ----------
 
 OAPI_SPEC   := api/openapi.yaml

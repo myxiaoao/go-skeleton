@@ -12,6 +12,30 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Added
+
+- **Security response headers middleware**:
+  `internal/middleware/security_headers.go` writes `X-Content-Type-Options:
+  nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` on
+  every response. New env `SECURITY_HEADERS_ENABLED` (default `true`).
+  HSTS is intentionally omitted (TLS terminates at the LB / reverse proxy,
+  not the app); CSP is omitted because the JSON API does not render HTML.
+- **Request body / header size limits**:
+  `internal/middleware/body_limit.go` wraps `http.MaxBytesReader` around
+  `c.Request.Body`; `internal/server.go` sets
+  `http.Server.MaxHeaderBytes = 1MB`. New env `BODY_MAX_BYTES`
+  (default `1048576`, `0` disables). Mitigates trivial OOM via a 100MB
+  JSON or oversized headers; the body cap surfaces through the normal
+  `INVALID_PARAMS` envelope.
+- **`make tidy-verify`**: backs up `go.mod` / `go.sum`, runs
+  `go mod tidy`, then diffs; fails when they drift from a fresh `tidy`.
+  Wired into the `make verify` chain so CI catches manual `go get`
+  changes that leave `go.sum` dirty.
+- **Dependabot `docker` ecosystem**: `.github/dependabot.yml` adds a
+  weekly scan of `FROM` lines in the `Dockerfile` so base-image CVEs get
+  a PR instead of going unnoticed alongside the existing `gomod` /
+  `github-actions` scans.
+
 ### Changed
 
 - **CORS `Access-Control-Allow-Credentials` is now opt-in**: previously the

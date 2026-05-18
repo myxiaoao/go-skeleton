@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,10 +44,11 @@ type HTTPHandlers struct {
 // Server 持有从 Registry 装配出来的 HTTP transport 全套：gin engine、
 // http.Server、handler 集合 + per-IP 限流器（如果开了的话）。
 type Server struct {
-	Engine      *gin.Engine
-	HTTP        *http.Server
-	Handlers    *HTTPHandlers
-	rateLimiter *middleware.IPRateLimiter
+	Engine             *gin.Engine
+	HTTP               *http.Server
+	Handlers           *HTTPHandlers
+	rateLimiter        *middleware.IPRateLimiter
+	stopMetricsCollect context.CancelFunc
 }
 
 // NewServer 把 handler / 中间件 / 底层 http.Server 一次性装配齐。reg 不全
@@ -62,17 +64,47 @@ func NewServer(reg *bootstrap.Registry) (*Server, error) {
 	}
 
 	handlers := newHTTPHandlers(reg)
-	engine, err := newEngine(reg, handlers, rl)
+	engine, metricsReg, err := newEngine(reg, handlers, rl)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Server{
+	server := &Server{
 		Engine:      engine,
 		HTTP:        newHTTPServer(reg.Cfg, engine),
 		Handlers:    handlers,
 		rateLimiter: rl,
-	}, nil
+	}
+
+	// metrics + inspector 都就绪时起后台 collector。collector 周期抓 asynq
+	// 队列状态喂 gauge；Shutdown 调 stopMetricsCollect 取消 ctx 让它退出。
+	if metricsReg != nil && reg.Inspector != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		server.stopMetricsCollect = cancel
+		queues := queueNames(reg.Cfg.Worker.Queues)
+		metricsReg.StartAsynqCollector(ctx, reg.Inspector, queues, asynqCollectInterval, nil)
+	}
+
+	return server, nil
+}
+
+// asynqCollectInterval 是 asynq 队列 metrics 的采样周期。30s 与 Prometheus
+// 默认 scrape 周期一致，再勤会给 Redis 添无谓负载；更稀疏会让 alert 滞后。
+const asynqCollectInterval = 30 * time.Second
+
+// queueNames 把 config 里的"队列→权重"map 翻译成稳定顺序的队列名切片。
+// 排序仅为了 Prometheus label 在重启间稳定，避免 gauge 在 register 阶段
+// 因 label 顺序差异打成不同 series。
+func queueNames(queues map[string]int) []string {
+	if len(queues) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(queues))
+	for name := range queues {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Run 开始监听并接 HTTP 请求，直到 Shutdown 被调。屏蔽
@@ -87,14 +119,18 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// Shutdown 优雅停服：先停限流器后台 goroutine，再让 http.Server 走 graceful
-// drain（等 in-flight 请求完成）。ctx 控制 drain 超时；超时后底层会强切。
+// Shutdown 优雅停服：先停限流器后台 goroutine + metrics collector，再让
+// http.Server 走 graceful drain（等 in-flight 请求完成）。ctx 控制 drain
+// 超时；超时后底层会强切。
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s == nil || s.HTTP == nil {
 		return errNilHTTPServer
 	}
 	if s.rateLimiter != nil {
 		s.rateLimiter.Stop()
+	}
+	if s.stopMetricsCollect != nil {
+		s.stopMetricsCollect()
 	}
 	return s.HTTP.Shutdown(ctx)
 }
@@ -107,6 +143,9 @@ func (s *Server) Close() error {
 	}
 	if s.rateLimiter != nil {
 		s.rateLimiter.Stop()
+	}
+	if s.stopMetricsCollect != nil {
+		s.stopMetricsCollect()
 	}
 	if err := s.HTTP.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
@@ -163,10 +202,10 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 //     （例如限流后 429），这样 Grafana 看到的 QPS 就是真实入站量；
 //   - recover 必须在业务之前能兜住 panic；
 //   - limiter 放最后避免限流前已经做了大量准备工作。
-func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.IPRateLimiter) (*gin.Engine, error) {
+func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.IPRateLimiter) (*gin.Engine, *metrics.Registry, error) {
 	engine := gin.New()
 	if err := engine.SetTrustedProxies(reg.Cfg.Server.TrustedProxies); err != nil {
-		return nil, fmt.Errorf("set trusted proxies: %w", err)
+		return nil, nil, fmt.Errorf("set trusted proxies: %w", err)
 	}
 
 	engine.Use(middleware.TraceLogger(reg.Cfg.Log.AuditEnabled, reg.Cfg.Log.AuditExcludes))
@@ -205,10 +244,10 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 		AuthRequired: authRequired,
 		Example:      handlers.Example,
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return engine, nil
+	return engine, metricsReg, nil
 }
 
 // newHTTPServer 把 cfg 翻译成裸 *http.Server，单独抽出来便于改超时 / 加

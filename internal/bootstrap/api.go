@@ -67,6 +67,9 @@ func InitAPI(cfg *config.Config) (*Registry, error) {
 	reg.Auth = authManager
 	reg.Queue = taskqueue.NewQueue(queueClient)
 	reg.queueClient = queueClient
+	// Inspector 仅 API 进程装配——Worker 进程自身就是 asynq.Server，没必要
+	// 再挂 Inspector；queue metrics 由 API 端的 collector 统一观测。
+	reg.Inspector = newAsynqInspector(cfg)
 	return reg, nil
 }
 

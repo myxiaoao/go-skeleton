@@ -19,11 +19,12 @@ import (
 // API / Worker / Migrate 三个进程各自有 InitXxx 装配自己需要的字段，没
 // 用到的字段保持 nil。Close 统一释放，按"后开先关"顺序。
 type Registry struct {
-	Cfg   *config.Config
-	DB    *database.DBManager
-	Cache *cache.Client
-	Auth  *auth.JWTManager
-	Queue *taskqueue.Queue
+	Cfg       *config.Config
+	DB        *database.DBManager
+	Cache     *cache.Client
+	Auth      *auth.JWTManager
+	Queue     *taskqueue.Queue
+	Inspector *asynq.Inspector
 
 	// Draining 是 graceful shutdown 的进程级信号：收到 SIGTERM 后置 true，
 	// /health 探活立即返 503，让 LB/K8s 在窗口内摘流。零值 false 即正常。
@@ -46,6 +47,11 @@ func (r *Registry) Close() error {
 	}
 
 	var errs []error
+	if r.Inspector != nil {
+		if err := r.Inspector.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close queue inspector: %w", err))
+		}
+	}
 	if r.queueClient != nil {
 		if err := r.queueClient.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close queue client: %w", err))
@@ -113,9 +119,23 @@ func newAsynqClient(cfg *config.Config) *asynq.Client {
 	if cfg == nil || strings.TrimSpace(cfg.Redis.Addr) == "" {
 		return nil
 	}
-	return asynq.NewClient(asynq.RedisClientOpt{
+	return asynq.NewClient(asynqRedisOpt(cfg))
+}
+
+// newAsynqInspector 构造一个 read-only Inspector，给 metrics 周期采集队列
+// 状态用（pkg/metrics.StartAsynqCollector）。没配 Redis 返回 nil；调用方
+// 用 nil 短路即可。Inspector 与 queueClient 各自持有独立连接池，互不影响。
+func newAsynqInspector(cfg *config.Config) *asynq.Inspector {
+	if cfg == nil || strings.TrimSpace(cfg.Redis.Addr) == "" {
+		return nil
+	}
+	return asynq.NewInspector(asynqRedisOpt(cfg))
+}
+
+func asynqRedisOpt(cfg *config.Config) asynq.RedisClientOpt {
+	return asynq.RedisClientOpt{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.QueueDB,
-	})
+	}
 }

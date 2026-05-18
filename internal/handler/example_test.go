@@ -114,6 +114,30 @@ func TestCreateExampleValidationError(t *testing.T) {
 	}
 }
 
+func TestCreateExampleRejectsOverlongName(t *testing.T) {
+	router := setupRouter(&mockExampleRepo{
+		createFunc: func(_ context.Context, _ *model.Example) error {
+			t.Fatal("repo.Create must not be called when validation rejects payload")
+			return nil
+		},
+	})
+
+	tooLong := strings.Repeat("x", 256)
+	payload := `{"name":"` + tooLong + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/examples", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var resp response.Response
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Code != errcode.InvalidParams.Code() {
+		t.Fatalf("code = %d, want %d", resp.Code, errcode.InvalidParams.Code())
+	}
+}
+
 func TestCreateExampleDatabaseError(t *testing.T) {
 	repo := &mockExampleRepo{
 		createFunc: func(_ context.Context, _ *model.Example) error {

@@ -284,6 +284,7 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 255
 
     ExampleEnvelope:
       allOf:
@@ -321,6 +322,7 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 255
 
     EnqueueExampleTaskRes:
       type: object

@@ -40,8 +40,10 @@ func NewExampleService(repo ExampleRepository, queue ...ExampleQueue) *ExampleSe
 }
 
 // CreateExampleReq is the request body for creating an example.
+// Name max length is aligned with the GORM column (varchar(255)) so overlong
+// input surfaces as INVALID_PARAMS instead of a DB-side failure.
 type CreateExampleReq struct {
-	Name string `json:"name" binding:"required"`
+	Name string `json:"name" binding:"required,max=255"`
 }
 
 // Create creates a new example.
@@ -55,8 +57,9 @@ func (s *ExampleService) Create(ctx context.Context, req *CreateExampleReq) (*mo
 }
 
 // EnqueueExampleTaskReq is the request body for publishing an example task.
+// Name shares the example table column constraint (varchar(255)).
 type EnqueueExampleTaskReq struct {
-	Name string `json:"name" binding:"required"`
+	Name string `json:"name" binding:"required,max=255"`
 }
 
 // EnqueueExampleTaskRes is the response for publishing an example task.

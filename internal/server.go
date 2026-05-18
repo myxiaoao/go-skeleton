@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -176,9 +177,22 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 }
 
 func newHTTPServer(cfg *config.Config, engine *gin.Engine) *http.Server {
+	// ReadHeaderTimeout: short hedge against slowloris-style header drips;
+	// independent of the per-request body deadline below.
+	// Read/WriteTimeout: a small buffer over the business RequestTimeout so
+	// the middleware-side REQUEST_TIMEOUT envelope has time to flush before
+	// the server itself cuts the connection.
+	const slack = 5 * time.Second
+	reqTimeout := cfg.Server.RequestTimeout
+	if reqTimeout <= 0 {
+		reqTimeout = 30 * time.Second
+	}
 	return &http.Server{
 		Addr:              cfg.Server.Port,
 		Handler:           engine,
-		ReadHeaderTimeout: cfg.Server.RequestTimeout,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       reqTimeout + slack,
+		WriteTimeout:      reqTimeout + slack,
+		IdleTimeout:       60 * time.Second,
 	}
 }

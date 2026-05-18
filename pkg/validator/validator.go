@@ -7,11 +7,15 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// InitValidator is the hook for registering custom validation rules.
+// InitValidator 是注册自定义 binding 校验规则的钩子。当前空实现——遇到要
+// 写跨字段校验（password != username 这种）时，在这里调
+// binding.Validator.Engine().(*validator.Validate).RegisterValidation。
 func InitValidator() {
 }
 
-// HandleValidatorError converts validation errors into a concise client message.
+// HandleValidatorError 把 validator.ValidationErrors 翻译成一条简洁、能直
+// 接展示给客户端的 message。**只取第一条错误**，避免一次 binding 失败甩出
+// 一堆字段名让前端难以展示；前端按 reason=INVALID_PARAMS 处理总分支即可。
 func HandleValidatorError(errs validator.ValidationErrors) string {
 	if len(errs) == 0 {
 		return "invalid request parameters"

@@ -11,7 +11,12 @@ import (
 	customvalidator "go-skeleton/pkg/validator"
 )
 
-// Response is the standard API response structure.
+// Response 是项目统一的 API 响应信封。Code=0 表示成功；非 0 时 Reason 是
+// 机器可读的错误常量（INVALID_PARAMS 等），Message 是默认人读文案，
+// Metadata 通常带 trace_id 给前端反查日志用。
+//
+// 所有业务 API 一律返 HTTP 200，靠 Code 区分；/livez 与 /health 例外（用
+// 真实状态码给 LB / K8s 用）。
 type Response struct {
 	Code     int            `json:"code"`
 	Message  string         `json:"message"`
@@ -20,12 +25,14 @@ type Response struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// SuccessResponse creates a success response with code 0.
+// SuccessResponse 构造 Code=0 的成功响应；只是个 helper，真正写出去走
+// WriteSuccess。
 func SuccessResponse(data any) Response {
 	return Response{Code: 0, Message: "success", Data: data}
 }
 
-// ErrorResponse creates an error response.
+// ErrorResponse 构造业务错误信封。Code / Reason / Message 三个字段绑死
+// errcode 表，避免散在各处拼字符串。
 func ErrorResponse(c *gin.Context, errorCode errcode.Error) Response {
 	reason := errorCode.Reason()
 	return Response{
@@ -36,7 +43,9 @@ func ErrorResponse(c *gin.Context, errorCode errcode.Error) Response {
 	}
 }
 
-// BuildValidationErrorResponse creates a validation error response.
+// BuildValidationErrorResponse 把 binding 校验错误包装成 INVALID_PARAMS
+// 信封。validator.ValidationErrors 走 customvalidator 翻译字段名 / 规则；
+// 其他 error 直接透传 err.Error() 兜底。
 func BuildValidationErrorResponse(c *gin.Context, err error) Response {
 	msg := err.Error()
 	if errs, ok := err.(validator.ValidationErrors); ok {
@@ -50,12 +59,14 @@ func BuildValidationErrorResponse(c *gin.Context, err error) Response {
 	}
 }
 
-// WriteSuccess writes a success response with HTTP 200.
+// WriteSuccess 写一条成功响应（HTTP 200 + Code=0），handler 用它收尾。
 func WriteSuccess(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, SuccessResponse(data))
 }
 
-// WriteError translates an errcode.Error into the API error envelope.
+// WriteError 把 service 返的 error 转成响应信封。如果是 errcode.Error
+// 直接用对应 Code / Reason；其他类型一律压成 INTERNAL_ERROR，避免泄漏
+// 底层错误细节给客户端。
 func WriteError(c *gin.Context, err error) {
 	var ec errcode.Error
 	if errors.As(err, &ec) {
@@ -65,12 +76,14 @@ func WriteError(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, ErrorResponse(c, errcode.InternalError))
 }
 
-// WriteValidationError writes a validation error response.
+// WriteValidationError 写参数校验错误响应。handler 内常用 inline
+// c.JSON(200, BuildValidationErrorResponse(...))，这个 helper 是给少数
+// 不走 handler 兜底分支的场景。
 func WriteValidationError(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, BuildValidationErrorResponse(c, err))
 }
 
-// MessageFor returns the default English message bound to an errcode reason.
+// MessageFor 按 errcode reason 返默认英文人读文案。
 // 导出供 scripts/gen-errcodes.go 复用同一份文案表，避免重复维护。
 func MessageFor(reason string) string {
 	switch reason {
@@ -99,6 +112,9 @@ func MessageFor(reason string) string {
 	}
 }
 
+// buildMetadata 把 trace_id 从 gin.Context 取出来塞到响应 metadata 里，
+// 让前端拿到错误响应时能直接报 trace_id 找日志。没有 trace_id 时返 nil
+// 让 omitempty 把字段省掉，保持响应干净。
 func buildMetadata(c *gin.Context) map[string]any {
 	if traceID := c.GetString("trace_id"); traceID != "" {
 		return map[string]any{"trace_id": traceID}

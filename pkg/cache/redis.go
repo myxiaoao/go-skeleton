@@ -12,23 +12,24 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// RedisConfig holds Redis connection settings.
+// RedisConfig 是 Redis 连接配置（地址 / 密码 / 逻辑 DB 编号）。
 type RedisConfig struct {
 	Addr     string
 	Password string
 	DB       int
 }
 
-// Client wraps a Redis client.
+// Client 是 *redis.Client 的薄封装，对外只暴露 Get / Set / Ping / Close
+// 这些骨架真正用到的方法；需要更多原子操作时通过 Underlying() 取裸客户端。
 type Client struct {
 	rdb *redis.Client
 }
 
-// pingTimeout bounds the startup ping so a stuck Redis node cannot hang the
-// process indefinitely.
+// pingTimeout 限制启动期 Ping 的最长等待时间，防 Redis 节点假死把进程拖死。
 const pingTimeout = 5 * time.Second
 
-// NewClient creates and verifies a Redis client.
+// NewClient 构造 Redis 客户端并做一次启动 Ping 探活。Ping 失败立即 Close
+// 并返 error，让上层 fail-fast；不返回半成品 client。
 func NewClient(cfg RedisConfig) (*Client, error) {
 	if strings.TrimSpace(cfg.Addr) == "" {
 		return nil, fmt.Errorf("redis address is required")
@@ -51,7 +52,8 @@ func NewClient(cfg RedisConfig) (*Client, error) {
 	return &Client{rdb: rdb}, nil
 }
 
-// Underlying returns the raw Redis client for advanced use.
+// Underlying 返回裸 *redis.Client，给需要 SET NX / 事务 / 管道等高级用法
+// 的场景用。如果只用 Get / Set，调本封装的方法就行。
 func (c *Client) Underlying() *redis.Client {
 	if c == nil {
 		return nil
@@ -59,7 +61,7 @@ func (c *Client) Underlying() *redis.Client {
 	return c.rdb
 }
 
-// Ping verifies that Redis is reachable.
+// Ping 探测 Redis 是否可达。/health 探针会调它，所以 ctx 应该带短超时。
 func (c *Client) Ping(ctx context.Context) error {
 	if c == nil || c.rdb == nil {
 		return fmt.Errorf("redis client is not configured")
@@ -70,7 +72,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the Redis connection.
+// Close 关闭底层连接。nil-safe，bootstrap.Registry.Close 会调它。
 func (c *Client) Close() error {
 	if c == nil || c.rdb == nil {
 		return nil
@@ -78,7 +80,8 @@ func (c *Client) Close() error {
 	return c.rdb.Close()
 }
 
-// Get retrieves a string value by key.
+// Get 按 key 取字符串值。**key 不存在时返 "" + nil**（不当 error），调用方
+// 用 val == "" 判 miss 即可，免去识别 redis.Nil 哨兵。
 func (c *Client) Get(ctx context.Context, key string) (string, error) {
 	if c == nil || c.rdb == nil {
 		return "", fmt.Errorf("redis client is not configured")
@@ -93,7 +96,7 @@ func (c *Client) Get(ctx context.Context, key string) (string, error) {
 	return val, nil
 }
 
-// Set stores a string value with an optional TTL. Pass 0 for no expiration.
+// Set 写一对 key / value，ttl 是过期时间；传 0 表示永不过期。
 func (c *Client) Set(ctx context.Context, key, value string, ttl time.Duration) error {
 	if c == nil || c.rdb == nil {
 		return fmt.Errorf("redis client is not configured")

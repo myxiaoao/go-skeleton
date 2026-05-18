@@ -195,14 +195,27 @@ systemd-cgtop -m | grep go-skeleton
 - 用 `firewalld` / `iptables` 把 `:3000` 限制只接 LB；`/livez`、`/health`、`/openapi.json` 不要直接暴露公网
 - `JWT_SECRET` 与 Postgres / Redis 凭据**只**放 `.env`，不要扔进环境变量被 `ps` / `/proc` 看到
 
-## 9. systemd 运行时（API unit）
+## 9. systemd 运行时
+
+### API unit
 
 - `Type=notify` + `WatchdogSec=30s`：API 进程通过 sd_notify 发 `READY=1`（启动完成）和
   周期 `WATCHDOG=1`（心跳）。`WATCHDOG_INTERVAL=10s` 是心跳周期，约为 WatchdogSec 的 1/3。
   systemd 在 30s 内未收到心跳即按 `Restart=on-failure` 重启。
 - `LimitNOFILE=65535`：HTTP server + DB/Redis 连接池 + asynq client 累积文件描述符；
   默认 1024 在中等并发下吃紧。
-- worker / migrate unit **不启用 watchdog**：迁移是一次性进程；worker 长期运行但不直接面向
-  请求，挂死靠业务监控（Asynqmon 队列堆积）发现即可。
+
+### Worker unit
+
+- `Type=notify` + `WatchdogSec=60s`：worker 同样发 READY/WATCHDOG。窗口比 API 宽
+  （60s vs 30s）——worker 单条 task 可能合法阻塞在长 DB / 外部 I/O 上；误杀进行中的
+  task 比误杀无状态 HTTP 请求代价更高。心跳周期复用 `WATCHDOG_INTERVAL=10s`。
+- 配 `LimitNOFILE=65535` 同 API 理由。
+- watchdog 不能替代业务监控：仍然要看 Asynqmon 队列堆积、ErrorHandler 日志。watchdog
+  只兜底"进程卡死"，识别不了"进程在跑但任务一直失败"。
+
+### Migrate unit
+
+迁移是一次性进程，不需要 watchdog，保持 `Type=simple`。
 
 更多上线前检查见 [README "Production Checklist"](../README.md#production-checklist)。

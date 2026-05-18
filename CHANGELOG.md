@@ -12,6 +12,42 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Fixed
+
+- **JWT issuer can be silently disabled**: `pkg/auth.JWTManager.ParseToken`
+  skipped iss-claim validation when `Issuer` was empty, so any token signed
+  with the same secret but a different iss would still pass. `config/validate.go`
+  now rejects empty `JWT_ISSUER` whenever `JWT_SECRET` is set; the JWTManager
+  godoc explicitly warns about the empty-issuer behaviour for `pkg/auth`
+  reusers. The `.env.example` default `JWT_ISSUER=go-skeleton` keeps existing
+  deployments green.
+- **Worker retry delay overflow**: `internal/worker.computeRetryDelay`
+  replaces inline `time.Duration(1<<uint(n)) * baseDelay`. The old expression
+  overflowed `int64` at large `n` and returned a negative `time.Duration` that
+  the `delay > maxDelay` guard could not catch (negative < positive). New
+  function caps at `n >= 30`, normalises negative `n`, and treats any
+  non-positive computed delay as "use max". Asynq's default max retries (25)
+  never reached the bug in practice, but the guard is cheap and covers
+  custom Retry tunings.
+- **Worker had no systemd watchdog**: `cmd/worker/main.go` now starts
+  `sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)`; the worker unit
+  switches to `Type=notify` + `NotifyAccess=main` + `WatchdogSec=60s`
+  (wider than the API's 30s, since worker tasks can legitimately block on
+  long DB / external I/O between heartbeats). Adds `LimitNOFILE=65535` to
+  match the API unit. `docs/deploy.md` section 9 splits into API / Worker /
+  Migrate subsections.
+
+### Tests
+
+- **`internal/middleware/rate_limit_test.go`** (was 0 coverage): burst /
+  block, per-IP isolation, zero-budget disabling, `cleanup` staleness
+  pruning, `Stop` releases the cleanup goroutine, idempotent `Stop`.
+- **`internal/worker/server_test.go`** (was 0 coverage):
+  `computeRetryDelay` table tests including the overflow boundary at
+  `n=30,100`; invariant test `delay ∈ [0, max]` over `n ∈ [-5, 100]`;
+  `taskLogContext` trace-source resolution (payload vs synthesised);
+  `traceMiddleware` does not swallow handler errors.
+
 ### Added
 
 - **PR / Issue templates**: `.github/pull_request_template.md` and

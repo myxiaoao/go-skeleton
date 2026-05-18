@@ -15,6 +15,7 @@ import (
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
+	"go-skeleton/pkg/sdnotify"
 )
 
 func main() {
@@ -52,6 +53,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// sd_notify watchdog 心跳：systemd Type=notify + WatchdogSec 时，定期发
+	// WATCHDOG=1 让 systemd 知道 worker 还活着；如果 Asynq handler 卡死（不
+	// panic、不 ErrorHandler），systemd 会按 unit 的 Restart=on-failure 重启。
+	// ctx 取消时自然退出；非 Linux 平台是 noop stub。
+	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
 
 	applog.L().Info("worker started", zap.String("component", "asynq"))
 	if err := worker.Run(ctx); err != nil {

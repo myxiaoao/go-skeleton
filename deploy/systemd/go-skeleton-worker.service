@@ -5,7 +5,12 @@ After=network-online.target redis.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+# notify: Worker sends sd_notify(READY=1) on startup + periodic WATCHDOG=1
+# heartbeats. If a handler hangs (no panic, no error) systemd restarts the
+# process per Restart= below; without watchdog those hangs would be silent
+# until Asynqmon queue depth alerts catch up.
+Type=notify
+NotifyAccess=main
 User=go-skeleton
 Group=go-skeleton
 
@@ -19,6 +24,14 @@ RestartSec=5s
 # room to finish in-flight tasks before systemd SIGKILLs it.
 KillSignal=SIGTERM
 TimeoutStopSec=45s
+# Watchdog: same WATCHDOG_INTERVAL=10s heartbeat as the API. 60s is a
+# wider margin than the API's 30s — worker tasks can legitimately block
+# on long DB / external I/O between heartbeat ticks, and a false-positive
+# restart mid-task is worse than for a stateless HTTP request.
+WatchdogSec=60s
+# Same rationale as API: HTTP/DB/Redis client pools + asynq client share
+# FDs; default 1024 is tight under bursts.
+LimitNOFILE=65535
 
 NoNewPrivileges=true
 ProtectSystem=strict

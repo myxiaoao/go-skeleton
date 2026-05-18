@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"go-skeleton/config"
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
+	"go-skeleton/internal/router"
 	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
 )
@@ -64,6 +66,19 @@ func main() {
 		applog.L().Fatal("assemble http server", zap.Error(err))
 	}
 
+	// 可选的 pprof debug 服务器，仅在配置开启时启动。生产默认关闭；排障时
+	// 临时打开 + 通过 SSH 隧道访问，**不要**把端口暴露到公网。
+	var pprofSrv *http.Server
+	if cfg.Server.PprofEnabled {
+		pprofSrv = router.NewPprofServer(cfg.Server.PprofAddr)
+		go func() {
+			applog.L().Info("starting pprof server", zap.String("addr", cfg.Server.PprofAddr))
+			if err := pprofSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				applog.L().Error("pprof server error", zap.Error(err))
+			}
+		}()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -96,6 +111,14 @@ func main() {
 
 	if _, err := shutdownWebServer(server, errCh, gracefulShutdownTimeout, serverExitWaitTimeout); err != nil {
 		applog.L().Error("web server shutdown failed", zap.Error(err))
+	}
+
+	if pprofSrv != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := pprofSrv.Shutdown(shutdownCtx); err != nil {
+			applog.L().Warn("pprof shutdown failed", zap.Error(err))
+		}
+		cancel()
 	}
 }
 

@@ -148,3 +148,21 @@ make verify                                        # 项目级一站式
 go test -run TestNewModule ./internal/... -v       # 新增模块的测试单独跑
 grep -rn "TODO\|FIXME" --include="*.go" internal/  # 没留 TODO
 ```
+
+## 线上排障：开 pprof
+
+pprof debug 端点默认关闭。需要现场抓 CPU/heap profile 时临时打开，**不要**长开。
+
+1. SSH 到目标机器，设环境变量 + 重启 API：
+   ```sh
+   PPROF_ENABLED=true PPROF_ADDR=127.0.0.1:6060 systemctl restart go-skeleton-api
+   ```
+2. 本地通过 SSH 隧道访问（pprof 只绑回环，禁止公网暴露）：
+   ```sh
+   ssh -L 6060:127.0.0.1:6060 prod-host
+   # 另一个终端
+   go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30   # CPU
+   go tool pprof http://127.0.0.1:6060/debug/pprof/heap                 # heap
+   curl http://127.0.0.1:6060/debug/pprof/goroutine?debug=2             # goroutine dump
+   ```
+3. 排障完关掉 PPROF_ENABLED，重启 API。

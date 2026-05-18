@@ -87,6 +87,9 @@ func Load() (*Config, error) {
 	cfg.RateLimit.RequestsPerMinute, err = intEnv("RATE_LIMIT_PER_MINUTE", 0)
 	collect(err)
 
+	cfg.Cors.AllowCredentials, err = boolEnv("CORS_ALLOW_CREDENTIALS", false)
+	collect(err)
+
 	cfg.Worker.Concurrency, err = intEnv("WORKER_CONCURRENCY", 10)
 	collect(err)
 	cfg.Worker.Queues, err = queueWeightsEnv("WORKER_QUEUES",

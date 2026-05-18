@@ -152,7 +152,7 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	engine.Use(middleware.TraceLogger(reg.Cfg.Log.AuditEnabled, reg.Cfg.Log.AuditExcludes))
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.Timeout(reg.Cfg.Server.RequestTimeout))
-	engine.Use(middleware.CORS(reg.Cfg.Cors.AllowOrigins))
+	engine.Use(middleware.CORS(reg.Cfg.Cors.AllowOrigins, reg.Cfg.Cors.AllowCredentials))
 	if rl != nil {
 		engine.Use(rl.Middleware())
 	}

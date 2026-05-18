@@ -68,6 +68,10 @@ type AuthConfig struct {
 // CorsConfig holds allowed browser origins.
 type CorsConfig struct {
 	AllowOrigins []string
+	// AllowCredentials 控制是否回写 Access-Control-Allow-Credentials: true。
+	// 骨架默认无状态 JWT 走 Authorization 头，**不需要** cookie，默认 false。
+	// 仅当前端需要从浏览器自动携带 cookie / session 时再打开。
+	AllowCredentials bool
 }
 
 // LogConfig holds structured logging settings.

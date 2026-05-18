@@ -1,8 +1,8 @@
 # go-skeleton 项目约定
 
-> 给 Claude 看的项目专属规则。全局规则见 `~/.claude/CLAUDE.md`，这里只列本项目特有的约定。
+> 给 AI 编码助手（Codex 等）看的项目专属规则。本文件是项目唯一真相源，无需依赖外部全局配置。
 >
-> **与 `AGENTS.md` 保持同步**：本项目并行维护两份 AI 编码助手规则文件（CLAUDE.md 给 Claude Code、AGENTS.md 给 Codex 等其他工具）。改一份时另一份也要改，否则两个助手会给出漂移的代码。
+> **与 `CLAUDE.md` 保持同步**：本项目并行维护两份 AI 编码助手规则文件（AGENTS.md 给 Codex 等工具、CLAUDE.md 给 Claude Code）。改一份时另一份也要改，否则两个助手会给出漂移的代码。
 
 ## 技术栈
 
@@ -26,6 +26,15 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 | `pkg/` | 跟业务无关的通用工具 | 严禁 import `internal/` 任何包 |
 
 数据库迁移当前用 `cmd/migrate` 跑 GORM `AutoMigrate`，**没有** `migrations/` SQL 文件目录；如果未来引入 SQL 迁移工具，放仓库根目录的 `migrations/`，不要塞 `internal/`。
+
+## 通用工作准则（适用于所有 AI 编码助手）
+
+- **始终使用简体中文回复**；技术术语保持英文原文。
+- **破坏性操作前必须确认**：删除文件/分支、`reset --hard`、`drop table`、`force push` 之类要先跟人确认。
+- **不要为了绕过失败用破坏性命令**（例如 `--no-verify` 跳过 hook）。
+- **声明任务完成前必须跑过验证命令**（`make verify`），不要凭感觉判断绿。
+- **不要自动 push**——commit 完等人确认。
+- Commit message 风格：`type(scope): description` + 空一行 + 详细变更说明，每项一行。type 使用英文（feat/fix/refactor/docs/test/chore），scope 见下文 Git Workflow 表。
 
 ## 分层规则：handler → service → repository
 
@@ -257,7 +266,7 @@ go test ./... -cover                  # 看覆盖率
 
 ### Commit message
 
-沿用全局 `~/.claude/CLAUDE.md` 的规则（type(scope): description + 详细变更说明）。本项目的 scope 约定：
+格式：`type(scope): description` + 空一行 + 详细变更说明，每项一行。type 用英文（feat/fix/refactor/docs/test/chore）。本项目的 scope 约定：
 
 | Scope | 对应改动 |
 | --- | --- |
@@ -297,7 +306,7 @@ feat(service): example 新增分页参数校验
 make verify   # fmt + vet + test + lint + oapi-verify
 ```
 
-任意一项挂了**不要 `--no-verify` 跳过**——按全局规则，hook 失败先修问题再重新 commit，不要 amend。
+任意一项挂了**不要 `--no-verify` 跳过**——按通用规则，hook 失败先修问题再重新 commit，不要 amend。
 
 ### Stage 文件时的硬约束
 
@@ -315,11 +324,10 @@ make verify   # fmt + vet + test + lint + oapi-verify
 go-example/
 ├── .env.example                配置模板（真实 .env 不入库）
 ├── .gitignore
-├── .dockerignore
 ├── Makefile                    开发与提交前一站式入口（make help 查全部 target）
 ├── README.md
-├── AGENTS.md                   Codex 等 AI 编码助手的项目规则（与本文件并存维护）
-├── CLAUDE.md                   本文件（Claude Code 用）
+├── AGENTS.md                   本文件（给 AI 编码助手看的项目规则）
+├── CLAUDE.md                   Claude Code 私有规则（与本文件并存维护）
 ├── CHANGELOG.md                Keep a Changelog 格式
 ├── Dockerfile                  multi-stage 构建（默认 cmd/api）
 ├── docker-compose.yml          本地 Postgres + Redis

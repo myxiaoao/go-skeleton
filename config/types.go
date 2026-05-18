@@ -61,6 +61,10 @@ type RedisConfig struct {
 	Password string
 	CacheDB  int
 	QueueDB  int
+	// PoolSize / MinIdleConns 透传给 go-redis；0 表示用库默认。给运维在
+	// 高负载下不改代码也能调连接池上限。
+	PoolSize     int
+	MinIdleConns int
 }
 
 // AuthConfig 是 JWT 鉴权配置。JWTSecret 为空时 BearerAuth 返

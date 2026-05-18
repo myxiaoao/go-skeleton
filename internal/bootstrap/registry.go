@@ -85,9 +85,11 @@ func initCache(cfg *config.Config) (*cache.Client, error) {
 		return nil, nil
 	}
 	return cache.NewClient(cache.RedisConfig{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.CacheDB,
+		Addr:         cfg.Redis.Addr,
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.CacheDB,
+		PoolSize:     cfg.Redis.PoolSize,
+		MinIdleConns: cfg.Redis.MinIdleConns,
 	})
 }
 

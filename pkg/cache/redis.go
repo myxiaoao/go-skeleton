@@ -12,11 +12,17 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// RedisConfig 是 Redis 连接配置（地址 / 密码 / 逻辑 DB 编号）。
+// RedisConfig 是 Redis 连接配置（地址 / 密码 / 逻辑 DB 编号 + 连接池）。
+//
+// PoolSize / MinIdleConns 透传给 go-redis；0 表示用库默认（PoolSize 默认
+// 是 10 * GOMAXPROCS，单核机器约 10 个连接，高负载下容易卡在这上面没人
+// 知道为什么，这两个旋钮就是给运维兜底用的）。
 type RedisConfig struct {
-	Addr     string
-	Password string
-	DB       int
+	Addr         string
+	Password     string
+	DB           int
+	PoolSize     int
+	MinIdleConns int
 }
 
 // Client 是 *redis.Client 的薄封装，对外只暴露 Get / Set / Ping / Close
@@ -36,9 +42,11 @@ func NewClient(cfg RedisConfig) (*Client, error) {
 	}
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
+		Addr:         cfg.Addr,
+		Password:     cfg.Password,
+		DB:           cfg.DB,
+		PoolSize:     cfg.PoolSize,
+		MinIdleConns: cfg.MinIdleConns,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)

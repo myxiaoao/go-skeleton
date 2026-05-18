@@ -26,9 +26,11 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 	var cleanups []func() error
 
 	cacheClient, err := cache.NewClient(cache.RedisConfig{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.CacheDB,
+		Addr:         cfg.Redis.Addr,
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.CacheDB,
+		PoolSize:     cfg.Redis.PoolSize,
+		MinIdleConns: cfg.Redis.MinIdleConns,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("init worker cache: %w", err)

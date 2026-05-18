@@ -83,6 +83,10 @@ func Load() (*Config, error) {
 	collect(err)
 	cfg.Redis.QueueDB, err = intEnv("REDIS_QUEUE_DB", 6)
 	collect(err)
+	cfg.Redis.PoolSize, err = intEnv("REDIS_POOL_SIZE", 0)
+	collect(err)
+	cfg.Redis.MinIdleConns, err = intEnv("REDIS_MIN_IDLE_CONNS", 0)
+	collect(err)
 
 	cfg.Auth.JWTTTL, err = durationEnv("JWT_TTL", 24*time.Hour)
 	collect(err)

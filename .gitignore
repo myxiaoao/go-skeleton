@@ -35,3 +35,6 @@ cmd/*/.env
 
 # Claude Code local settings (may contain MCP tokens / credentials)
 .claude/settings.local.json
+
+# Worktrees
+.worktrees/

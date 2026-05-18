@@ -1,0 +1,46 @@
+[Unit]
+Description=go-skeleton HTTP API
+Documentation=https://github.com/myxiaoao/go-skeleton
+After=network-online.target postgresql.service redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=go-skeleton
+Group=go-skeleton
+
+# Layout assumed by docs/deploy.md:
+#   /opt/go-skeleton/bin/{api,worker,migrate}
+#   /etc/go-skeleton/.env   (config, mode 0640, owned by root:go-skeleton)
+WorkingDirectory=/opt/go-skeleton
+EnvironmentFile=/etc/go-skeleton/.env
+ExecStart=/opt/go-skeleton/bin/api
+
+Restart=on-failure
+RestartSec=5s
+# Send SIGTERM; the process handles graceful shutdown internally.
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# Security hardening — sensible defaults for a stateless HTTP service.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# Logs go to journald; use `journalctl -u go-skeleton-api -f` to follow.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

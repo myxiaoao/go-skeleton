@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"go-skeleton/config"
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
+	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
 )
 
@@ -29,6 +32,13 @@ type httpServerLifecycle interface {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version info and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String())
+		os.Exit(0)
+	}
+
 	config.LoadEnv("cmd/api/.env")
 	cfg, err := config.Load()
 	if err != nil {

@@ -12,6 +12,26 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Added
+
+- **Binary deployment path** alongside the Docker path. `make build-linux`
+  cross-compiles static `linux/amd64` + `linux/arm64` binaries (CGO off,
+  `-tags netgo`, `-trimpath`); `make release` packages them with the
+  systemd units, `.env.example`, and `DEPLOY.md` into per-arch tarballs
+  plus a `SHA256SUMS` manifest.
+- `.github/workflows/release.yml` publishes those tarballs to GitHub
+  Releases on every `v*` tag push.
+- `deploy/systemd/{go-skeleton-api,go-skeleton-worker,go-skeleton-migrate}.service`
+  unit templates with security hardening (NoNewPrivileges, ProtectSystem,
+  PrivateTmp, etc.).
+- `docs/deploy.md` step-by-step binary deployment guide: host setup,
+  systemd install, rolling upgrade, rollback, journald queries, and a
+  troubleshooting cheat sheet.
+- `pkg/buildinfo` exposes `Version` / `Commit` / `BuildTime` injected via
+  ldflags; each `cmd/` binary supports `-version`, `/livez` includes the
+  version, and `/health` returns a `build` object so monitoring can
+  scrape the running version without a separate endpoint.
+
 ### Breaking
 - Response envelope field renamed from `msg` to `message` to drop the
   abbreviation. Update any client that reads `response.msg`. The Go field

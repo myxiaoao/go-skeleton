@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -11,10 +13,18 @@ import (
 	"go-skeleton/config"
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
+	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version info and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String())
+		os.Exit(0)
+	}
+
 	config.LoadEnv("cmd/worker/.env")
 	cfg, err := config.Load()
 	if err != nil {

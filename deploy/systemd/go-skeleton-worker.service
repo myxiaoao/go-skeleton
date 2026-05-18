@@ -1,0 +1,42 @@
+[Unit]
+Description=go-skeleton Asynq worker
+Documentation=https://github.com/myxiaoao/go-skeleton
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=go-skeleton
+Group=go-skeleton
+
+WorkingDirectory=/opt/go-skeleton
+EnvironmentFile=/etc/go-skeleton/.env
+ExecStart=/opt/go-skeleton/bin/worker
+
+Restart=on-failure
+RestartSec=5s
+# Worker does two-phase shutdown (Stop → Shutdown) on SIGTERM; give it
+# room to finish in-flight tasks before systemd SIGKILLs it.
+KillSignal=SIGTERM
+TimeoutStopSec=45s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

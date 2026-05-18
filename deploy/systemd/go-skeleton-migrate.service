@@ -1,0 +1,43 @@
+[Unit]
+Description=go-skeleton database migration (one-shot)
+Documentation=https://github.com/myxiaoao/go-skeleton
+After=network-online.target postgresql.service
+# Run before the API/Worker units come up. Add this unit to their
+# `Before=` or invoke it via `systemctl start go-skeleton-migrate.service`
+# in your deploy script before starting the long-running services.
+Before=go-skeleton-api.service go-skeleton-worker.service
+
+[Service]
+# One-shot: runs to completion, exits 0, then systemd considers it done.
+Type=oneshot
+RemainAfterExit=no
+User=go-skeleton
+Group=go-skeleton
+
+WorkingDirectory=/opt/go-skeleton
+EnvironmentFile=/etc/go-skeleton/.env
+ExecStart=/opt/go-skeleton/bin/migrate
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+# Optional WantedBy: enable if you want migrate to run on every boot.
+# Most setups run migrate manually as part of the release pipeline, so
+# we leave Install empty by default. Uncomment to auto-enable on boot:
+# WantedBy=multi-user.target

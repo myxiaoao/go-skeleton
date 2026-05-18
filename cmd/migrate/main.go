@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -10,11 +12,19 @@ import (
 	"go-skeleton/config"
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/internal/model"
+	"go-skeleton/pkg/buildinfo"
 	"go-skeleton/pkg/database"
 	applog "go-skeleton/pkg/log"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version info and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String())
+		os.Exit(0)
+	}
+
 	config.LoadEnv("cmd/migrate/.env")
 	cfg, err := config.Load()
 	if err != nil {

@@ -8,9 +8,28 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-skeleton/internal/oapi"
+	"go-skeleton/pkg/buildinfo"
 	"go-skeleton/pkg/cache"
 	"go-skeleton/pkg/database"
 )
+
+// buildResponse mirrors the anonymous struct on oapi.HealthResponse.Build
+// so the handler doesn't construct it inline three times.
+func buildResponse() struct {
+	BuildTime string `json:"build_time"`
+	Commit    string `json:"commit"`
+	Version   string `json:"version"`
+} {
+	return struct {
+		BuildTime string `json:"build_time"`
+		Commit    string `json:"commit"`
+		Version   string `json:"version"`
+	}{
+		BuildTime: buildinfo.BuildTime,
+		Commit:    buildinfo.Commit,
+		Version:   buildinfo.Version,
+	}
+}
 
 // HealthHandler checks infrastructure dependencies.
 type HealthHandler struct {
@@ -27,7 +46,10 @@ func NewHealthHandler(db *database.DBManager, cache *cache.Client) *HealthHandle
 // request. Must not touch DB / Redis: a failure here causes Kubernetes to
 // restart the pod, which is the wrong response when downstreams flap.
 func (h *HealthHandler) Live(c *gin.Context) {
-	c.JSON(http.StatusOK, oapi.LivenessResponse{Status: "ok"})
+	c.JSON(http.StatusOK, oapi.LivenessResponse{
+		Status:  "ok",
+		Version: buildinfo.Version,
+	})
 }
 
 // Health is the readiness probe — returns 503 when required dependencies
@@ -72,5 +94,6 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	c.JSON(httpStatus, oapi.HealthResponse{
 		Status: status,
 		Checks: checks,
+		Build:  buildResponse(),
 	})
 }

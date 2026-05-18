@@ -1,0 +1,63 @@
+name: Release
+
+# Triggered by pushing a semver tag (vX.Y.Z). Use:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Security note: this workflow does NOT interpolate any user-controlled
+# event fields into `run:` commands. All build steps go through `make`,
+# which only consumes git-tracked state. Tag name reaches the build via
+# `git describe` (read by Makefile), not via `${{ github.ref }}` shell
+# expansion, so command-injection vectors don't apply here.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # Required for creating the GitHub Release and uploading assets.
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build cross-platform binaries and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # `git describe --tags --dirty` needs full history.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install tooling (oapi-codegen / golangci-lint / gci / gofumpt)
+        run: make init
+
+      - name: Verify
+        # Same gate regular CI runs — won't release a broken build.
+        run: make verify
+
+      - name: Build release artifacts
+        # Produces dist/<version>/{linux-amd64,linux-arm64}/ plus tarballs
+        # and SHA256SUMS. VERSION defaults to `git describe --tags --dirty`,
+        # so on a clean tag push this becomes the tag string.
+        run: make release
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*/go-skeleton-*-linux-amd64.tar.gz
+            dist/*/go-skeleton-*-linux-arm64.tar.gz
+            dist/*/SHA256SUMS

@@ -220,6 +220,8 @@ make verify   # fmt + vet + test + lint + oapi-verify（每步打横幅，便于
 
 **常用命令速查见 [`docs/runbook.md`](./docs/runbook.md)**——它把"新增 endpoint / 新增任务 / 跑特定测试 / 排错"等高频动作整理成可执行清单，AI 助手优先读它。
 
+**二进制部署见 [`docs/deploy.md`](./docs/deploy.md)**——主机初始化、systemd unit 安装、滚动升级、回滚、日志查询；与 Docker 路径并存。
+
 ## 测试约定
 
 项目目前的测试风格是**标准库 `testing` + 手写 mock**，下面这些约定是为了让新写的测试和老的一脉相承，不要凭直觉换风格。

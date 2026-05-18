@@ -178,7 +178,30 @@ Tick these off before pointing real traffic at this service:
 - [ ] Run `go run ./cmd/migrate` (or your replacement migration tool) before the API process starts.
 - [ ] Decide on the worker process: deploy it separately if any `*/tasks` endpoints are reachable, otherwise queued tasks accumulate without consumers.
 
-## Deployment Notes
+## Deployment
+
+Two supported paths:
+
+### Container
+
+Use the multi-stage [`Dockerfile`](./Dockerfile) (`make docker-build` /
+`make docker-run`). The same Dockerfile produces images for `api`, `worker`,
+and `migrate` via the `CMD_TARGET` build-arg.
+
+### Binary (systemd)
+
+Static Linux binaries are produced with `make build-linux` (or `make release`
+to also produce tarballs + `SHA256SUMS`). Step-by-step host setup, systemd
+unit installation, rolling upgrades, rollback, and journald log queries are
+in [`docs/deploy.md`](./docs/deploy.md).
+
+GitHub Releases attach `linux-amd64` / `linux-arm64` tarballs automatically
+on every `v*` tag push (see [`.github/workflows/release.yml`](./.github/workflows/release.yml)).
+Binaries embed `version`, `commit`, and `build_time` via ldflags — surfaces
+via `<binary> -version`, the `/livez` `version` field, and the `/health`
+`build` object.
+
+### Notes (both paths)
 
 - The OpenAPI spec is generated at build time from `api/openapi.yaml`; the
   generated `internal/oapi/oapi.gen.go` is checked into the repo, so deployment
@@ -186,7 +209,7 @@ Tick these off before pointing real traffic at this service:
 - `CORS_ALLOW_ORIGINS` is a comma-separated allow list. Empty means no CORS allow headers.
 - Replace `JWT_SECRET` before using the auth example outside local development.
 - API business errors use the JSON envelope `code`, `message`, and `reason`; most API errors are returned with HTTP 200 by convention.
-- `/health` uses real HTTP status codes and returns 503 when required dependencies are unavailable.
+- `/livez` is the liveness probe (always 200); `/health` is the readiness probe and returns 503 when required dependencies are unavailable.
 
 ## Runbook
 

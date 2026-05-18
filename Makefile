@@ -13,7 +13,19 @@ API_PORT ?= 3000
 # go 命令统一开关
 GO       ?= go
 GOFLAGS  ?=
-LDFLAGS  ?= -s -w
+
+# 版本元数据：默认从 git 取，可被环境变量覆盖。VERSION 优先用最近的
+# tag（git describe --tags --dirty），无 tag 时退回 0.0.0-<short-sha>。
+# 注入到 pkg/buildinfo.{Version,Commit,BuildTime} 三个变量。
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-unknown")
+COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# -s -w 缩小二进制；-X 把版本元数据注入 buildinfo 变量。
+LDFLAGS  ?= -s -w \
+	-X 'go-skeleton/pkg/buildinfo.Version=$(VERSION)' \
+	-X 'go-skeleton/pkg/buildinfo.Commit=$(COMMIT)' \
+	-X 'go-skeleton/pkg/buildinfo.BuildTime=$(BUILD_TIME)'
 
 # 工具链版本固定。升级时改这里 + 跑 make init 重新装，让 CI / 队友复现一致。
 GOLANGCI_LINT_VERSION ?= v2.12.2
@@ -194,8 +206,14 @@ run-migrate: ## 跑 GORM AutoMigrate（需要 POSTGRES 配置）
 $(BIN_DIR):
 	@mkdir -p $(BIN_DIR)
 
+.PHONY: version
+version: ## 打印当前会注入到二进制里的版本元数据
+	@echo "VERSION    = $(VERSION)"
+	@echo "COMMIT     = $(COMMIT)"
+	@echo "BUILD_TIME = $(BUILD_TIME)"
+
 .PHONY: build
-build: build-api build-worker build-migrate ## 构建三个进程的二进制到 bin/
+build: build-api build-worker build-migrate ## 构建三个进程的二进制到 bin/（本机平台，注入版本）
 
 .PHONY: build-api
 build-api: | $(BIN_DIR) ## 构建 API
@@ -208,6 +226,57 @@ build-worker: | $(BIN_DIR) ## 构建 Worker
 .PHONY: build-migrate
 build-migrate: | $(BIN_DIR) ## 构建 Migrate
 	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(MIGRATE_BIN) ./cmd/migrate
+
+# ---------- 交叉编译 + 发布 artifact ----------
+#
+# 静态链接：CGO_ENABLED=0 + -tags netgo 让产物可以扔到 distroless / scratch
+# 或者裸 Linux 上跑，不依赖 glibc 版本。-trimpath 去掉构建机的绝对路径，
+# 让相同源码 + 相同 ldflags 能产出 reproducible 二进制。
+
+DIST_DIR    := dist
+LINUX_AMD64 := linux/amd64
+LINUX_ARM64 := linux/arm64
+
+# 内部辅助目标，由 release 调用：$1=GOOS/GOARCH，例如 build-cross/linux/amd64。
+.PHONY: build-cross
+build-cross:
+	@if [ -z "$(TARGET)" ]; then echo "build-cross requires TARGET=os/arch"; exit 1; fi
+	@os=$$(echo $(TARGET) | cut -d/ -f1); arch=$$(echo $(TARGET) | cut -d/ -f2); \
+	out=$(DIST_DIR)/$(VERSION)/$${os}-$${arch}; \
+	mkdir -p $$out/bin $$out/deploy/systemd; \
+	for cmd in api worker migrate; do \
+		printf '  → %s/%s/bin/%s\n' "$$os" "$$arch" "$$cmd"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+			$(GO) build -trimpath -tags netgo \
+				-ldflags="$(LDFLAGS)" \
+				-o $$out/bin/$$cmd ./cmd/$$cmd; \
+	done; \
+	cp .env.example $$out/.env.example; \
+	cp deploy/systemd/*.service $$out/deploy/systemd/ 2>/dev/null || true; \
+	cp docs/deploy.md $$out/DEPLOY.md 2>/dev/null || true; \
+	cp LICENSE $$out/LICENSE; \
+	echo "$(VERSION)" > $$out/VERSION
+
+.PHONY: build-linux-amd64
+build-linux-amd64: ## 交叉编译 linux/amd64 静态二进制到 dist/<version>/linux-amd64/
+	@$(MAKE) --no-print-directory build-cross TARGET=$(LINUX_AMD64)
+
+.PHONY: build-linux-arm64
+build-linux-arm64: ## 交叉编译 linux/arm64 静态二进制到 dist/<version>/linux-arm64/
+	@$(MAKE) --no-print-directory build-cross TARGET=$(LINUX_ARM64)
+
+.PHONY: build-linux
+build-linux: build-linux-amd64 build-linux-arm64 ## 构建所有 Linux 平台二进制
+
+.PHONY: release
+release: build-linux ## 把 Linux 二进制打成 tarball + SHA256SUMS 到 dist/<version>/
+	@cd $(DIST_DIR)/$(VERSION) && \
+	for d in linux-amd64 linux-arm64; do \
+		tar -czf go-skeleton-$(VERSION)-$$d.tar.gz $$d/; \
+		printf '  → %s\n' "dist/$(VERSION)/go-skeleton-$(VERSION)-$$d.tar.gz"; \
+	done && \
+	shasum -a 256 go-skeleton-$(VERSION)-*.tar.gz > SHA256SUMS && \
+	printf '\n=== SHA256SUMS ===\n' && cat SHA256SUMS
 
 # ---------- 容器镜像（默认构建 cmd/api） ----------
 

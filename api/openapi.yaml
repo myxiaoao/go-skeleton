@@ -202,16 +202,19 @@ components:
     # ---------- Health ----------
     LivenessResponse:
       type: object
-      required: [status]
+      required: [status, version]
       properties:
         status:
           type: string
           description: Always "ok" — the probe is hard-coded to succeed.
           example: ok
+        version:
+          type: string
+          description: Build version injected via ldflags, for quick "what's running" checks.
 
     HealthResponse:
       type: object
-      required: [status, checks]
+      required: [status, checks, build]
       properties:
         status:
           type: string
@@ -221,6 +224,19 @@ components:
           additionalProperties:
             type: string
             enum: [ok, unavailable, not_configured]
+        build:
+          type: object
+          description: |
+            Build-time metadata injected via ldflags. Lets monitoring scrape
+            the version off /health without a separate endpoint.
+          required: [version, commit, build_time]
+          properties:
+            version:
+              type: string
+            commit:
+              type: string
+            build_time:
+              type: string
 
     # ---------- Business envelope ----------
     Envelope:

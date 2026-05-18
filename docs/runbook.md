@@ -87,6 +87,30 @@ make dev-down                  # 数据卷保留
 make dev-reset                 # 数据卷销毁（破坏性）
 ```
 
+## 出二进制 release artifact
+
+详细部署步骤见 [`docs/deploy.md`](./deploy.md)。
+
+```sh
+make build-linux                                # 交叉编译 amd64 + arm64 静态二进制
+                                                # → dist/<version>/linux-{amd64,arm64}/
+make release                                    # 顺便打 tarball + SHA256SUMS
+                                                # → dist/<version>/go-skeleton-<version>-linux-*.tar.gz
+make version                                    # 看当前会注入哪个版本号
+
+# 单独跑某个架构：
+make build-linux-amd64
+make build-linux-arm64
+
+# 看二进制版本：
+./bin/api -version
+./bin/worker -version
+./bin/migrate -version
+
+# CI 自动发版：推一个 v* tag 会触发 .github/workflows/release.yml
+git tag v0.2.0 && git push origin v0.2.0
+```
+
 ## 打容器镜像
 
 ```sh

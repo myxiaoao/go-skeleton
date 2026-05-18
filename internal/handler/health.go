@@ -24,24 +24,6 @@ type healthCachePinger interface {
 	Ping(context.Context) error
 }
 
-// buildResponse 镜像 oapi.HealthResponse.Build 上的匿名 struct，避免 handler
-// 内三处地方都写一份内联字面量。
-func buildResponse() struct {
-	BuildTime string `json:"build_time"`
-	Commit    string `json:"commit"`
-	Version   string `json:"version"`
-} {
-	return struct {
-		BuildTime string `json:"build_time"`
-		Commit    string `json:"commit"`
-		Version   string `json:"version"`
-	}{
-		BuildTime: buildinfo.BuildTime,
-		Commit:    buildinfo.Commit,
-		Version:   buildinfo.Version,
-	}
-}
-
 // HealthHandler 实现 K8s 风格的探活：/livez（liveness）+ /health（readiness）。
 // 持有 db / cache 的 ping 接口和 draining 信号；后者由 main 在 SIGTERM 时翻
 // true，用来让 /health 提前返 503 让 LB 摘流。
@@ -129,9 +111,12 @@ func (h *HealthHandler) Health(c *gin.Context) {
 		// httpStatus 保持 200：让 LB 区别 "完全挂" 和 "降级运行"。
 	}
 
-	c.JSON(httpStatus, oapi.HealthResponse{
+	resp := oapi.HealthResponse{
 		Status: status,
 		Checks: checks,
-		Build:  buildResponse(),
-	})
+	}
+	resp.Build.BuildTime = buildinfo.BuildTime
+	resp.Build.Commit = buildinfo.Commit
+	resp.Build.Version = buildinfo.Version
+	c.JSON(httpStatus, resp)
 }

@@ -27,16 +27,41 @@ help: ## 列出所有可用 target
 # ---------- 开发依赖 ----------
 
 .PHONY: init
-init: ## 安装本项目用到的辅助工具（pin 版本，已存在则跳过）
-	@command -v golangci-lint >/dev/null 2>&1 || { \
-		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
-		$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
-	}
-	@command -v oapi-codegen >/dev/null 2>&1 || { \
-		echo "Installing oapi-codegen $(OAPI_CODEGEN_VERSION)..."; \
-		$(GO) install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION); \
-	}
+init: ## 安装/对齐辅助工具到 pin 版本（已是 pin 版本则跳过）
+	@$(MAKE) --no-print-directory _ensure-golangci-lint
+	@$(MAKE) --no-print-directory _ensure-oapi-codegen
 	@echo "init done."
+
+# Compares the installed tool version against the pinned version and
+# reinstalls when they differ. Keeps team / CI reproducible: a stale
+# pre-existing binary no longer slips past `make init`.
+.PHONY: _ensure-golangci-lint
+_ensure-golangci-lint:
+	@want="$(GOLANGCI_LINT_VERSION)"; want_short="$${want#v}"; \
+	if command -v golangci-lint >/dev/null 2>&1; then \
+		got=$$(golangci-lint version --short 2>/dev/null); \
+		if [ "$$got" = "$$want_short" ]; then \
+			echo "golangci-lint $$got: ok"; exit 0; \
+		fi; \
+		echo "golangci-lint $$got != $$want_short, reinstalling..."; \
+	else \
+		echo "Installing golangci-lint $$want..."; \
+	fi; \
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$want
+
+.PHONY: _ensure-oapi-codegen
+_ensure-oapi-codegen:
+	@want="$(OAPI_CODEGEN_VERSION)"; \
+	if command -v oapi-codegen >/dev/null 2>&1; then \
+		got=$$(oapi-codegen --version 2>/dev/null | awk 'NR==2{print; exit}'); \
+		if [ "$$got" = "$$want" ]; then \
+			echo "oapi-codegen $$got: ok"; exit 0; \
+		fi; \
+		echo "oapi-codegen $$got != $$want, reinstalling..."; \
+	else \
+		echo "Installing oapi-codegen $$want..."; \
+	fi; \
+	$(GO) install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$$want
 
 # ---------- 本地开发依赖（docker compose） ----------
 
@@ -67,9 +92,8 @@ OAPI_CFG    := api/oapi-codegen.yaml
 OAPI_OUTPUT := internal/oapi/oapi.gen.go
 
 .PHONY: oapi-install
-oapi-install: ## 仅安装 oapi-codegen（pin 版本）
-	@command -v oapi-codegen >/dev/null 2>&1 || \
-		$(GO) install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
+oapi-install: ## 仅校验/安装 oapi-codegen（pin 版本，不匹配会重装）
+	@$(MAKE) --no-print-directory _ensure-oapi-codegen
 
 .PHONY: oapi
 oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go

@@ -188,6 +188,12 @@ Tick these off before pointing real traffic at this service:
 - API business errors use the JSON envelope `code`, `message`, and `reason`; most API errors are returned with HTTP 200 by convention.
 - `/health` uses real HTTP status codes and returns 503 when required dependencies are unavailable.
 
+## Runbook
+
+Common machine-executable commands (add endpoint, add task, run specific
+tests, troubleshoot) are collected in [`docs/runbook.md`](./docs/runbook.md).
+Optimised as a cheat sheet for both AI assistants and new contributors.
+
 ## Verify
 
 Run the one-shot check that gates every commit:

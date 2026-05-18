@@ -146,6 +146,17 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 - **严禁** import `internal/` 下任何包。`pkg` 内部互相 import 合法（`pkg/response` 依赖 `pkg/errcode` 就是这样）。
 - 接口稳定优先于功能堆叠，因为理论上可以被其他项目复用。
 
+## AI 助手提示（最高频违反，每次进项目先扫这段）
+
+下面这些规则**写得很明白，但 AI 助手仍然会犯**。开始任何写代码任务前先内化这几条，可以省下大量返工：
+
+- **不要修改 `internal/oapi/oapi.gen.go`**。它顶部标了 DO NOT EDIT，唯一改它的方式是改 `api/openapi.yaml` 然后 `make oapi`。哪怕只是改一行 import / 注释 / 字段名都会被 oapi-verify 抓出来。
+- **`oapi.Example`、`oapi.CreateExampleReq` 等业务实体类型不要 import**。业务结构以 `internal/service` 包为准（如 `service.CreateExampleReq`）；只有协议层 schema（`oapi.HealthResponse` / `oapi.LivenessResponse` / `oapi.ListExamplesParams` 等）可以直接用。
+- **service 入参永远是 `context.Context`，不是 `*gin.Context`**。Worker 也消费 service，绑死 gin 会让 Worker 跑不通。需要 trace_id / auth subject 这种字段，由 handler 提前从 `*gin.Context` 取出来，作为 primitive 传给 service。
+- **测试不要引入 testify / gomock / mockery / sqlmock / testcontainers**。本项目坚持标准库 `testing` + 手写 mock，参考 `internal/service/example_test.go`。
+- **响应字段是 `message`，不是 `msg`**（早期用过 `msg`，已经统一改成 `message` 这种完整单词；不要又退回简写）。
+- **错误返回值用 `pkg/errcode` 里的常量**，不要 `fmt.Errorf("...")` 字符串拼接。底层错误用 `applog.FromContext(ctx).Error(..., zap.Error(err))` 单独记日志。
+
 ## 写代码时常犯的错（已知会触发返工）
 
 - ❌ 在 handler 写业务规则 → ✅ 挪到 service。
@@ -202,10 +213,12 @@ oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。
 声明任务完成前必须跑过：
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify
+make verify   # fmt + vet + test + lint + oapi-verify（每步打横幅，便于定位失败）
 ```
 
 需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
+
+**常用命令速查见 [`docs/runbook.md`](./docs/runbook.md)**——它把"新增 endpoint / 新增任务 / 跑特定测试 / 排错"等高频动作整理成可执行清单，AI 助手优先读它。
 
 ## 测试约定
 

@@ -14,5 +14,9 @@ indent_size = 4
 indent_style = space
 indent_size = 2
 
+# Markdown uses trailing whitespace as a hard line-break marker; keep it.
+[*.md]
+trim_trailing_whitespace = false
+
 [Makefile]
 indent_style = tab

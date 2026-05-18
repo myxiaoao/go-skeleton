@@ -1,0 +1,27 @@
+# Mark generated code so GitHub diff auto-collapses it and language
+# stats don't double-count it. Useful for both humans reviewing PRs and
+# AI assistants that grep through the repo.
+internal/oapi/oapi.gen.go linguist-generated=true
+*.gen.go                  linguist-generated=true
+go.sum                    linguist-generated=true
+
+# Normalize line endings: LF everywhere, no CRLF surprises from Windows
+# checkouts. Go toolchain assumes LF.
+* text=auto eol=lf
+
+# Lockfiles + generated specs benefit from being marked text so diff
+# tools still work; binary blobs below are pinned explicitly.
+*.go      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+Makefile  text eol=lf
+
+# Common binary types — never apply line-ending or whitespace fixes.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.pdf     binary

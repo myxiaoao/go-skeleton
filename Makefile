@@ -101,6 +101,10 @@ oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
 	oapi-codegen -config $(OAPI_CFG) $(OAPI_SPEC)
 	@echo "generated: $(OAPI_OUTPUT)"
 
+.PHONY: docs-verify
+docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
+	@bash scripts/docs-verify.sh
+
 .PHONY: oapi-verify
 oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
 	@if ! git diff --quiet -- $(OAPI_OUTPUT); then \
@@ -223,7 +227,24 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: fmt vet test lint oapi-verify ## 提交前一站式校验（fmt + vet + test + lint + oapi-verify）
+verify: ## 提交前一站式校验（fmt + vet + test + lint + oapi-verify + docs-verify）
+	@$(MAKE) --no-print-directory _verify-step STEP=fmt
+	@$(MAKE) --no-print-directory _verify-step STEP=vet
+	@$(MAKE) --no-print-directory _verify-step STEP=test
+	@$(MAKE) --no-print-directory _verify-step STEP=lint
+	@$(MAKE) --no-print-directory _verify-step STEP=oapi-verify
+	@$(MAKE) --no-print-directory _verify-step STEP=docs-verify
+	@printf '\033[32m=== verify OK ===\033[0m\n'
+
+# Prints a banner before each step so AI assistants and humans can spot
+# the failing one instantly. Exits with the underlying step's status.
+.PHONY: _verify-step
+_verify-step:
+	@printf '\n\033[36m=== STEP: %s ===\033[0m\n' "$(STEP)"
+	@$(MAKE) --no-print-directory $(STEP) || { \
+		printf '\n\033[31m=== STEP FAILED: %s ===\033[0m\n' "$(STEP)"; \
+		exit 1; \
+	}
 
 # ---------- 清理 ----------
 

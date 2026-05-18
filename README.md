@@ -55,19 +55,30 @@ reuse the same `Dockerfile` for the other two processes.
 
 Steps to take after cloning this repo as the starting point of a new service:
 
-1. Pick a new module path and rename it everywhere:
+1. Run the one-shot rename script to re-brand everything in one go:
 
    ```sh
-   go mod edit -module github.com/your-org/your-service
-   # Update import paths from go-skeleton -> github.com/your-org/your-service
-   find . -type f -name '*.go' -not -path './internal/oapi/*' \
-     -exec sed -i '' 's|go-skeleton|github.com/your-org/your-service|g' {} +
-   make oapi   # regenerate oapi.gen.go with the new import path
+   ./scripts/rename.sh github.com/your-org/your-service your-service
+   #                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^^
+   #                    NEW_MODULE                      NEW_SHORTNAME
+   ```
+
+   This rewrites Go imports, `go.mod`, Makefile vars, `.env.example`,
+   `.golangci.yml`, OpenAPI title, systemd unit filenames + contents,
+   `docker-compose` container names, JWT issuer defaults, and test fixtures.
+   It runs `make fmt + vet + test + lint + docs-verify` to confirm the
+   rewrite builds and lints, then prints a small list of remaining manual
+   touch-ups (Documentation= URLs in systemd units, comments referencing
+   the skeleton's history).
+
+   After reviewing the diff and committing, delete the script:
+
+   ```sh
+   git rm scripts/rename.sh && git commit -m 'chore: drop rename script (one-shot)'
    ```
 
 2. Set production-safe values in `.env`:
    - `JWT_SECRET` (mandatory; the default is a placeholder)
-   - `JWT_ISSUER` (rename from `go-skeleton`)
    - `POSTGRES`, `REDIS_ADDR` if not using `make dev-up`
 
 3. Delete or rename the `Example` module once your real module is wired up:

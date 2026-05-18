@@ -14,6 +14,13 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- `scripts/rename.sh` one-shot rename helper. Pass
+  `NEW_MODULE NEW_SHORTNAME`; it rewrites Go imports, `go.mod`, Makefile
+  vars, `.env.example`, `.golangci.yml`, OpenAPI title, systemd unit file
+  names + contents, `docker-compose` container names, JWT issuer defaults,
+  and test fixtures, then runs `fmt + vet + test + lint + docs-verify`
+  to confirm the rewrite is clean. README / README_zh / runbook updated
+  to point at it instead of the previous hand-rolled `sed` command.
 - **Binary deployment path** alongside the Docker path. `make build-linux`
   cross-compiles static `linux/amd64` + `linux/arm64` binaries (CGO off,
   `-tags netgo`, `-trimpath`); `make release` packages them with the

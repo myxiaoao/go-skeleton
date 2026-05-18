@@ -2,6 +2,14 @@
 
 执行清单，给 AI 编码助手和人类用。只列**机器可执行的命令**，不重复规则解释（规则去看 `AGENTS.md` / `CLAUDE.md`）。
 
+## 0. 第一次复制 skeleton
+
+```sh
+# 一键改 module 名 + service shortname 后再做后续步骤
+./scripts/rename.sh github.com/your-org/your-service your-service
+# 跑完后 git rm scripts/rename.sh && git commit
+```
+
 ## 一次性环境准备
 
 ```sh

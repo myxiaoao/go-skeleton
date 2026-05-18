@@ -52,19 +52,29 @@ make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
 
 把这个仓库当作新服务的起点时，请按下面的顺序改：
 
-1. 换 module 路径并替换所有引用：
+1. 跑一次性 rename 脚本，把所有 `go-skeleton` 字样换掉：
 
    ```sh
-   go mod edit -module github.com/your-org/your-service
-   # 把 import 从 go-skeleton 改成 github.com/your-org/your-service
-   find . -type f -name '*.go' -not -path './internal/oapi/*' \
-     -exec sed -i '' 's|go-skeleton|github.com/your-org/your-service|g' {} +
-   make oapi   # 用新 import path 重新生成 oapi.gen.go
+   ./scripts/rename.sh github.com/your-org/your-service your-service
+   #                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^^
+   #                    NEW_MODULE                      NEW_SHORTNAME
+   ```
+
+   脚本会改：Go import、`go.mod`、Makefile 变量、`.env.example`、
+   `.golangci.yml`、OpenAPI title、systemd unit 文件名+内容、
+   `docker-compose` 容器名、JWT issuer 默认值、测试 fixture；
+   结束前会跑 `make fmt + vet + test + lint + docs-verify` 确认没问题，
+   再列出需要手改的少量残留（systemd 里的 Documentation= 上游 URL、
+   注释里的 skeleton 历史说明）。
+
+   审 diff、commit 之后把脚本删掉：
+
+   ```sh
+   git rm scripts/rename.sh && git commit -m 'chore: drop rename script (one-shot)'
    ```
 
 2. 在 `.env` 里替换生产安全的值：
    - `JWT_SECRET`（必改，默认值是占位符）
-   - `JWT_ISSUER`（从 `go-skeleton` 改成自己的）
    - 不用 `make dev-up` 时改 `POSTGRES`、`REDIS_ADDR`
 
 3. 真实模块跑通后，删掉或改名 `Example` 模块：

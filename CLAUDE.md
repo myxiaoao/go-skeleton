@@ -111,9 +111,13 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## 环境变量
 
-- 三个进程各自有 `cmd/{api,worker,migrate}/.env`，根目录 `.env` 是共享 fallback。
-- 加载优先级：真实环境变量 > 进程专属 `.env` > 根 `.env`。
-- 新增配置项必须更新 `.env.example`。所有 `.env*`（除 `.env.example`）都在 `.gitignore`，禁止把真实凭证落到仓库。
+- **入库模板只有根目录 `.env.example` 一份**，所有进程共用。新增配置项必须同步更新它。
+- 运行时加载顺序（在 `cmd/<proc>/main.go` 里）：
+  ```
+  真实环境变量 > cmd/<proc>/.env（如果存在） > 根目录 .env
+  ```
+  本地想给某个进程开"差异化覆盖"时，自行手写 `cmd/<proc>/.env`——它不入库，被 `.gitignore` 兜底。
+- 所有 `.env*`（除 `.env.example`）都在 `.gitignore`，禁止把真实凭证落到仓库。
 
 ## 审计日志
 
@@ -185,12 +189,10 @@ oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。
 声明任务完成前必须跑过：
 
 ```sh
-go test ./...
-go vet ./...
-golangci-lint run
+make verify   # fmt + vet + test + lint + oapi-verify
 ```
 
-详见根目录 `README.md` 的"Verify"小节。
+需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
 
 ## 测试约定
 

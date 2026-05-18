@@ -1,6 +1,36 @@
+# OS noise
 .DS_Store
-.env
-cmd/*/.env
+.AppleDouble
+._*
+Thumbs.db
+
+# IDE / editor
+.idea/
+.vscode/
+.fleet/
+.cursor/
+.history/
+*.swp
+*.swo
+*~
+
+# Go build / test artifacts
 bin/
 dist/
-coverage.out
+vendor/
+*.test
+*.out
+*.prof
+coverage.html
+profile.cov
+go.work
+go.work.sum
+
+# Env files: keep only .env.example
+.env
+.env.*
+!.env.example
+cmd/*/.env
+
+# Claude Code local settings (may contain MCP tokens / credentials)
+.claude/settings.local.json

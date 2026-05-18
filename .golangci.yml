@@ -1,0 +1,55 @@
+# golangci-lint v2 config.
+#
+# Why gci instead of goimports here: golangci-lint v2 ships a vendored
+# goimports whose grouping disagrees with the upstream `goimports` CLI on
+# this repo's short module name (`go-skeleton`, no dot — gets misread as
+# stdlib). gci lets us declare the import sections explicitly, which is
+# what we actually want.
+#
+# Why gofumpt: strict superset of gofmt, picks up the readability rules
+# gofmt doesn't enforce (multi-line struct alignment, redundant blank
+# lines, long-call argument formatting, etc.).
+#
+# Order matters: golangci-lint v2 runs gofumpt first, then gci. If we
+# ran gci before gofumpt, gofumpt would re-shuffle imports because it
+# falls back to gofmt's stdlib heuristic and treats `go-skeleton/...`
+# as stdlib. v2 sequences them correctly for us.
+#
+# Tool versions are pinned by the Makefile (GCI_VERSION /
+# GOFUMPT_VERSION); `make init` keeps locally installed binaries
+# aligned with these pins.
+
+version: "2"
+
+formatters:
+  enable:
+    - gofumpt
+    - gci
+  settings:
+    gofumpt:
+      # Must be set explicitly: golangci-lint's embedded gofumpt does not
+      # auto-detect `module` from go.mod the way the standalone gofumpt
+      # binary or gopls does. Without it gofumpt groups our packages as
+      # third-party and the linter flags random files as "not gofumpt-ed".
+      # https://github.com/golangci/golangci-lint/issues/4004
+      module-path: go-skeleton
+      extra-rules: true
+    gci:
+      # standard         → "errors", "net/http", ...
+      # default          → everything not matched (third-party deps)
+      # prefix(go-skel)  → this repo's packages
+      sections:
+        - standard
+        - default
+        - prefix(go-skeleton)
+      # Don't auto-rewrite import blanks/dot imports (e.g. _ "embed").
+      custom-order: true
+  exclusions:
+    # Generated code shouldn't be reformatted — `make oapi` owns it.
+    paths:
+      - internal/oapi
+
+linters:
+  exclusions:
+    paths:
+      - internal/oapi

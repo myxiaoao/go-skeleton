@@ -18,6 +18,11 @@ LDFLAGS  ?= -s -w
 # 工具链版本固定。升级时改这里 + 跑 make init 重新装，让 CI / 队友复现一致。
 GOLANGCI_LINT_VERSION ?= v2.12.2
 OAPI_CODEGEN_VERSION  ?= v2.7.0
+# 格式化工具：gofumpt 收紧 gofmt 风格细节（多余空行、struct 对齐等），
+# gci 用显式 sections 控制 import 分组（standard / default / prefix），
+# 避免短 module name（go-skeleton 不含 dot）被误判成 stdlib 的老坑。
+GCI_VERSION           ?= v0.14.0
+GOFUMPT_VERSION       ?= v0.10.0
 
 .PHONY: help
 help: ## 列出所有可用 target
@@ -30,6 +35,8 @@ help: ## 列出所有可用 target
 init: ## 安装/对齐辅助工具到 pin 版本（已是 pin 版本则跳过）
 	@$(MAKE) --no-print-directory _ensure-golangci-lint
 	@$(MAKE) --no-print-directory _ensure-oapi-codegen
+	@$(MAKE) --no-print-directory _ensure-gci
+	@$(MAKE) --no-print-directory _ensure-gofumpt
 	@echo "init done."
 
 # Compares the installed tool version against the pinned version and
@@ -62,6 +69,36 @@ _ensure-oapi-codegen:
 		echo "Installing oapi-codegen $$want..."; \
 	fi; \
 	$(GO) install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$$want
+
+# gci --version 输出形如 "gci version 0.14.0"，提取第三个字段并补回 v 前缀做比较。
+.PHONY: _ensure-gci
+_ensure-gci:
+	@want="$(GCI_VERSION)"; want_short="$${want#v}"; \
+	if command -v gci >/dev/null 2>&1; then \
+		got=$$(gci --version 2>/dev/null | awk '{print $$3; exit}'); \
+		if [ "$$got" = "$$want_short" ]; then \
+			echo "gci v$$got: ok"; exit 0; \
+		fi; \
+		echo "gci v$$got != $$want_short, reinstalling..."; \
+	else \
+		echo "Installing gci $$want..."; \
+	fi; \
+	$(GO) install github.com/daixiang0/gci@$$want
+
+# gofumpt -version 输出形如 "v0.10.0 (go1.x)"，取第一个字段。
+.PHONY: _ensure-gofumpt
+_ensure-gofumpt:
+	@want="$(GOFUMPT_VERSION)"; \
+	if command -v gofumpt >/dev/null 2>&1; then \
+		got=$$(gofumpt -version 2>/dev/null | awk '{print $$1; exit}'); \
+		if [ "$$got" = "$$want" ]; then \
+			echo "gofumpt $$got: ok"; exit 0; \
+		fi; \
+		echo "gofumpt $$got != $$want, reinstalling..."; \
+	else \
+		echo "Installing gofumpt $$want..."; \
+	fi; \
+	$(GO) install mvdan.cc/gofumpt@$$want
 
 # ---------- 本地开发依赖（docker compose） ----------
 
@@ -194,8 +231,11 @@ docker-run: ## 本地跑 API 镜像（依赖 make dev-up；host.docker.internal 
 # ---------- 检查 ----------
 
 .PHONY: fmt
-fmt: ## gofmt -s -w 全部代码
-	$(GO) fmt ./...
+fmt: ## 格式化代码（gofumpt + gci，统一走 golangci-lint fmt，配置见 .golangci.yml）
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "golangci-lint not found, run: make init"; exit 1; \
+	}
+	golangci-lint fmt
 
 .PHONY: vet
 vet: ## go vet

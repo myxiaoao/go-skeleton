@@ -100,6 +100,11 @@ func Load() (*Config, error) {
 	if len(errs) > 0 {
 		return cfg, fmt.Errorf("config: invalid environment variables: %w", errors.Join(errs...))
 	}
+	// 一致性约束（RequestTimeout > 0、连接池正数等）放在解析全部成功之后做，
+	// 避免对部分填充的 cfg 报令人困惑的"二段错误"。
+	if err := validate(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
 

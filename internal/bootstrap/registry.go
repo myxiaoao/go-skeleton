@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/hibiken/asynq"
 
@@ -22,7 +23,16 @@ type Registry struct {
 	Auth  *auth.JWTManager
 	Queue *taskqueue.Queue
 
+	// Draining 是 graceful shutdown 的进程级信号：收到 SIGTERM 后置 true，
+	// /health 探活立即返 503，让 LB/K8s 在窗口内摘流。零值 false 即正常。
+	Draining *atomic.Bool
+
 	queueClient *asynq.Client
+}
+
+// newRegistry 构造 Registry 时统一初始化 Draining，避免散在各 InitXxx 里漏初始化。
+func newRegistry() *Registry {
+	return &Registry{Draining: &atomic.Bool{}}
 }
 
 // Close releases resources owned by the registry.

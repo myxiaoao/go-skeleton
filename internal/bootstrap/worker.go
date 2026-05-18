@@ -55,11 +55,11 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 	}
 
 	queueClient := newAsynqClient(cfg)
-	return &Registry{
-		Cfg:         cfg,
-		DB:          dbMgr,
-		Cache:       cacheClient,
-		Queue:       taskqueue.NewQueue(queueClient),
-		queueClient: queueClient,
-	}, nil
+	reg := newRegistry()
+	reg.Cfg = cfg
+	reg.DB = dbMgr
+	reg.Cache = cacheClient
+	reg.Queue = taskqueue.NewQueue(queueClient)
+	reg.queueClient = queueClient
+	return reg, nil
 }

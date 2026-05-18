@@ -83,6 +83,17 @@ func main() {
 	case <-ctx.Done():
 	}
 
+	// graceful drain：翻 Registry.Draining 让 /health 立刻返 503，让 LB 在
+	// 窗口期内摘流；之后再 Shutdown HTTP server。窗口由 GracefulDrain 控制，
+	// 0 表示跳过 drain，直接 Shutdown（开发环境）。
+	if registry.Draining != nil {
+		registry.Draining.Store(true)
+		if drain := cfg.Server.GracefulDrain; drain > 0 {
+			applog.L().Info("draining: health 503 grace window", zap.Duration("window", drain))
+			time.Sleep(drain)
+		}
+	}
+
 	if _, err := shutdownWebServer(server, errCh, gracefulShutdownTimeout, serverExitWaitTimeout); err != nil {
 		applog.L().Error("web server shutdown failed", zap.Error(err))
 	}

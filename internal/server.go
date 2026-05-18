@@ -125,7 +125,7 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	exampleService := service.NewExampleService(exampleRepository, reg.Queue)
 
 	authH := handler.NewAuthHandler(reg.Auth, reg.Cfg.Auth.DevTokenEndpointEnabled)
-	healthH := handler.NewHealthHandler(reg.DB, reg.Cache)
+	healthH := handler.NewHealthHandler(reg.DB, reg.Cache, reg.Draining)
 	exampleH := handler.NewExampleHandler(exampleService)
 	openapiH := handler.NewOpenAPIHandler()
 

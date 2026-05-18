@@ -64,14 +64,14 @@ func InitAPI(cfg *config.Config) (*Registry, error) {
 	validator.InitValidator()
 	queueClient := newAsynqClient(cfg)
 
-	return &Registry{
-		Cfg:         cfg,
-		DB:          dbMgr,
-		Cache:       cacheClient,
-		Auth:        authManager,
-		Queue:       taskqueue.NewQueue(queueClient),
-		queueClient: queueClient,
-	}, nil
+	reg := newRegistry()
+	reg.Cfg = cfg
+	reg.DB = dbMgr
+	reg.Cache = cacheClient
+	reg.Auth = authManager
+	reg.Queue = taskqueue.NewQueue(queueClient)
+	reg.queueClient = queueClient
+	return reg, nil
 }
 
 // probeDependencies 在 bootstrap 末尾做依赖探活；DB 必探，Cache 仅在配置了 Addr 时探。

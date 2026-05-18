@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,13 +34,14 @@ func buildResponse() struct {
 
 // HealthHandler checks infrastructure dependencies.
 type HealthHandler struct {
-	db    *database.DBManager
-	cache *cache.Client
+	db       *database.DBManager
+	cache    *cache.Client
+	draining *atomic.Bool
 }
 
-// NewHealthHandler creates a HealthHandler.
-func NewHealthHandler(db *database.DBManager, cache *cache.Client) *HealthHandler {
-	return &HealthHandler{db: db, cache: cache}
+// NewHealthHandler creates a HealthHandler. draining 可为 nil（不参与 graceful drain 的进程）。
+func NewHealthHandler(db *database.DBManager, cache *cache.Client, draining *atomic.Bool) *HealthHandler {
+	return &HealthHandler{db: db, cache: cache, draining: draining}
 }
 
 // Live is the liveness probe — succeeds as long as the process can serve a
@@ -57,6 +59,13 @@ func (h *HealthHandler) Live(c *gin.Context) {
 // without restarting it. The response shape is pinned to oapi.HealthResponse
 // so it stays aligned with api/openapi.yaml.
 func (h *HealthHandler) Health(c *gin.Context) {
+	// graceful drain：SIGTERM 后 main 先翻 draining=true，让 LB 在 GracefulDrain
+	// 窗口内摘流，再退出 HTTP server，避免请求被半途切断。
+	if h.draining != nil && h.draining.Load() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "draining"})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 

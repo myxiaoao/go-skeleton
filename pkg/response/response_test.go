@@ -81,8 +81,8 @@ func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
 }
 
 func TestMessageForCoversEveryDeclaredReason(t *testing.T) {
-	// Every reason exported from pkg/errcode/common.go should have a default
-	// English message in MessageFor (avoid the "operation failed" tar pit).
+	// pkg/errcode/common.go 里导出的每个 Reason 都必须在 MessageFor 有对应
+	// 默认文案——否则新增错误码忘了同步会掉进 "operation failed" 兜底坑。
 	declared := []string{
 		errcode.InvalidParams.Reason(),
 		errcode.Unauthorized.Reason(),

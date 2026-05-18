@@ -9,7 +9,7 @@ func TestTraceIDFromMissing(t *testing.T) {
 	if got := TraceIDFrom(context.Background()); got != "" {
 		t.Errorf("TraceIDFrom on empty ctx = %q, want empty", got)
 	}
-	//nolint:staticcheck // intentional: verify nil-ctx safe path
+	//nolint:staticcheck // 故意传 nil ctx，验证 nil-safe 分支
 	if got := TraceIDFrom(nil); got != "" {
 		t.Errorf("TraceIDFrom(nil) = %q, want empty", got)
 	}

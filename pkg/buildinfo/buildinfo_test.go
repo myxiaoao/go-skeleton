@@ -24,9 +24,8 @@ func TestMapHasExpectedKeys(t *testing.T) {
 }
 
 func TestDefaultsAreNonEmpty(t *testing.T) {
-	// Guards consumers from needing empty-string checks when running via
-	// `go run` without ldflags. If you intentionally set one to empty,
-	// update the package doc and remove this test.
+	// 防止下游消费方在 `go run`（没经 ldflags 注入）时遇到空串还得做额外
+	// 兜底。如果某个字段确实要允许空，先改 package doc 再删本测试。
 	if Version == "" || Commit == "" || BuildTime == "" {
 		t.Errorf("defaults must be non-empty, got Version=%q Commit=%q BuildTime=%q",
 			Version, Commit, BuildTime)

@@ -12,6 +12,12 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Breaking
+- Response envelope field renamed from `msg` to `message` to drop the
+  abbreviation. Update any client that reads `response.msg`. The Go field
+  name (`Response.Message`) is unchanged; only the JSON tag and the
+  OpenAPI schema move.
+
 ### Added
 - `/livez` liveness probe; `/health` is now documented as the readiness probe.
 - `cmd/worker` performs a two-phase shutdown (`Stop` then `Shutdown`) so

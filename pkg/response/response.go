@@ -14,7 +14,7 @@ import (
 // Response is the standard API response structure.
 type Response struct {
 	Code     int            `json:"code"`
-	Message  string         `json:"msg"`
+	Message  string         `json:"message"`
 	Reason   string         `json:"reason,omitempty"`
 	Data     any            `json:"data,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`

@@ -225,7 +225,7 @@ components:
     # ---------- Business envelope ----------
     Envelope:
       type: object
-      required: [code, msg]
+      required: [code, message]
       description: |
         Standard envelope. Success is `code: 0`. Failure carries a non-zero
         `code`, a stable `reason` slug, and optionally `metadata.trace_id`.
@@ -233,7 +233,7 @@ components:
         code:
           type: integer
           description: 0 on success; non-zero error code otherwise.
-        msg:
+        message:
           type: string
         reason:
           type: string

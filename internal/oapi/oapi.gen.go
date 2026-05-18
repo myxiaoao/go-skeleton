@@ -87,10 +87,10 @@ type CreateTokenEnvelope struct {
 	// Code 0 on success; non-zero error code otherwise.
 	Code     int             `json:"code"`
 	Data     *CreateTokenRes `json:"data,omitempty"`
+	Message  string          `json:"message"`
 	Metadata *struct {
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
-	Msg string `json:"msg"`
 
 	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
 	Reason *string `json:"reason,omitempty"`
@@ -115,10 +115,10 @@ type EnqueueExampleTaskEnvelope struct {
 	// Code 0 on success; non-zero error code otherwise.
 	Code     int                    `json:"code"`
 	Data     *EnqueueExampleTaskRes `json:"data,omitempty"`
+	Message  string                 `json:"message"`
 	Metadata *struct {
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
-	Msg string `json:"msg"`
 
 	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
 	Reason *string `json:"reason,omitempty"`
@@ -138,11 +138,11 @@ type EnqueueExampleTaskRes struct {
 // `code`, a stable `reason` slug, and optionally `metadata.trace_id`.
 type Envelope struct {
 	// Code 0 on success; non-zero error code otherwise.
-	Code     int `json:"code"`
+	Code     int    `json:"code"`
+	Message  string `json:"message"`
 	Metadata *struct {
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
-	Msg string `json:"msg"`
 
 	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
 	Reason *string `json:"reason,omitempty"`
@@ -161,10 +161,10 @@ type ExampleEnvelope struct {
 	// Code 0 on success; non-zero error code otherwise.
 	Code     int      `json:"code"`
 	Data     *Example `json:"data,omitempty"`
+	Message  string   `json:"message"`
 	Metadata *struct {
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
-	Msg string `json:"msg"`
 
 	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
 	Reason *string `json:"reason,omitempty"`
@@ -187,10 +187,10 @@ type ListExamplesEnvelope struct {
 	// Code 0 on success; non-zero error code otherwise.
 	Code     int              `json:"code"`
 	Data     *ListExamplesRes `json:"data,omitempty"`
+	Message  string           `json:"message"`
 	Metadata *struct {
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
-	Msg string `json:"msg"`
 
 	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
 	Reason *string `json:"reason,omitempty"`
@@ -213,10 +213,10 @@ type MeEnvelope struct {
 	// Code 0 on success; non-zero error code otherwise.
 	Code     int    `json:"code"`
 	Data     *MeRes `json:"data,omitempty"`
+	Message  string `json:"message"`
 	Metadata *struct {
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
-	Msg string `json:"msg"`
 
 	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
 	Reason *string `json:"reason,omitempty"`
@@ -455,45 +455,45 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"lzagvL85Xu13vl08LP4TAAD//w==",
+	"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",
+	"wRGFtAHl+83xar+L7eJh8Z8AAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

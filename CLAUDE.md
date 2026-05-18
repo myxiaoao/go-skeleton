@@ -68,11 +68,11 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 业务 API 固定返回 HTTP 200，靠 JSON body 的 `code` 区分。响应结构定义在 `pkg/response/response.go`：
 
 ```json
-{ "code": 0, "msg": "success", "data": { ... } }
-{ "code": 1001, "msg": "...", "reason": "INVALID_PARAMS", "metadata": { "trace_id": "..." } }
+{ "code": 0, "message": "success", "data": { ... } }
+{ "code": 1001, "message": "...", "reason": "INVALID_PARAMS", "metadata": { "trace_id": "..." } }
 ```
 
-注意字段是 `msg`，不是 `message`（项目早期定下来的，前端契约不要动）。
+字段名都用完整单词（`message` / `reason` / `metadata`），不引入简写。需要新增响应字段时同理。
 
 例外：`/health` 用真实 HTTP 状态码（200 / 503），给 LB 和 K8s 探针用。
 
@@ -138,7 +138,6 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 - ❌ service 收 `*gin.Context` → ✅ 收 `context.Context`，需要的字段由 handler 传 primitive。
 - ❌ repository 之外的层 import `gorm.io/gorm` → ✅ 通过 service 包里定义的接口隔离。
 - ❌ 用 `fmt.Errorf("xxx")` 直接返 → ✅ 返 `errcode.XxxError`；底层错误 `applog.FromContext(ctx).Error(..., zap.Error(err))` 记进日志。
-- ❌ 响应字段写 `message` → ✅ 是 `msg`。
 - ❌ 在 service 里 `context.Background()` 起新 ctx 调 DB → ✅ 传原 ctx；只有 fire-and-forget 后台任务才允许，且必须独立带超时。
 - ❌ 给 Worker 复制一份和 API 不同的业务逻辑 → ✅ 共享 service。
 
@@ -382,7 +381,7 @@ go-example/
     ├── database/               GORM 初始化 + 健康检查
     ├── errcode/                业务错误码集中地（type.go + common.go）
     ├── log/                    zap logger + trace_id ctx helper
-    ├── response/response.go    统一响应 (code/msg/reason/data/metadata)
+    ├── response/response.go    统一响应 (code/message/reason/data/metadata)
     └── validator/              binding 错误翻译
 ```
 

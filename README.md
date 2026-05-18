@@ -185,7 +185,7 @@ Tick these off before pointing real traffic at this service:
   does not need to run codegen.
 - `CORS_ALLOW_ORIGINS` is a comma-separated allow list. Empty means no CORS allow headers.
 - Replace `JWT_SECRET` before using the auth example outside local development.
-- API business errors use the JSON envelope `code`, `msg`, and `reason`; most API errors are returned with HTTP 200 by convention.
+- API business errors use the JSON envelope `code`, `message`, and `reason`; most API errors are returned with HTTP 200 by convention.
 - `/health` uses real HTTP status codes and returns 503 when required dependencies are unavailable.
 
 ## Verify

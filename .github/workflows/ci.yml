@@ -42,9 +42,20 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      # systemd-analyze verify 在 ubuntu-latest runner 上可用：systemd 是 PID 1，
-      # /etc/systemd 完备。若未来环境变了（如 nix-based），可降级为仅 grep 关键字段
-      # 或加 `sudo apt-get install -y systemd`。
+      # systemd-analyze verify 会把 ExecStart / EnvironmentFile / User 当真存
+      # 在的资源校验。CI runner 上没装这些，先创建占位让真正想校验的"unit
+      # 语法 / key / value / Type=notify 一致性"信号能跑过。
+      - name: Prepare placeholder targets for systemd-analyze
+        run: |
+          set -e
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin go-skeleton 2>/dev/null || true
+          sudo mkdir -p /opt/go-skeleton/bin /etc/go-skeleton
+          sudo touch /opt/go-skeleton/bin/api /opt/go-skeleton/bin/worker /opt/go-skeleton/bin/migrate
+          sudo chmod +x /opt/go-skeleton/bin/api /opt/go-skeleton/bin/worker /opt/go-skeleton/bin/migrate
+          sudo touch /etc/go-skeleton/.env
+          sudo chown -R go-skeleton:go-skeleton /opt/go-skeleton
+          sudo chmod 0640 /etc/go-skeleton/.env
+          sudo chown root:go-skeleton /etc/go-skeleton/.env
       - name: Verify systemd unit syntax
         run: |
           set -e

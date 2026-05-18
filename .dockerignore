@@ -1,0 +1,37 @@
+# Build context hygiene: keep image builds fast and avoid leaking host state.
+
+.git
+.github
+.gitignore
+.editorconfig
+.idea
+.vscode
+.cursor
+.fleet
+.history
+.claude
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+cmd/*/.env
+
+# Build / test artifacts (also in .gitignore)
+bin
+dist
+vendor
+*.test
+*.out
+*.prof
+coverage.html
+profile.cov
+
+# Compose state shouldn't ship into the image
+docker-compose.yml
+
+# Docs aren't needed at runtime
+README.md
+README_zh.md
+LICENSE
+CLAUDE.md

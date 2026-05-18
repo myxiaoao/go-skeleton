@@ -168,6 +168,25 @@ build-worker: | $(BIN_DIR) ## 构建 Worker
 build-migrate: | $(BIN_DIR) ## 构建 Migrate
 	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(MIGRATE_BIN) ./cmd/migrate
 
+# ---------- 容器镜像（默认构建 cmd/api） ----------
+
+DOCKER_IMAGE ?= go-skeleton
+DOCKER_TAG   ?= dev
+CMD_TARGET   ?= api
+
+.PHONY: docker-build
+docker-build: ## 构建 multi-stage 镜像（CMD_TARGET=api|worker|migrate）
+	docker build \
+		--build-arg CMD_TARGET=$(CMD_TARGET) \
+		-t $(DOCKER_IMAGE)-$(CMD_TARGET):$(DOCKER_TAG) .
+
+.PHONY: docker-run
+docker-run: ## 本地跑 API 镜像（依赖 make dev-up；host.docker.internal 通到宿主）
+	docker run --rm -p 3000:3000 \
+		-e POSTGRES=postgres://user:password@host.docker.internal:5432/app?sslmode=disable \
+		-e REDIS_ADDR=host.docker.internal:6379 \
+		$(DOCKER_IMAGE)-api:$(DOCKER_TAG)
+
 # ---------- 检查 ----------
 
 .PHONY: fmt

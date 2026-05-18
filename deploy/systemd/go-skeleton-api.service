@@ -5,7 +5,10 @@ After=network-online.target postgresql.service redis.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+# notify: 进程通过 sd_notify(READY=1) 告诉 systemd 启动完成；配合
+# WatchdogSec= 让 systemd 在 watchdog 心跳缺失时按 Restart= 重启。
+Type=notify
+NotifyAccess=main
 User=go-skeleton
 Group=go-skeleton
 
@@ -21,6 +24,12 @@ RestartSec=5s
 # Send SIGTERM; the process handles graceful shutdown internally.
 KillSignal=SIGTERM
 TimeoutStopSec=30s
+# Watchdog：30s 内没收到 WATCHDOG=1 就视为挂死并重启。
+# 代码侧 WATCHDOG_INTERVAL=10s（≈ WatchdogSec/3），避免边界抖动。
+WatchdogSec=30s
+# 文件描述符上限：HTTP server + DB/Redis 连接池 + asynq client 累加；
+# 默认 1024 在中等并发下吃紧。设 65535 给富余。
+LimitNOFILE=65535
 
 # Security hardening — sensible defaults for a stateless HTTP service.
 NoNewPrivileges=true

@@ -19,6 +19,7 @@ import (
 	"go-skeleton/internal/router"
 	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
+	"go-skeleton/pkg/sdnotify"
 )
 
 const (
@@ -81,6 +82,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// sd_notify watchdog 心跳：systemd Type=notify + WatchdogSec 时，定期发
+	// WATCHDOG=1 让 systemd 知道进程还活着；ctx 取消时自然退出。非 Linux 是 noop。
+	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
 
 	errCh := make(chan error, 1)
 	go func() {

@@ -3,6 +3,7 @@ module go-skeleton
 go 1.26.3
 
 require (
+	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/getkin/kin-openapi v0.138.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/validator/v10 v10.30.2

@@ -18,11 +18,11 @@ type asyncQueueInspector interface {
 // asynqMetrics 持有 worker 队列相关 gauge。labels=queue 让 Prometheus 能按
 // 队列名分组查（critical / default / low 等）。
 type asynqMetrics struct {
-	size      *prometheus.GaugeVec
-	pending   *prometheus.GaugeVec
-	active    *prometheus.GaugeVec
-	retry     *prometheus.GaugeVec
-	archived  *prometheus.GaugeVec
+	size       *prometheus.GaugeVec
+	pending    *prometheus.GaugeVec
+	active     *prometheus.GaugeVec
+	retry      *prometheus.GaugeVec
+	archived   *prometheus.GaugeVec
 	latencySec *prometheus.GaugeVec
 }
 

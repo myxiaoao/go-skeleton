@@ -33,16 +33,14 @@ func (q *Queue) Available() bool {
 	return q != nil && q.client != nil
 }
 
-// Enqueue publishes a task to the queue.
+// Enqueue publishes a task to the queue. Callers must pass a non-nil ctx;
+// passing nil is a bug and will panic via EnqueueContext.
 func (q *Queue) Enqueue(ctx context.Context, t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	if q == nil || q.client == nil {
 		return nil, ErrQueueUnavailable
 	}
 	if t == nil {
 		return nil, ErrNilTask
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	return q.client.EnqueueContext(ctx, t, opts...)
 }

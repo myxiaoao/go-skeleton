@@ -47,7 +47,8 @@ go run ./cmd/migrate
 
 ## Example API
 
-Issue a sample JWT:
+Issue a sample JWT (dev-only endpoint, off by default — set
+`AUTH_DEV_TOKEN_ENABLED=true` in your local `.env` to enable):
 
 ```sh
 curl -X POST http://127.0.0.1:3000/api/v1/auth/token \

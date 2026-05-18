@@ -69,6 +69,8 @@ func Load() (*Config, error) {
 
 	cfg.Auth.JWTTTL, err = durationEnv("JWT_TTL", 24*time.Hour)
 	collect(err)
+	cfg.Auth.DevTokenEndpointEnabled, err = boolEnv("AUTH_DEV_TOKEN_ENABLED", false)
+	collect(err)
 
 	cfg.Log.AuditEnabled, err = boolEnv("AUDIT_LOG_ENABLED", true)
 	collect(err)

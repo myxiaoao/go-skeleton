@@ -165,9 +165,10 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 		authRequired = middleware.BearerAuth(reg.Auth)
 	}
 	if err := router.RegisterRoutes(api, router.Dependencies{
-		Auth:         handlers.Auth,
-		AuthRequired: authRequired,
-		Example:      handlers.Example,
+		Auth:                    handlers.Auth,
+		AuthRequired:            authRequired,
+		Example:                 handlers.Example,
+		DevTokenEndpointEnabled: reg.Cfg.Auth.DevTokenEndpointEnabled,
 	}); err != nil {
 		return nil, err
 	}

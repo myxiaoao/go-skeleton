@@ -44,6 +44,11 @@ type AuthConfig struct {
 	JWTSecret string
 	JWTIssuer string
 	JWTTTL    time.Duration
+
+	// DevTokenEndpointEnabled exposes POST /api/v1/auth/token, which signs a
+	// token for any caller-provided subject. It MUST stay false in production:
+	// it is a development convenience for the skeleton's example flow.
+	DevTokenEndpointEnabled bool
 }
 
 // CorsConfig holds allowed browser origins.

@@ -11,6 +11,10 @@ type Dependencies struct {
 	Auth         *handler.AuthHandler
 	AuthRequired gin.HandlerFunc
 	Example      *handler.ExampleHandler
+
+	// DevTokenEndpointEnabled exposes POST /auth/token (signs a token for any
+	// caller-provided subject). Default false; only flip to true in dev.
+	DevTokenEndpointEnabled bool
 }
 
 // RegisterRoutes registers API routes under the given router group.
@@ -26,7 +30,9 @@ func registerAuthRoutes(r *gin.RouterGroup, deps Dependencies) {
 	}
 
 	authRoutes := r.Group("/auth")
-	authRoutes.POST("/token", deps.Auth.CreateToken)
+	if deps.DevTokenEndpointEnabled {
+		authRoutes.POST("/token", deps.Auth.CreateToken)
+	}
 	if deps.AuthRequired != nil {
 		authRoutes.GET("/me", deps.AuthRequired, deps.Auth.Me)
 	}

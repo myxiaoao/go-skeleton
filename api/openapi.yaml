@@ -71,9 +71,11 @@ paths:
     post:
       tags: [auth]
       operationId: createAuthToken
-      summary: Issue a sample JWT
+      summary: Issue a sample JWT (dev-only)
       description: |
-        Available only when `JWT_SECRET` is configured. The token is signed
+        Available only when `JWT_SECRET` is configured AND `AUTH_DEV_TOKEN_ENABLED=true`.
+        Off by default. The endpoint signs a token for any caller-supplied
+        subject, so it MUST NOT be exposed in production. The token is signed
         with HS256 and includes the configured issuer + TTL.
       requestBody:
         required: true

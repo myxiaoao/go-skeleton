@@ -45,7 +45,8 @@ go run ./cmd/migrate
 
 ## 示例 API
 
-签发示例 JWT：
+签发示例 JWT（dev-only 端点，默认关闭——在本地 `.env` 设
+`AUTH_DEV_TOKEN_ENABLED=true` 才暴露）：
 
 ```sh
 curl -X POST http://127.0.0.1:3000/api/v1/auth/token \

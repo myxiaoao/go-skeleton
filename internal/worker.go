@@ -82,12 +82,17 @@ func validateWorkerRegistry(reg *bootstrap.Registry) error {
 }
 
 func buildWorkerDeps(reg *bootstrap.Registry) *worker.Deps {
-	deps := &worker.Deps{
+	// 示意：业务任务需要 DB 时，在这里组装 service：
+	//
+	//   var exampleSvc worker.ExampleProcessor
+	//   if reg.DB != nil {
+	//       repo := repository.NewExampleRepository(reg.DB.DB())
+	//       exampleSvc = service.NewExampleService(repo, reg.Queue)
+	//   }
+	//
+	// 然后把 exampleSvc 挂到 Deps.Example。worker 包本身不 import gorm。
+	return &worker.Deps{
 		Cache: reg.Cache,
 		Queue: reg.Queue,
 	}
-	if reg.DB != nil {
-		deps.DB = reg.DB.DB()
-	}
-	return deps
 }

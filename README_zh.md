@@ -18,9 +18,13 @@
 
 ## 运行
 
+新仓库最快上手路径：
+
 ```sh
 cp .env.example .env
-go run ./cmd/api
+make dev-up          # 用 docker compose 起 Postgres + Redis
+go run ./cmd/migrate # 建 example 表
+go run ./cmd/api     # 监听 :3000
 ```
 
 配置好 Redis 后运行 worker：
@@ -29,11 +33,58 @@ go run ./cmd/api
 go run ./cmd/worker
 ```
 
-配置好 Postgres 后运行 example 迁移：
+停掉本地依赖（数据卷保留）：
 
 ```sh
-go run ./cmd/migrate
+make dev-down
 ```
+
+或者用仓库自带的 multi-stage `Dockerfile` 构建镜像：
+
+```sh
+make docker-build        # 构建 go-skeleton-api:dev（默认 CMD_TARGET=api）
+make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
+```
+
+`CMD_TARGET=worker make docker-build`、`CMD_TARGET=migrate make docker-build` 复用同一个 `Dockerfile` 打另外两个进程的镜像。
+
+## 复制 skeleton 后要改什么
+
+把这个仓库当作新服务的起点时，请按下面的顺序改：
+
+1. 换 module 路径并替换所有引用：
+
+   ```sh
+   go mod edit -module github.com/your-org/your-service
+   # 把 import 从 go-skeleton 改成 github.com/your-org/your-service
+   find . -type f -name '*.go' -not -path './internal/oapi/*' \
+     -exec sed -i '' 's|go-skeleton|github.com/your-org/your-service|g' {} +
+   make oapi   # 用新 import path 重新生成 oapi.gen.go
+   ```
+
+2. 在 `.env` 里替换生产安全的值：
+   - `JWT_SECRET`（必改，默认值是占位符）
+   - `JWT_ISSUER`（从 `go-skeleton` 改成自己的）
+   - 不用 `make dev-up` 时改 `POSTGRES`、`REDIS_ADDR`
+
+3. 真实模块跑通后，删掉或改名 `Example` 模块：
+   - `internal/handler/example.go`、`internal/service/example.go`、
+     `internal/repository/example.go`、`internal/model/example.go`
+   - `internal/task/example.go`、`internal/worker/handler.go`（Asynq 注册处）
+   - `api/openapi.yaml` 里的 `/api/v1/examples*` 路径
+   - 引用 `Example` 的测试
+
+4. 按 `Example` 模板新增模块：
+   - 在 `api/openapi.yaml` 里加 request/response，跑 `make oapi`
+   - 按 handler → service → repository → model 的分层补文件
+   - 在 `internal/server.go::newHTTPHandlers` 装配、`internal/router/router.go` 注册路由
+   - Worker 端：在 `internal/task/` 定义任务类型，在 `internal/worker/handler.go` 注册 handler
+
+5. 保证 CI 全绿：
+
+   ```sh
+   make verify   # fmt + vet + test + lint + oapi-verify
+   ```
 
 ## 运行时依赖
 

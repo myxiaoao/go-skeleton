@@ -20,9 +20,13 @@ the `Example` flow used to demonstrate the app layers.
 
 ## Run
 
+The fastest path on a fresh clone:
+
 ```sh
 cp .env.example .env
-go run ./cmd/api
+make dev-up          # boots Postgres + Redis via docker compose
+go run ./cmd/migrate # creates the example table
+go run ./cmd/api     # serves on :3000
 ```
 
 Run the worker when Redis is configured:
@@ -31,11 +35,60 @@ Run the worker when Redis is configured:
 go run ./cmd/worker
 ```
 
-Run the example migration when Postgres is configured:
+Stop the local dependencies (data volumes are preserved):
 
 ```sh
-go run ./cmd/migrate
+make dev-down
 ```
+
+Or build a container image from the included multi-stage `Dockerfile`:
+
+```sh
+make docker-build        # build go-skeleton-api:dev (default CMD_TARGET=api)
+make docker-run          # run it locally, talking to make dev-up dependencies
+```
+
+`CMD_TARGET=worker make docker-build` and `CMD_TARGET=migrate make docker-build`
+reuse the same `Dockerfile` for the other two processes.
+
+## Using this Skeleton
+
+Steps to take after cloning this repo as the starting point of a new service:
+
+1. Pick a new module path and rename it everywhere:
+
+   ```sh
+   go mod edit -module github.com/your-org/your-service
+   # Update import paths from go-skeleton -> github.com/your-org/your-service
+   find . -type f -name '*.go' -not -path './internal/oapi/*' \
+     -exec sed -i '' 's|go-skeleton|github.com/your-org/your-service|g' {} +
+   make oapi   # regenerate oapi.gen.go with the new import path
+   ```
+
+2. Set production-safe values in `.env`:
+   - `JWT_SECRET` (mandatory; the default is a placeholder)
+   - `JWT_ISSUER` (rename from `go-skeleton`)
+   - `POSTGRES`, `REDIS_ADDR` if not using `make dev-up`
+
+3. Delete or rename the `Example` module once your real module is wired up:
+   - `internal/handler/example.go`, `internal/service/example.go`,
+     `internal/repository/example.go`, `internal/model/example.go`
+   - `internal/task/example.go`, `internal/worker/handler.go` (Asynq registration)
+   - The `/api/v1/examples*` paths in `api/openapi.yaml`
+   - Tests that reference `Example`
+
+4. Add a new module by copying the `Example` shape:
+   - Define the request/response in `api/openapi.yaml`, run `make oapi`.
+   - Add `handler` → `service` → `repository` → `model` files matching the pattern.
+   - Wire it in `internal/server.go::newHTTPHandlers` and `internal/router/router.go`.
+   - Worker side: register the task in `internal/task/` and the handler in
+     `internal/worker/handler.go`.
+
+5. Make sure CI is happy:
+
+   ```sh
+   make verify   # fmt + vet + test + lint + oapi-verify
+   ```
 
 ## Runtime Dependencies
 

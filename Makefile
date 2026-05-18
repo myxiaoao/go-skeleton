@@ -223,6 +223,28 @@ tidy: ## go mod tidy + verify
 	$(GO) mod tidy
 	$(GO) mod verify
 
+.PHONY: tidy-verify
+tidy-verify: ## 校验 go.mod / go.sum 与 go mod tidy 结果一致（防漂移）
+	@tmpdir=$$(mktemp -d); \
+	cp go.mod go.sum "$$tmpdir"/; \
+	$(GO) mod tidy >/dev/null 2>&1 || { \
+		echo "tidy-verify: 'go mod tidy' failed"; \
+		cp "$$tmpdir/go.mod" "$$tmpdir/go.sum" .; \
+		rm -rf "$$tmpdir"; \
+		exit 1; \
+	}; \
+	if ! diff -q "$$tmpdir/go.mod" go.mod >/dev/null || \
+	   ! diff -q "$$tmpdir/go.sum" go.sum >/dev/null; then \
+		echo "tidy-verify: go.mod / go.sum out of sync with 'go mod tidy'"; \
+		echo "--- go.mod diff ---"; diff "$$tmpdir/go.mod" go.mod || true; \
+		echo "--- go.sum diff ---"; diff "$$tmpdir/go.sum" go.sum || true; \
+		cp "$$tmpdir/go.mod" "$$tmpdir/go.sum" .; \
+		rm -rf "$$tmpdir"; \
+		exit 1; \
+	fi; \
+	rm -rf "$$tmpdir"; \
+	echo "tidy-verify: go.mod / go.sum are tidy."
+
 # ---------- 本地运行（三进程入口） ----------
 
 .PHONY: run-api
@@ -459,11 +481,12 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify）
+verify: ## 提交前一站式校验（fmt + vet + test + lint + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify）
 	@$(MAKE) --no-print-directory _verify-step STEP=fmt
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
 	@$(MAKE) --no-print-directory _verify-step STEP=lint
+	@$(MAKE) --no-print-directory _verify-step STEP=tidy-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=oapi-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-deploy-check

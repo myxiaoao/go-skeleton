@@ -2,7 +2,8 @@ package config
 
 import "time"
 
-// Config holds all application configuration loaded once at startup.
+// Config 是进程启动期一次性加载的所有配置。运行时不应再修改它的字段；要
+// "动态配置"的需求请走外部配置中心，不要在代码里读这里又写这里。
 type Config struct {
 	Server    ServerConfig
 	Postgres  PostgresConfig
@@ -14,7 +15,7 @@ type Config struct {
 	Worker    WorkerConfig
 }
 
-// ServerConfig holds HTTP server settings.
+// ServerConfig 是 HTTP server 相关的配置（监听端口、超时、安全开关等）。
 type ServerConfig struct {
 	Port           string
 	GinMode        string
@@ -41,7 +42,8 @@ type ServerConfig struct {
 	BodyMaxBytes int64
 }
 
-// PostgresConfig holds database connection settings.
+// PostgresConfig 是数据库连接配置。DSN 为空时所有 DB 相关功能均不启用，
+// API 进程会 fail-fast 退出（DB 必需）；Worker 进程允许 DSN 为空（DB 可选）。
 type PostgresConfig struct {
 	DSN             string
 	LogLevel        string
@@ -51,7 +53,9 @@ type PostgresConfig struct {
 	ConnMaxIdleTime time.Duration
 }
 
-// RedisConfig holds Redis settings for cache and queue clients.
+// RedisConfig 是 Redis 配置，cache 和 queue 客户端共用 Addr + Password，
+// 用不同的 DB 编号（CacheDB / QueueDB）做逻辑隔离，避免 cache 数据被
+// asynq 误删。
 type RedisConfig struct {
 	Addr     string
 	Password string
@@ -59,19 +63,20 @@ type RedisConfig struct {
 	QueueDB  int
 }
 
-// AuthConfig holds JWT authentication settings.
+// AuthConfig 是 JWT 鉴权配置。JWTSecret 为空时 BearerAuth 返
+// UNAUTHORIZED，受保护接口全部走不通——这是有意为之的运维兜底。
 type AuthConfig struct {
 	JWTSecret string
 	JWTIssuer string
 	JWTTTL    time.Duration
 
-	// DevTokenEndpointEnabled exposes POST /api/v1/auth/token, which signs a
-	// token for any caller-provided subject. It MUST stay false in production:
-	// it is a development convenience for the skeleton's example flow.
+	// DevTokenEndpointEnabled 决定是否暴露 POST /api/v1/auth/token——这个端
+	// 点给任意 caller 传入的 subject 颁 token，**生产必须保持 false**，仅给
+	// 骨架示例流程在开发环境用。
 	DevTokenEndpointEnabled bool
 }
 
-// CorsConfig holds allowed browser origins.
+// CorsConfig 是浏览器跨域配置，只允许 AllowOrigins 白名单里的 Origin。
 type CorsConfig struct {
 	AllowOrigins []string
 	// AllowCredentials 控制是否回写 Access-Control-Allow-Credentials: true。
@@ -80,7 +85,8 @@ type CorsConfig struct {
 	AllowCredentials bool
 }
 
-// LogConfig holds structured logging settings.
+// LogConfig 是结构化日志配置。AuditEnabled 决定是否打 HTTP 审计日志；
+// AuditExcludes 用于排除高频探活路径（/health、/livez），避免刷屏。
 type LogConfig struct {
 	Level           string
 	Format          string
@@ -89,19 +95,20 @@ type LogConfig struct {
 	AuditExcludes   []string
 }
 
-// RateLimitConfig holds per-IP rate limit settings.
+// RateLimitConfig 是 per-IP 限流配置。RequestsPerMinute=0 表示不启用限流；
+// >0 时 burst 默认等于 RequestsPerMinute，允许短时突发。
 type RateLimitConfig struct {
 	RequestsPerMinute int
 }
 
-// WorkerConfig holds Asynq worker tuning knobs.
+// WorkerConfig 是 Asynq worker 调参。
 type WorkerConfig struct {
-	// Concurrency is the number of asynq workers processing tasks in parallel.
+	// Concurrency 是 asynq worker 并行消费任务的数量。
 	Concurrency int
-	// Queues maps queue name to weight, parsed from "name:weight,name:weight".
+	// Queues 把队列名映射到权重，按 "name:weight,name:weight" 解析。
 	Queues map[string]int
-	// RetryBaseDelay is the seed for exponential backoff (delay = base * 2^n).
+	// RetryBaseDelay 是指数 backoff 的种子（delay = base * 2^n）。
 	RetryBaseDelay time.Duration
-	// RetryMaxDelay caps backoff so it does not grow without bound.
+	// RetryMaxDelay 给指数 backoff 封顶，防止无界增长（见 computeRetryDelay）。
 	RetryMaxDelay time.Duration
 }

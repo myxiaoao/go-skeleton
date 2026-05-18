@@ -9,9 +9,13 @@ import (
 	"time"
 )
 
-// Load reads all configuration from environment variables. Call after LoadEnv.
-// Returns the first batch of parse errors via errors.Join; the partially
-// populated *Config is still returned so callers can log it before exiting.
+// Load 从环境变量读全部配置，必须在 LoadEnv 之后调。
+//
+// 设计点：解析错误用 errors.Join 聚合一批返出去——运维能一次性看到所有错
+// 配项，不用一个个改了再 fail-fast 一次。返回值即使有错也带着部分填好的
+// *Config，让上层在退出前能 log 已经成功的字段做对比。
+//
+// 解析全部成功后再跑一遍 validate（约束检查）；失败也包装成 error 返回。
 func Load() (*Config, error) {
 	var errs []error
 	collect := func(err error) {
@@ -115,7 +119,8 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// queueWeightsEnv parses "critical:6,default:3,low:1" into a queue weight map.
+// queueWeightsEnv 解析 "critical:6,default:3,low:1" 这种字符串成队列权重 map。
+// 解析失败返 fallback + error，让上层走 errors.Join 兜底。
 func queueWeightsEnv(key string, fallback map[string]int) (map[string]int, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {

@@ -70,6 +70,10 @@ done
 
 cat <<EOF
 
+⚠️  当前仓库**编译不过**——5 个新文件引用了不存在的 oapi 生成类型
+   （CreateExampleReq 等已被 sed 改成 Create${NAME}Req），但
+   internal/oapi/oapi.gen.go 还是旧版。完成下面 3 步才能恢复绿色：
+
 下一步手动补：
 
   1. api/openapi.yaml

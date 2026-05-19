@@ -242,11 +242,14 @@ via `<binary> -version`, the `/livez` `version` field, and the `/health`
 - API business errors use the JSON envelope `code`, `message`, and `reason`; most API errors are returned with HTTP 200 by convention.
 - `/livez` is the liveness probe (always 200); `/health` is the readiness probe and returns 503 when required dependencies are unavailable.
 
-## Runbook
+## Development workflow
 
-Common machine-executable commands (add endpoint, add task, run specific
-tests, troubleshoot) are collected in [`docs/runbook.md`](./docs/runbook.md).
-Optimised as a cheat sheet for both AI assistants and new contributors.
+- Narrative guide (timeline from clone to PR, with layering rules / tests /
+  commit style / CI): [`docs/development.md`](./docs/development.md)
+- Command cheat sheet (per-scenario: add endpoint / task / troubleshoot):
+  [`docs/runbook.md`](./docs/runbook.md)
+- Binary deployment (systemd / rolling upgrade / rollback):
+  [`docs/deploy.md`](./docs/deploy.md)
 
 ## Verify
 

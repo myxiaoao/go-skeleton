@@ -2,6 +2,9 @@
 
 执行清单，给 AI 编码助手和人类用。只列**机器可执行的命令**，不重复规则解释（规则去看 `AGENTS.md` / `CLAUDE.md`）。
 
+> 想看"从克隆到 PR"的叙事性工作流（按时间线串起来）见 [`docs/development.md`](./development.md)；
+> 本文档按场景查命令。
+
 ## 0. 第一次复制 skeleton
 
 ```sh

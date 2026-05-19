@@ -91,24 +91,52 @@ fi
 echo
 echo "==> applying upgrades (one at a time, with rollback on verify failure)"
 
+# 用 stash 锁定升级前的 go.mod / go.sum 基线。每个模块升级成功后保留累积
+# 改动；失败时通过 stash 还原到初始基线，而不是 git checkout —— 后者只
+# 回滚最后一步，前面 N-1 次成功的升级也会被一起抹掉。
+#
+# stash 的 ref 通过 commit hash 锁定（不依赖 stash@{0} 索引），防止脚本运
+# 行期间用户在另一个终端 stash 引入位移。
+baseline_stash=""
+if ! git diff --quiet -- go.mod go.sum 2>/dev/null; then
+  echo "error: go.mod / go.sum already dirty; commit or stash before running APPLY=1"
+  exit 1
+fi
+baseline_stash="$(git stash create -- go.mod go.sum 2>/dev/null || true)"
+
+restore_baseline() {
+  if [ -n "$baseline_stash" ]; then
+    git checkout "$baseline_stash" -- go.mod go.sum
+  else
+    # 没基线（脚本刚开始时 working tree 没改动），直接 checkout HEAD 还原。
+    git checkout -- go.mod go.sum
+  fi
+}
+
+failed_at=""
 for it in "${PATCH_MINOR[@]}"; do
   echo "----- $it -----"
   if ! go get "$it"; then
-    echo "go get $it failed; rolling back"
-    git checkout -- go.mod go.sum
-    exit 1
+    failed_at="$it (go get)"
+    break
   fi
   if ! go mod tidy; then
-    echo "go mod tidy after $it failed; rolling back"
-    git checkout -- go.mod go.sum
-    exit 1
+    failed_at="$it (go mod tidy)"
+    break
   fi
   if ! make verify; then
-    echo "make verify after $it failed; rolling back"
-    git checkout -- go.mod go.sum
-    exit 1
+    failed_at="$it (make verify)"
+    break
   fi
 done
+
+if [ -n "$failed_at" ]; then
+  echo
+  echo "✗ upgrade failed at: $failed_at"
+  echo "  rolling back ALL upgrades to baseline (this run produced no changes)..."
+  restore_baseline
+  exit 1
+fi
 
 echo
 echo "✓ all patch/minor upgrades applied + verify green."

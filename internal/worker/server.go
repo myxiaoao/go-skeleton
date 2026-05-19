@@ -12,16 +12,6 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// NewRedisOpt 构造 asynq 用的 Redis 连接配置。集中在这里，让 API（入队）
-// 和 Worker（消费）共用一份连接参数定义。
-func NewRedisOpt(addr, password string, db int) asynq.RedisClientOpt {
-	return asynq.RedisClientOpt{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-	}
-}
-
 // ServerConfig 把 Asynq 调参集中成一个入参对象。默认值由 config.Load 在对
 // 应 env 缺失时补；这里只做透传，不再 fallback。
 type ServerConfig struct {

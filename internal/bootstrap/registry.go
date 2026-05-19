@@ -119,7 +119,7 @@ func newAsynqClient(cfg *config.Config) *asynq.Client {
 	if cfg == nil || strings.TrimSpace(cfg.Redis.Addr) == "" {
 		return nil
 	}
-	return asynq.NewClient(asynqRedisOpt(cfg))
+	return asynq.NewClient(AsynqRedisOpt(cfg))
 }
 
 // newAsynqInspector 构造一个 read-only Inspector，给 metrics 周期采集队列
@@ -129,10 +129,13 @@ func newAsynqInspector(cfg *config.Config) *asynq.Inspector {
 	if cfg == nil || strings.TrimSpace(cfg.Redis.Addr) == "" {
 		return nil
 	}
-	return asynq.NewInspector(asynqRedisOpt(cfg))
+	return asynq.NewInspector(AsynqRedisOpt(cfg))
 }
 
-func asynqRedisOpt(cfg *config.Config) asynq.RedisClientOpt {
+// AsynqRedisOpt 把 cfg.Redis 翻译成 asynq.RedisClientOpt（用 QueueDB）。
+// API 进程的 client / inspector 与 Worker 进程的 server 都从这里取连接参数，
+// 让"队列连哪个 Redis"在 API 端和 Worker 端绑死一份定义。
+func AsynqRedisOpt(cfg *config.Config) asynq.RedisClientOpt {
 	return asynq.RedisClientOpt{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,

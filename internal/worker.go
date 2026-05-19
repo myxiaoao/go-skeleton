@@ -30,7 +30,7 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 
 	return &Worker{
 		server: worker.NewServer(
-			worker.NewRedisOpt(reg.Cfg.Redis.Addr, reg.Cfg.Redis.Password, reg.Cfg.Redis.QueueDB),
+			bootstrap.AsynqRedisOpt(reg.Cfg),
 			worker.ServerConfig{
 				Concurrency:    reg.Cfg.Worker.Concurrency,
 				Queues:         reg.Cfg.Worker.Queues,

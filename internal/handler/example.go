@@ -2,7 +2,7 @@ package handler
 
 // Example handler 教学模板：handler 层只做三件事
 //
-//  1. 参数绑定 / 校验（c.ShouldBind...，失败走 response.BuildValidationErrorResponse）。
+//  1. 参数绑定 / 校验（c.ShouldBind...，失败走 response.WriteValidationError）。
 //  2. 调 service（传 c.Request.Context()，不要传 *gin.Context）。
 //  3. 用 response.WriteSuccess / response.WriteError 转协议。
 //
@@ -32,7 +32,7 @@ func NewExampleHandler(svc *service.ExampleService) *ExampleHandler {
 func (h *ExampleHandler) Create(c *gin.Context) {
 	var req service.CreateExampleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(200, response.BuildValidationErrorResponse(c, err))
+		response.WriteValidationError(c, err)
 		return
 	}
 
@@ -50,7 +50,7 @@ func (h *ExampleHandler) Create(c *gin.Context) {
 func (h *ExampleHandler) List(c *gin.Context) {
 	var req service.ListExamplesReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(200, response.BuildValidationErrorResponse(c, err))
+		response.WriteValidationError(c, err)
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *ExampleHandler) List(c *gin.Context) {
 func (h *ExampleHandler) EnqueueTask(c *gin.Context) {
 	var req service.EnqueueExampleTaskReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(200, response.BuildValidationErrorResponse(c, err))
+		response.WriteValidationError(c, err)
 		return
 	}
 

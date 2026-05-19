@@ -76,9 +76,8 @@ func WriteError(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, ErrorResponse(c, errcode.InternalError))
 }
 
-// WriteValidationError 写参数校验错误响应。handler 内常用 inline
-// c.JSON(200, BuildValidationErrorResponse(...))，这个 helper 是给少数
-// 不走 handler 兜底分支的场景。
+// WriteValidationError 写参数校验错误响应。handler 里 ShouldBind 失败统一
+// 走它，与 WriteSuccess / WriteError 三个 helper 调用形态对齐。
 func WriteValidationError(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, BuildValidationErrorResponse(c, err))
 }

@@ -56,7 +56,7 @@ func (h *AuthHandler) CreateToken(c *gin.Context) {
 
 	var req CreateTokenReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(200, response.BuildValidationErrorResponse(c, err))
+		response.WriteValidationError(c, err)
 		return
 	}
 

@@ -22,18 +22,38 @@
 
 ```sh
 cp .env.example .env
-make dev-up          # 用 docker compose 起 Postgres + Redis
+```
+
+依赖（Postgres + Redis）二选一启动——都跟 `.env.example` 端口 / 凭证对齐：
+
+### A. 用 docker compose（推荐，零配置）
+
+```sh
+make dev-up          # 起 Postgres + Redis 容器
 go run ./cmd/migrate # 建 example 表
 go run ./cmd/api     # 监听 :3000
 ```
 
-配置好 Redis 后运行 worker：
+### B. 用本机已装的 Postgres + Redis（不用 docker）
+
+```sh
+# macOS:
+brew install postgresql@17 redis && brew services start postgresql@17 && brew services start redis
+# Linux (apt): sudo apt install -y postgresql-17 redis-server && sudo systemctl enable --now postgresql redis-server
+
+# 建与 .env.example 对齐的 user / db（见 docs/runbook.md 详细命令）
+make dev-deps-check  # 探活 Postgres :5432 + Redis :6379，不通会给出装包提示
+go run ./cmd/migrate
+go run ./cmd/api
+```
+
+配置好 Redis 后另开一个终端跑 worker：
 
 ```sh
 go run ./cmd/worker
 ```
 
-停掉本地依赖（数据卷保留）：
+停掉本地 docker 依赖（数据卷保留）：
 
 ```sh
 make dev-down

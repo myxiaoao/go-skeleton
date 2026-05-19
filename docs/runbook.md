@@ -15,9 +15,61 @@
 ```sh
 make init          # 装 / 校验 golangci-lint、oapi-codegen（pin 版本）
 cp .env.example .env
-make dev-up        # docker compose 起 Postgres + Redis
+```
+
+依赖（Postgres + Redis）二选一启动：
+
+### A. 用 docker compose（推荐——零配置，端口 / 凭证已对齐 `.env.example`）
+
+```sh
+make dev-up        # 起 Postgres + Redis 容器（后台）
 go run ./cmd/migrate
 ```
+
+### B. 用本机已装的 Postgres + Redis（不用 docker）
+
+如果本机已经有 Postgres / Redis 服务，或者更习惯用宿主进程跑依赖，跳过 `make dev-up`，自己装好后跑 `make dev-deps-check` 验证可连。
+
+**macOS（Homebrew）**：
+
+```sh
+brew install postgresql@17 redis
+brew services start postgresql@17
+brew services start redis
+
+# 建与 .env.example 对齐的 user / db：
+createuser -s user 2>/dev/null || true
+psql -d postgres -c "ALTER USER \"user\" WITH PASSWORD 'password';"
+createdb -O user app
+```
+
+**Linux（apt / dnf）**：
+
+```sh
+# Debian / Ubuntu
+sudo apt install -y postgresql-17 redis-server
+sudo systemctl enable --now postgresql redis-server
+
+# RHEL / CentOS / Fedora 类
+sudo dnf install -y postgresql-server postgresql redis
+sudo postgresql-setup --initdb
+sudo systemctl enable --now postgresql redis
+
+# 建与 .env.example 对齐的 user / db：
+sudo -u postgres psql <<'SQL'
+CREATE USER "user" WITH PASSWORD 'password';
+CREATE DATABASE app OWNER "user";
+SQL
+```
+
+验证可连 + 初始化表：
+
+```sh
+make dev-deps-check    # 探活 Postgres :5432 + Redis :6379
+go run ./cmd/migrate
+```
+
+> 生产凭证**不要**用 `user/password`；这套默认值只是开发期为了零配置。改 `.env` 里的 `POSTGRES` DSN + `REDIS_PASSWORD` 后再 `make dev-deps-check`。
 
 ## 提交前必跑
 

@@ -24,18 +24,38 @@ The fastest path on a fresh clone:
 
 ```sh
 cp .env.example .env
-make dev-up          # boots Postgres + Redis via docker compose
+```
+
+Pick one path for dependencies (Postgres + Redis) — both align with `.env.example` ports / credentials:
+
+### A. Use docker compose (recommended, zero config)
+
+```sh
+make dev-up          # boot Postgres + Redis containers
 go run ./cmd/migrate # creates the example table
 go run ./cmd/api     # serves on :3000
 ```
 
-Run the worker when Redis is configured:
+### B. Use host-installed Postgres + Redis (no docker)
+
+```sh
+# macOS:
+brew install postgresql@17 redis && brew services start postgresql@17 && brew services start redis
+# Linux (apt): sudo apt install -y postgresql-17 redis-server && sudo systemctl enable --now postgresql redis-server
+
+# Create user / db matching .env.example (full commands in docs/runbook.md)
+make dev-deps-check  # probe Postgres :5432 + Redis :6379, prints install hints if unreachable
+go run ./cmd/migrate
+go run ./cmd/api
+```
+
+Run the worker in another terminal when Redis is configured:
 
 ```sh
 go run ./cmd/worker
 ```
 
-Stop the local dependencies (data volumes are preserved):
+Stop the local docker dependencies (data volumes are preserved):
 
 ```sh
 make dev-down

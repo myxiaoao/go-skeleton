@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
@@ -29,7 +30,7 @@ func Recovery() gin.HandlerFunc {
 					zap.Any("error", err),
 					zap.ByteString("stacktrace", debug.Stack()),
 				)
-				c.AbortWithStatusJSON(200, response.ErrorResponse(c, errcode.InternalError))
+				c.AbortWithStatusJSON(http.StatusOK, response.ErrorResponse(c, errcode.InternalError))
 			}
 		}()
 		c.Next()

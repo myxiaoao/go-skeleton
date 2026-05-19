@@ -36,6 +36,60 @@ jobs:
       - name: Race detector
         run: make test-race
 
+  # integration tests 跟单元测试解耦：需要真实 Postgres + Redis，跑得慢；
+  # 但留着不跑会让 //go:build integration 的代码慢慢腐烂。这里用 GitHub
+  # Actions services 起 PG / Redis 跑一遍，与 docs/runbook.md 的本地路径
+  # 对齐（POSTGRES / REDIS_ADDR 与 .env.example 同凭证）。
+  integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        # health 检查保证 services 就绪后 step 才跑；不带的话 connect refused 偶发。
+        options: >-
+          --health-cmd "pg_isready -U user -d app"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      POSTGRES: postgres://user:password@127.0.0.1:5432/app?sslmode=disable
+      REDIS_ADDR: 127.0.0.1:6379
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run migrations
+        run: go run ./cmd/migrate
+
+      - name: Run integration tests
+        run: make test-integration
+
   validate-systemd-units:
     name: validate-systemd-units
     runs-on: ubuntu-latest

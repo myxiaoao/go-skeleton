@@ -29,6 +29,9 @@ type IPRateLimiter struct {
 	rate     rate.Limit
 	burst    int
 	stop     chan struct{}
+	// done 在 cleanupLoop 退出时 close，给测试 / 优雅关闭一个确定性的"协程已
+	// 退出"信号，避免靠 runtime.NumGoroutine() 这种全局计数做脆弱断言。
+	done chan struct{}
 }
 
 // NewIPRateLimiterPerMinute 按"每分钟 requestsPerMinute 次"构造限流器。
@@ -44,6 +47,7 @@ func NewIPRateLimiterPerMinute(requestsPerMinute int) *IPRateLimiter {
 		rate:     rate.Every(time.Minute / time.Duration(requestsPerMinute)),
 		burst:    requestsPerMinute,
 		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 	go limiter.cleanupLoop()
 	return limiter
@@ -61,8 +65,9 @@ func (l *IPRateLimiter) Middleware() gin.HandlerFunc {
 	}
 }
 
-// Stop 关停后台清理 goroutine。幂等：用 select 探测 stop channel 是否已
-// close，避免重复 close 触发 panic。Server.Shutdown 会调它释放资源。
+// Stop 关停后台清理 goroutine 并等它真正退出。幂等：用 select 探测 stop
+// channel 是否已 close，避免重复 close 触发 panic；之后等 done（cleanupLoop
+// 退出时 close）确保返回后协程已结束，不留泄漏。Server.Shutdown 会调它释放资源。
 func (l *IPRateLimiter) Stop() {
 	if l == nil {
 		return
@@ -72,6 +77,7 @@ func (l *IPRateLimiter) Stop() {
 	default:
 		close(l.stop)
 	}
+	<-l.done
 }
 
 // allow 给 IP 申请一个令牌；首次访问时懒构造 visitor。所有路径都更新
@@ -93,6 +99,8 @@ func (l *IPRateLimiter) allow(ip string) bool {
 // 分钟而不是 1 分钟，是给瞬时跌零又回来的客户端留点缓冲，避免频繁重建
 // rate.Limiter 把刚消的令牌补满。
 func (l *IPRateLimiter) cleanupLoop() {
+	defer close(l.done)
+
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"testing"
 	"time"
 
@@ -118,34 +117,28 @@ func TestIPRateLimiterCleanupRemovesStale(t *testing.T) {
 }
 
 // Stop 后 cleanupLoop 协程必须退出，否则长跑会泄漏 goroutine。
-// 用 runtime.NumGoroutine 等到 goroutine 启动后再 Stop，最后断言归位。
+//
+// 不靠 runtime.NumGoroutine() 这种进程级全局计数断言（并发跑其他测试时会
+// 抖动、误判）。改成确定性同步：Stop() 内部会等 cleanupLoop 退出时 close 的
+// done channel，所以"Stop() 能在限定时间内返回"就等价于"协程已退出"。
 func TestIPRateLimiterStopReleasesGoroutine(t *testing.T) {
-	before := runtime.NumGoroutine()
 	limiter := NewIPRateLimiterPerMinute(5)
 
-	// 等 cleanupLoop 真正被调度起来；最多等 1s（CI 慢机有 margin）。
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if runtime.NumGoroutine() > before {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if runtime.NumGoroutine() <= before {
-		t.Fatalf("cleanupLoop goroutine did not start: before=%d now=%d",
-			before, runtime.NumGoroutine())
+	returned := make(chan struct{})
+	go func() {
+		limiter.Stop()
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+		// Stop() 返回即证明 cleanupLoop 已退出（done 已 close）。
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return: cleanupLoop goroutine likely leaked")
 	}
 
+	// 幂等性：再调一次 Stop 不应 panic 也不应阻塞。
 	limiter.Stop()
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if runtime.NumGoroutine() <= before {
-			return // 退出成功
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Errorf("cleanupLoop did not exit after Stop: now=%d before=%d",
-		runtime.NumGoroutine(), before)
 }
 
 // 重复 Stop 不应该 panic（双 close chan 经典坑）。

@@ -65,8 +65,23 @@ func (h *HealthHandler) Live(c *gin.Context) {
 func (h *HealthHandler) Health(c *gin.Context) {
 	// graceful drain：SIGTERM 后 main 先翻 draining=true，让 LB 在 GracefulDrain
 	// 窗口内摘流，再退出 HTTP server，避免请求被半途切断。
+	//
+	// 响应仍绑死 oapi.HealthResponse（status/checks/build），不另起一套
+	// {"status":"draining"} 的 ad-hoc 结构——否则客户端按 spec 解析这条 503 会
+	// 踩坑。draining 映射成 status=unhealthy（503 → LB 摘流，语义一致）；不再
+	// ping 依赖（进程正在退出，没必要也来不及），checks 直接标 unavailable。
 	if h.draining != nil && h.draining.Load() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "draining"})
+		resp := oapi.HealthResponse{
+			Status: oapi.HealthResponseStatusUnhealthy,
+			Checks: map[string]oapi.HealthResponseChecks{
+				"postgres": oapi.HealthResponseChecksUnavailable,
+				"redis":    oapi.HealthResponseChecksUnavailable,
+			},
+		}
+		resp.Build.BuildTime = buildinfo.BuildTime
+		resp.Build.Commit = buildinfo.Commit
+		resp.Build.Version = buildinfo.Version
+		c.JSON(http.StatusServiceUnavailable, resp)
 		return
 	}
 

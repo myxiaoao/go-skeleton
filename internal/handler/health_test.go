@@ -48,6 +48,9 @@ func TestHealthHandlerLiveReturns200WithoutDependencies(t *testing.T) {
 
 // /health 在 draining=true 时必须返 503，让 LB 在停服窗口内摘流。
 // 这样 SIGTERM 后窗口期内的请求会被 LB 转走，不再打到当前实例。
+//
+// 响应体必须符合 OpenAPI 的 HealthResponse（status=unhealthy + checks + build），
+// 不是 ad-hoc 的 {"status":"draining"}——客户端按 spec 解析这条 503 不能踩坑。
 func TestHealthHandlerReturns503WhenDraining(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -69,8 +72,15 @@ func TestHealthHandlerReturns503WhenDraining(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if body["status"] != "draining" {
-		t.Errorf("status = %v, want draining", body["status"])
+	if body["status"] != "unhealthy" {
+		t.Errorf("status = %v, want unhealthy", body["status"])
+	}
+	// 契约要求 checks / build 必填，draining 响应也不能缺。
+	if _, ok := body["checks"]; !ok {
+		t.Error("checks field missing from draining response")
+	}
+	if _, ok := body["build"]; !ok {
+		t.Error("build field missing from draining response")
 	}
 }
 

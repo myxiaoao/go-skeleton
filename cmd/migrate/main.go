@@ -101,6 +101,9 @@ func main() {
 		sqlDB,
 		migrations.FS,
 		goose.WithSessionLocker(locker),
+		// 本项目只认 migrations/*.sql 为真相源。关掉全局 Go migration registry，
+		// 杜绝某个包 init 注册的 Go migration 被意外合并进来。
+		goose.WithDisableGlobalRegistry(true),
 	)
 	if err != nil {
 		applog.L().Fatal("create goose provider", zap.Error(err))

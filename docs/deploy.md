@@ -192,6 +192,10 @@ sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd down
 sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd status
 ```
 
+> 本地开发走 `make migrate-down` 会先要求输入 `yes` 确认（防误删）；脚本里要免交互传
+> `make migrate-down confirm=1`。生产直接调二进制 `migrate -cmd down` 没有这层门槛，
+> 务必在执行前确认已按下文做了备份。
+
 > ⚠️ **schema 回滚有数据风险**：`down` 执行的是迁移文件里的 `-- +goose Down` 段。
 > 如果 Up 是"删列"、Down 是"重新加列"，回滚**不会恢复列里原来的数据**（已经随
 > Up 丢了）。所以：

@@ -135,10 +135,16 @@ func newAsynqInspector(cfg *config.Config) *asynq.Inspector {
 // AsynqRedisOpt 把 cfg.Redis 翻译成 asynq.RedisClientOpt（用 QueueDB）。
 // API 进程的 client / inspector 与 Worker 进程的 server 都从这里取连接参数，
 // 让"队列连哪个 Redis"在 API 端和 Worker 端绑死一份定义。
+//
+// PoolSize 透传 REDIS_POOL_SIZE：0 = asynq 默认（10 * NumCPU）。高队列负载下
+// API enqueue / worker consume 共享这个上限，运维不改代码也能调。asynq 的
+// RedisClientOpt 不暴露 MinIdleConns，所以 REDIS_MIN_IDLE_CONNS 只作用于 cache
+// 客户端（go-redis），队列连接池用不到它。
 func AsynqRedisOpt(cfg *config.Config) asynq.RedisClientOpt {
 	return asynq.RedisClientOpt{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.QueueDB,
+		PoolSize: cfg.Redis.PoolSize,
 	}
 }

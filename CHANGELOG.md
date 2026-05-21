@@ -35,8 +35,56 @@ Commit prefixes follow the convention in `CLAUDE.md`
   weekly scan of `FROM` lines in the `Dockerfile` so base-image CVEs get
   a PR instead of going unnoticed alongside the existing `gomod` /
   `github-actions` scans.
+- **`APP_ENV` production safety guard**: new env `APP_ENV`
+  (`development` | `production`, default `development`). When
+  `production`, `config/validate.go::validateProductionSecrets` rejects a
+  placeholder / empty / sub-32-byte `JWT_SECRET` and a `true`
+  `AUTH_DEV_TOKEN_ENABLED` (fail-fast at startup); `cmd/api/main.go` warns
+  on `RATE_LIMIT_PER_MINUTE=0`. Stops "copy `.env.example` to prod" from
+  shipping a public JWT secret. `APP_ENV` is distinct from `GIN_MODE`.
+- **Asynq Redis pool size is now tunable**:
+  `bootstrap.AsynqRedisOpt` passes `REDIS_POOL_SIZE` through to
+  `asynq.RedisClientOpt.PoolSize` (API client/inspector + worker server).
+  Previously only the cache (go-redis) client honored it; the queue
+  connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
+  stays cache-only (asynq does not expose it).
 
 ### Changed
+
+- **Docker build injects buildinfo**: `Dockerfile` adds `VERSION` /
+  `COMMIT` / `BUILD_TIME` build-args wired into the same
+  `-ldflags -X go-skeleton/pkg/buildinfo.*` as the Makefile; `make
+  docker-build` passes them from git. Container `/health` and `-version`
+  no longer fall back to `dev/none/unknown`, so prod triage / rollback can
+  confirm the running revision.
+- **`/health` draining response matches the OpenAPI contract**: while
+  draining (post-SIGTERM), the handler returned an ad-hoc
+  `{"status":"draining"}`. It now returns a spec-compliant
+  `oapi.HealthResponse` (`status: unhealthy` + `checks` + `build`) with
+  503, so clients parsing the documented schema do not break. Semantics
+  are unchanged (503 → LB removes the pod).
+- **systemd `READY=1` is no longer sent optimistically**:
+  `sdnotify.Watchdog` previously fired `READY=1` the moment it started —
+  before the HTTP port was bound. `Server.Run` / `Worker.Run` now take an
+  `onReady` callback; the API calls `sdnotify.Ready` only after
+  `net.Listen` succeeds (port bound, about to serve). The worker now calls
+  `asynq.Server.Start` (synchronous, returns startup error) instead of
+  `Run`, fires `onReady` only after `Start` returns nil, then drives
+  `Stop`/`Shutdown` off the caller's `ctx` — so a failed start (e.g. Redis
+  unreachable) returns an error and never sends READY, and Asynq's built-in
+  `waitForSignals` no longer competes with the main `signal.NotifyContext`.
+  A bind / start failure no longer fools systemd into thinking startup
+  succeeded.
+- **`make test-integration` no longer reruns the unit suite**: the target
+  was `go test -tags=integration ./...`, which compiled the integration
+  files but also re-ran every unit test, making the integration job a
+  superset and attributing unit-test flakiness to it. Now scoped with
+  `-run Integration`; integration test functions must contain
+  `Integration` in their name (documented in the Makefile).
+- **pre-commit hook stops suggesting `--no-verify`**: the sensitive-file
+  block previously told users to run `git commit --no-verify`, which
+  contradicts the repo rule against bypassing hooks. It now guides toward
+  unstaging the file or narrowing the deny rule / allowlist.
 
 - **CORS `Access-Control-Allow-Credentials` is now opt-in**: previously the
   middleware always wrote `Allow-Credentials: true` for whitelisted origins.
@@ -91,6 +139,13 @@ Commit prefixes follow the convention in `CLAUDE.md`
   long DB / external I/O between heartbeats). Adds `LimitNOFILE=65535` to
   match the API unit. `docs/deploy.md` section 9 splits into API / Worker /
   Migrate subsections.
+- **Flaky rate-limiter goroutine assertion**: `TestIPRateLimiterStop`
+  used process-wide `runtime.NumGoroutine()` deltas to assert the cleanup
+  goroutine started/stopped, which races with other concurrently-running
+  tests (observed failure: `before=3 now=3`). `IPRateLimiter` now closes a
+  `done` channel when `cleanupLoop` exits and `Stop` waits on it, so the
+  test asserts deterministically that `Stop` returns instead of polling a
+  global counter.
 
 ### Tests
 

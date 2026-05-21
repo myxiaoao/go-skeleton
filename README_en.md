@@ -12,7 +12,7 @@ the `Example` flow used to demonstrate the app layers.
 
 - `cmd/api`: HTTP API process.
 - `cmd/worker`: Asynq worker process.
-- `cmd/migrate`: minimal GORM migration entrypoint for the example table.
+- `cmd/migrate`: goose-based versioned SQL migration entrypoint (files in `migrations/`).
 - `config`: environment loading and typed configuration values.
 - `internal/bootstrap`: process-level resource initialization and lifecycle.
 - `internal`: application wiring, routes, middleware, and example layers.
@@ -32,7 +32,7 @@ Pick one path for dependencies (Postgres + Redis) — both align with `.env.exam
 
 ```sh
 make dev-up          # boot Postgres + Redis containers
-go run ./cmd/migrate # creates the example table
+go run ./cmd/migrate # migrate up (create tables); -cmd down rolls back / -cmd status shows state
 go run ./cmd/api     # serves on :3000
 ```
 
@@ -218,7 +218,7 @@ Tick these off before pointing real traffic at this service:
 - [ ] Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget.
 - [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do not point liveness at `/health` — a DB blip would restart healthy pods.
 - [ ] Size `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections` budget. The defaults (30 / 15 / 30m) are tuned for development, not production.
-- [ ] Run `go run ./cmd/migrate` (or your replacement migration tool) before the API process starts.
+- [ ] Run `go run ./cmd/migrate` (goose up, applies pending `migrations/`) before the API process starts.
 - [ ] Decide on the worker process: deploy it separately if any `*/tasks` endpoints are reachable, otherwise queued tasks accumulate without consumers.
 
 ## Deployment

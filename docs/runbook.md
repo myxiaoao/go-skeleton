@@ -136,10 +136,15 @@ git add internal/oapi/oapi.gen.go
 
 ```sh
 make dev-up
-go run ./cmd/migrate           # 一次性，建表
+go run ./cmd/migrate           # goose up，应用 migrations/ 待执行迁移（建表）
 make run-api &                 # 端口 3000
 make run-worker &              # 消费 Asynq
 ```
+
+> 迁移命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/
+> `make migrate-status`（看状态）/ `make migrate-create name=add_xxx`（新建空迁移）。
+> 改表结构走"写 `migrations/<序号>_<描述>.sql` + 跑 `make run-migrate`"，不要改 model
+> 等 AutoMigrate（已移除）。
 
 停服：
 

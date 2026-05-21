@@ -25,7 +25,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 | `internal/taskqueue/` | Asynq client 的薄封装 | service 通过 `ExampleQueue` 这种接口依赖它，不直接 import asynq |
 | `pkg/` | 跟业务无关的通用工具 | 严禁 import `internal/` 任何包 |
 
-数据库迁移当前用 `cmd/migrate` 跑 GORM `AutoMigrate`，**没有** `migrations/` SQL 文件目录；如果未来引入 SQL 迁移工具，放仓库根目录的 `migrations/`，不要塞 `internal/`。
+数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——`AutoMigrate` 已移除，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格，对齐 Laravel）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，**不要**像 Laravel 那样在时间戳里插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。
 
 ## 分层规则：handler → service → repository
 
@@ -346,10 +346,14 @@ go-example/
 │   ├── openapi.yaml            真相源：OpenAPI 3.1 spec
 │   └── oapi-codegen.yaml       codegen 配置
 │
+├── migrations/                 版本化 SQL 迁移（真相源，go:embed 进二进制）
+│   ├── embed.go                //go:embed *.sql → fs.FS
+│   └── <时间戳>_*.sql          goose 时间戳风格（-- +goose Up / Down）
+│
 ├── cmd/                        三个进程入口，main.go 只做启停
 │   ├── api/main.go             HTTP 服务
 │   ├── worker/main.go          Asynq 消费者
-│   └── migrate/main.go         GORM AutoMigrate
+│   └── migrate/main.go         goose 迁移（up/down/status）
 │
 ├── config/                     配置加载 + 类型定义
 │   ├── config.go

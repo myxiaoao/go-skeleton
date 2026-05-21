@@ -321,8 +321,24 @@ watch: ## 用 air 热重载跑 API（保存 .go 文件自动重启）
 	air -c .air.toml
 
 .PHONY: run-migrate
-run-migrate: ## 跑 GORM AutoMigrate（需要 POSTGRES 配置）
-	$(GO) run ./cmd/migrate
+run-migrate: ## 跑迁移 up：应用全部待执行的 migrations/*.sql（需要 POSTGRES 配置）
+	$(GO) run ./cmd/migrate -cmd up
+
+.PHONY: migrate-down
+migrate-down: ## 回滚最近一版迁移（需要 POSTGRES 配置）
+	$(GO) run ./cmd/migrate -cmd down
+
+.PHONY: migrate-status
+migrate-status: ## 打印各迁移的应用状态（需要 POSTGRES 配置）
+	$(GO) run ./cmd/migrate -cmd status
+
+.PHONY: migrate-create
+migrate-create: ## 新建空迁移文件（时间戳前缀）：make migrate-create name=add_email_to_examples
+	@if [ -z "$(name)" ]; then echo "用法: make migrate-create name=<描述>"; exit 1; fi
+	@ts=$$(date +%Y%m%d%H%M%S); \
+	f="migrations/$${ts}_$(name).sql"; \
+	printf -- '-- +goose Up\n\n-- +goose Down\n' > "$$f"; \
+	echo "created $$f"
 
 # ---------- 构建 ----------
 

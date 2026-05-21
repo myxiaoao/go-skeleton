@@ -69,6 +69,17 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Changed
 
+- **数据库迁移从 GORM AutoMigrate 切到 goose 版本化 SQL**: 真相源从 Go struct
+  改为仓库根 `migrations/*.sql`（goose 格式，经 `//go:embed` 打进二进制）。
+  `cmd/migrate` 改用 goose 库 API，支持 `-cmd up`（默认）/ `down`（回滚一版）/
+  `status`（看状态）；Makefile 配套 `run-migrate` / `migrate-down` /
+  `migrate-status` / `migrate-create name=xxx`。迁移文件用时间戳前缀命名
+  （goose 时间戳风格、对齐 Laravel，`<YYYYMMDDHHMMSS>_<描述>.sql`），首版
+  `20260521000001_create_examples_table.sql` 用 `IF NOT EXISTS` 兼容已跑过
+  AutoMigrate 的旧库。
+  **破坏性流程变更**：改表结构不再靠改 model 等自动同步，必须写迁移文件；
+  `AutoMigrate` 已**移除**（不留兜底，避免两套真相源打架）。新增
+  `migrations` 包静态校验测试（不连库，校验迁移可解析、版本递增无重复）。
 - **Docker build injects buildinfo**: `Dockerfile` adds `VERSION` /
   `COMMIT` / `BUILD_TIME` build-args wired into the same
   `-ldflags -X go-skeleton/pkg/buildinfo.*` as the Makefile; `make

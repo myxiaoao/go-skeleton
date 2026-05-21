@@ -1,11 +1,12 @@
 package model
 
-// Example model 教学模板：model 是纯 GORM 数据结构
+// Example model 教学模板：model 是纯 GORM 数据结构（应用层读写用）
 //
-//   - 字段加上 `gorm:"..."` tag 控制 DDL；JSON tag 控制对外契约。
+//   - `gorm:"..."` tag 让 GORM 运行时正确映射列；JSON tag 控制对外契约。
 //   - **不要**在 model 上挂带业务规则的方法（鉴权、状态机、外部调用都属于 service）。
-//   - 新增字段后跑 cmd/migrate 把 AutoMigrate 同步到 DB；正式项目建议换成
-//     SQL 文件 + golang-migrate / atlas（skeleton 阶段先 AutoMigrate 够用）。
+//   - DDL 的真相源是 migrations/ 下的版本化 SQL，不是这个 struct——改表结构走
+//     "写 migrations/*.sql + 跑 make run-migrate"，不要靠改字段等 AutoMigrate
+//     （已移除）。struct 与迁移文件需手动保持一致。
 
 import "time"
 

@@ -68,6 +68,8 @@ make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
 
 `CMD_TARGET=worker make docker-build`、`CMD_TARGET=migrate make docker-build` 复用同一个 `Dockerfile` 打另外两个进程的镜像。
 
+生产环境的容器编排（迁移当独立 Job / Helm hook 跑、滚动升级、回滚、并发安全）见 [`docs/deploy.md` §10](./docs/deploy.md#10-docker--k8s-路径)；本节只讲本地起步。
+
 ## 复制 skeleton 后要改什么
 
 把这个仓库当作新服务的起点时，请按下面的顺序改：

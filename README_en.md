@@ -71,6 +71,11 @@ make docker-run          # run it locally, talking to make dev-up dependencies
 `CMD_TARGET=worker make docker-build` and `CMD_TARGET=migrate make docker-build`
 reuse the same `Dockerfile` for the other two processes.
 
+Production container orchestration (running migrations as a standalone Job / Helm
+hook, rolling upgrades, rollback, concurrency safety) is covered in
+[`docs/deploy.md` §10](./docs/deploy.md#10-docker--k8s-路径); this section only covers
+local bootstrapping.
+
 ## Using this Skeleton
 
 Steps to take after cloning this repo as the starting point of a new service:

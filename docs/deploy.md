@@ -1,8 +1,10 @@
 # 二进制部署指南
 
-适用场景：没有 Docker / K8s 平台，需要把 `go-skeleton` 直接装到 Linux 主机上（裸机或 VM）。
+适用场景：把 `go-skeleton` 装到 Linux 主机上（裸机或 VM），用 systemd 托管三个进程。
 
-镜像部署见 [`Dockerfile`](../Dockerfile) 与 README 的 Docker 章节；这里只讲二进制路径。
+本文以二进制 / systemd 为主线讲操作命令。**§4 升级时序与 §5 回滚里的运维原则
+（迁移向后兼容、expand-contract 两阶段、advisory lock 并发安全、schema 回滚优先备份）
+与载体无关**——Docker / K8s 部署同样适用，只是命令载体不同，对应命令见 [§10](#10-docker--k8s-路径)。
 
 ## 0. 准备工作
 
@@ -156,9 +158,11 @@ curl -fsS http://127.0.0.1:3000/health | jq '.build'
 > 这样任意时刻"当前 schema"都能被"当前在线的任意代码版本"安全访问，滚动升级和
 > 回滚都不会因 schema 漂移炸掉。
 >
-> 并发安全：`cmd/migrate` 用 Postgres advisory lock（goose session locker），多台
-> 同时跑也只有一个真正执行、其余阻塞等待，不会竞态——但仍建议按上面"任一台跑一次"
-> 的流程,把迁移当成独立步骤而非每台都跑。
+> 并发安全：`cmd/migrate` 用 Postgres advisory lock（goose session locker），多个
+> migrate 实例同时跑也只有一个真正执行、其余阻塞等待，不会竞态。这在 Docker / K8s
+> 下尤其重要——多副本滚动发布时若把迁移塞进每个 API 副本的启动钩子，会有 N 个进程
+> 抢着跑 DDL，advisory lock 兜底不竞态；但仍建议把迁移当成**独立一次性步骤**
+> （单独的 migrate 容器 / K8s Job / initContainer），而非每个业务副本都跑一遍。
 
 ## 5. 回滚
 
@@ -194,6 +198,8 @@ sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd status
 > - 写迁移时认真写 Down，但别指望它能还原数据；
 > - 真正的数据安全靠**升级前对数据库做备份**（如 `pg_dump`），而不是靠 `down`；
 > - 生产环境优先用 expand-contract 避免回滚 schema，把 `down` 当应急手段而非常规操作。
+
+Docker / K8s 下的 `down` / `status` 命令载体见 [§10](#10-docker--k8s-路径)，回滚原则与上面完全相同。
 
 ## 6. 日常运维
 
@@ -259,3 +265,73 @@ systemd-cgtop -m | grep go-skeleton
 迁移是一次性进程，不需要 watchdog，保持 `Type=simple`。
 
 更多上线前检查见 [README "Production Checklist"](../README.md#production-checklist)。
+
+## 10. Docker / K8s 路径
+
+容器部署的**运维原则与 §4–§5 完全一致**——迁移向后兼容、破坏性变更走 expand-contract
+两阶段、advisory lock 保证并发不竞态、schema 回滚优先 `pg_dump` 备份。这里只给命令载体，
+原则不再重复，请回看 §4–§5。
+
+三个进程复用同一份 [`Dockerfile`](../Dockerfile)，靠 `CMD_TARGET` build-arg 选入口：
+
+```sh
+# 构建三个镜像（CI 里用 git 注入 buildinfo，见 Dockerfile 注释）
+docker build --build-arg CMD_TARGET=api     -t go-skeleton-api:${VERSION}     .
+docker build --build-arg CMD_TARGET=worker  -t go-skeleton-worker:${VERSION}  .
+docker build --build-arg CMD_TARGET=migrate -t go-skeleton-migrate:${VERSION} .
+```
+
+### 迁移：当独立一次性容器跑，不要塞进 API 容器 entrypoint
+
+```sh
+# 一次性跑 migration（任一处执行即可，advisory lock 兜底并发）
+docker run --rm --env-file /etc/go-skeleton/.env \
+  go-skeleton-migrate:${VERSION} -cmd up
+# 看到 "migrations completed" 日志再滚业务镜像
+
+# 回滚最近一版 schema（应急；先确认已 pg_dump 备份）
+docker run --rm --env-file /etc/go-skeleton/.env \
+  go-skeleton-migrate:${VERSION} -cmd down
+docker run --rm --env-file /etc/go-skeleton/.env \
+  go-skeleton-migrate:${VERSION} -cmd status
+```
+
+K8s 下把迁移做成 **Job**（或 Helm `pre-upgrade` hook），等 Job 成功再滚 API/Worker
+Deployment——而不是塞进每个业务 Pod 的 initContainer：
+
+```yaml
+# 迁移 Job：一次性、跑完即退，与业务 Deployment 解耦
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: go-skeleton-migrate
+spec:
+  backoffLimit: 3              # 失败重试几次（advisory lock 不会因并发失败）
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: go-skeleton-migrate:${VERSION}
+          args: ["-cmd", "up"]
+          envFrom:
+            - secretRef:
+                name: go-skeleton-env   # 同 .env 的内容，走 Secret
+```
+
+> initContainer 也能跑迁移，但每个业务副本都会拉起一个——N 副本 = N 个 migrate 抢锁。
+> advisory lock 保证不竞态、只有一个真执行，但多余的进程白启动、日志噪音大、还拖慢
+> Pod 就绪。**用 Job / Helm hook 把迁移收成一次**才是干净做法。
+
+### 业务进程
+
+API / Worker 镜像由编排平台（compose / K8s Deployment）托管，systemd 的 watchdog /
+`LimitNOFILE`（§9）换成容器运行时与编排层的等价机制：
+
+- liveness/readiness 探针打 `/livez`（liveness，恒 200）/ `/health`（readiness，依赖挂了 503），
+  对应 §3 的健康检查；K8s 用 `livenessProbe` / `readinessProbe` 指这两个端点。
+- 文件描述符上限（§9 的 `LimitNOFILE=65535`）由容器运行时 ulimit / K8s 节点配置兜底。
+- 滚动升级摘流量靠 readiness 探针 + 编排层的 `maxUnavailable` / `maxSurge`，对应 §4
+  二进制路径里的"摘流量 → 换镜像 → 健康检查 → 加回流量"。
+
+README 的 Docker 章节讲本地 `make docker-build` / `make docker-run` 起步；这里讲生产编排。

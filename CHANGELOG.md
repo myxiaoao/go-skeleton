@@ -87,7 +87,10 @@ Commit prefixes follow the convention in `CLAUDE.md`
   `AutoMigrate` 已**移除**（不留兜底，避免两套真相源打架）。新增
   `migrations` 包静态校验测试（不连库，校验迁移可解析、版本递增无重复）。
   生产滚动升级的迁移时序与 schema 回滚（expand-contract / `pg_dump` 备份优先）
-  见 `docs/deploy.md` §4–§5。
+  见 `docs/deploy.md` §4–§5；Docker / K8s 路径下的命令载体（迁移当独立
+  容器 / K8s Job / Helm hook 跑，而非塞进每个业务副本的 initContainer）见
+  `docs/deploy.md` §10——运维原则与二进制路径一致，advisory lock 兜底多副本
+  并发抢锁不竞态。
 - **Docker build injects buildinfo**: `Dockerfile` adds `VERSION` /
   `COMMIT` / `BUILD_TIME` build-args wired into the same
   `-ldflags -X go-skeleton/pkg/buildinfo.*` as the Makefile; `make

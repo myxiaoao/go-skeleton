@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/hibiken/asynq"
-	"golang.org/x/sync/errgroup"
 
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/internal/worker"
@@ -42,32 +41,35 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 	}, nil
 }
 
-// Run 启动 Asynq worker server，阻塞到 ctx 取消。用 errgroup 组合两个 goroutine：
-// 一个跑 server.Run，一个监听 ctx.Done 触发两阶段停服。
-func (w *Worker) Run(ctx context.Context) error {
+// Run 启动 Asynq worker server，阻塞到 ctx 取消，然后两阶段停服。
+//
+// 用 Start 而不是 Run：Run = Start + 它自己的 waitForSignals + Shutdown，
+// 那条内置 signal loop 会和 cmd/worker/main.go 的 signal.NotifyContext 抢
+// SIGTERM，两套信号处理并存语义混乱。Start 是同步的、返回启动期 error，让我们
+// 能精确地"启动成功后才发 READY=1"——这是 onReady 的关键：在 Start 返回 nil
+// 之后调，Asynq 已真正进入消费态。若 Start 失败（如 Redis 不可达），直接返
+// error，READY 不会发，systemd 不会被骗成"已就绪"。onReady 为 nil 时跳过。
+func (w *Worker) Run(ctx context.Context, onReady func()) error {
 	if w == nil || w.server == nil || w.mux == nil {
 		return errNilWorker
 	}
 
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		if err := w.server.Run(w.mux); err != nil {
-			return fmt.Errorf("run worker server: %w", err)
-		}
-		return nil
-	})
-	group.Go(func() error {
-		<-groupCtx.Done()
-		// Asynq 官方推荐的两阶段停服：Stop 先停拉新任务，Shutdown 再等
-		// in-flight 任务完成（受 Config.ShutdownTimeout 控制，默认 8s）。
-		// 跳过 Stop 直接 Shutdown 会让 shutdown 窗口内新任务被拉进来又被
-		// 重新调度，破坏 at-least-once 语义。
-		w.server.Stop()
-		w.server.Shutdown()
-		return nil
-	})
+	if err := w.server.Start(w.mux); err != nil {
+		return fmt.Errorf("start worker server: %w", err)
+	}
+	if onReady != nil {
+		onReady()
+	}
 
-	return group.Wait()
+	<-ctx.Done()
+
+	// Asynq 官方推荐的两阶段停服：Stop 先停拉新任务，Shutdown 再等
+	// in-flight 任务完成（受 Config.ShutdownTimeout 控制，默认 8s）。
+	// 跳过 Stop 直接 Shutdown 会让 shutdown 窗口内新任务被拉进来又被
+	// 重新调度，破坏 at-least-once 语义。
+	w.server.Stop()
+	w.server.Shutdown()
+	return nil
 }
 
 // validateWorkerRegistry 校验 Worker 装配需要的 Registry 字段都齐了。

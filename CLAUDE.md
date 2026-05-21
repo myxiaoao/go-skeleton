@@ -105,6 +105,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 - service 通过 `ExampleQueue` 接口依赖 `taskqueue.Queue`，不直接拿 `*asynq.Client`。
 - Worker 消费端 handler 在 `internal/worker/handler.go` 注册，业务流程委托给 service。
 - Worker 停服走两阶段：`srv.Stop()` 停止接新任务、`srv.Shutdown()` 等当前任务完成（已在 `internal/worker.go` 实现，扩展时不要破坏顺序）。
+- Worker 启动用 `asynq.Server.Start`（同步、返回启动期 error），**不要退回 `server.Run`**。`Run` = `Start` + 它内置的 `waitForSignals` + `Shutdown`，那条内置 signal loop 会和 `cmd/worker/main.go` 的 `signal.NotifyContext` 抢 SIGTERM；而且 `Run` 异步起 goroutine 没法精确知道启动成败，会让 sd_notify `READY=1` 早发。`internal/worker.go` 的 `Run(ctx, onReady)` 已经是：`Start` 成功后才回调 `onReady`、停服由传入的 `ctx` 驱动。
 
 ## context 传递（硬约束）
 

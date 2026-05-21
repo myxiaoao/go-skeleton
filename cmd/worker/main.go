@@ -60,10 +60,11 @@ func main() {
 	// WATCHDOG=1 让 systemd 知道 worker 还活着；如果 Asynq handler 卡死（不
 	// panic、不 ErrorHandler），systemd 会按 unit 的 Restart=on-failure 重启。
 	// ctx 取消时自然退出；非 Linux 平台是 noop stub。
+	// READY=1 不在这里发——推迟到 worker 进入消费态（worker.Run 的 onReady）。
 	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
 
 	applog.L().Info("worker started", zap.String("component", "asynq"))
-	if err := worker.Run(ctx); err != nil {
+	if err := worker.Run(ctx, sdnotify.Ready); err != nil {
 		applog.L().Fatal("worker runtime error", zap.Error(err))
 	}
 	applog.L().Info("worker shutdown completed")

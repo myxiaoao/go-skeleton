@@ -203,7 +203,7 @@ oapi-codegen 会生成两类东西，**区分对待**：
 
 - 不生成 client SDK（内部联调用不到）。
 - 不生成 strict-server wrapper（会绕开 Gin 上下文，破坏现有 middleware）。
-- 不引入 `swaggo/swag`、`gin-swagger`、`swagger-ui` 等运行时 UI 框架——前端用 `/openapi.json` 导入 Postman / Bruno / Insomnia 即可。
+- 在线文档用 Stoplight Elements（纯 CDN web component，零 Go 依赖、不接管路由）挂在 `/docs`，spec 复用 `/openapi.json`；前端也可继续用 `/openapi.json` 导入 Postman / Bruno / Insomnia。仍**不引入** `swaggo/swag`、`gin-swagger` 这类把 UI 框架编译进 Go、或用 `RegisterHandlers` 接管路由的重型方案。
 - 不用 `oapi.RegisterHandlers` 接管路由注册——业务路由仍走 `internal/router`，享受细粒度中间件控制（如 `/auth/me` 要 BearerAuth、`/auth/token` 不要）。
 
 ### oapi-codegen 对 OpenAPI 3.1 的支持

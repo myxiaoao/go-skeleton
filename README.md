@@ -169,13 +169,14 @@ flowchart TD
 
 ## API 契约
 
-服务自带一份 OpenAPI 3.1 spec，位于 `api/openapi.yaml`。运行时通过下面的端点返回内嵌的 spec：
+服务自带一份 OpenAPI 3.1 spec，位于 `api/openapi.yaml`。运行时通过下面的端点暴露：
 
 ```
-GET /openapi.json
+GET /openapi.json   # 内嵌的 spec（JSON），供工具导入
+GET /docs           # Stoplight Elements 在线文档页（依赖外网 CDN）
 ```
 
-把它导入 Postman / Bruno / Insomnia 或任意支持 OpenAPI 的工具即可浏览接口。spec 是请求/响应结构的唯一真相源；生成的 `internal/oapi/oapi.gen.go` 通过 `oapi.ServerInterface` 在编译期强制对齐。
+`/openapi.json` 可导入 Postman / Bruno / Insomnia 或任意支持 OpenAPI 的工具浏览接口。`/docs` 用 Stoplight Elements 渲染同一份 spec，可在浏览器直接浏览/调试；它依赖外网 CDN，内网/离线环境无法渲染。调试时在浏览器 console 执行 `localStorage.setItem('go_skeleton_token','<jwt>')`，刷新后 TryIt 发出的请求会自动带 `Authorization` 头。spec 是请求/响应结构的唯一真相源；生成的 `internal/oapi/oapi.gen.go` 通过 `oapi.ServerInterface` 在编译期强制对齐。
 
 修改 `api/openapi.yaml` 后重新生成：
 

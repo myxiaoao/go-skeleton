@@ -14,6 +14,17 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`/docs` 在线 API 文档（Stoplight Elements）**:
+  `internal/handler/openapi.go` 新增 `OpenAPIHandler.Docs`，返回内嵌的
+  Stoplight Elements 页面（unpkg CDN，锁版本 `@stoplight/elements@8.4.2`），
+  通过 `apiDescriptionUrl="/openapi.json"` 复用现有 spec 端点渲染在线文档。
+  挂在根级 `/docs`（与 `/openapi.json`、`/metrics` 同级），不进
+  `oapi.ServerInterface`、不改 `api/openapi.yaml`。内嵌 fetch 拦截器从
+  `localStorage` 的 `go_skeleton_token` 读 token，给 TryIt 请求自动加
+  `Authorization` 头。**推翻**原先"不引入运行时 UI 框架"的约束：该约束针对
+  把 UI 框架编译进 Go（swaggo/swag、gin-swagger）的重型方案，而 Stoplight
+  Elements 是纯 CDN web component，零 Go 依赖、不接管路由，不带来这些代价；
+  CLAUDE.md / AGENTS.md 已同步修订。依赖外网 CDN，内网/离线环境无法渲染。
 - **Security response headers middleware**:
   `internal/middleware/security_headers.go` writes `X-Content-Type-Options:
   nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` on

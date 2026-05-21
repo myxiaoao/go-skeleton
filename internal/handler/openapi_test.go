@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,31 @@ func TestOpenAPISpecReturnsValidJSON(t *testing.T) {
 	for _, p := range []string{"/health", "/api/v1/examples", "/openapi.json"} {
 		if _, ok := paths[p]; !ok {
 			t.Errorf("expected path %s in spec", p)
+		}
+	}
+}
+
+func TestDocs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/docs", NewOpenAPIHandler().Docs)
+
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("expected text/html content-type, got %q", ct)
+	}
+
+	body := w.Body.String()
+	for _, want := range []string{"elements-api", "/openapi.json", "go_skeleton_token"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected docs body to contain %q", want)
 		}
 	}
 }

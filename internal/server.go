@@ -241,6 +241,9 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	engine.GET("/livez", handlers.Health.Live)
 	engine.GET("/health", handlers.Health.Health)
 	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
+	// /docs 是 Stoplight Elements 在线文档页（HTML，依赖外网 CDN），
+	// 复用同域 /openapi.json，不进 oapi.ServerInterface、不改 openapi.yaml。
+	engine.GET("/docs", handlers.OpenAPI.Docs)
 	// /metrics 故意挂在 /api/v1 之外、且不走 BearerAuth：Prometheus / Grafana
 	// Agent 抓数据时不该带业务身份。生产环境靠网络层（不暴露公网 + LB
 	// allowlist）保护，本地开发直接 curl 即可。

@@ -12,7 +12,9 @@
 # （那个太慢，留到 push 前手动跑 / CI 兜底）。这里只做：
 #   1. fmt + vet                              — 30s 内能给出回应
 #   2. 阻止疑似秘钥 / .env 真值被加进暂存
-#   3. 不允许 git add --no-verify 跳过 hook
+#
+# 命中检查时不要用 --no-verify 整体绕过——按仓库约定 hook 失败先修问题再重新
+# commit。误判就收窄规则 / 加白名单（见下方第 2 步的提示），别关掉检查。
 #
 # 如果想跑全量校验，前面 export FULL=1：FULL=1 git commit ...
 
@@ -58,7 +60,11 @@ done
 if [ ${#violations[@]} -gt 0 ]; then
   echo "[pre-commit] refusing to commit potentially sensitive files:"
   printf '  - %s\n' "${violations[@]}"
-  echo "         如果确认要提交，跑 git commit --no-verify （慎用，并自负责任）。"
+  echo
+  echo "  这些文件名匹配了密钥 / .env 黑名单。正确处理方式（不要用 --no-verify 整体绕过 hook）："
+  echo "    - 真含敏感内容：从暂存区移除（git restore --staged <file>），别提交。"
+  echo "    - 是误判（如安全的模板文件）：把它加进 .gitignore 例外或本 hook 顶部的白名单，"
+  echo "      让规则收窄，而不是关掉整个检查——否则下次真的密钥也会漏网。"
   exit 1
 fi
 

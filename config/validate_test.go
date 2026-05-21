@@ -219,6 +219,10 @@ func defaultValidConfig() *Config {
 			RequestTimeout: 30 * time.Second,
 			GracefulDrain:  10 * time.Second,
 		},
+		Docs: DocsConfig{
+			Theme:  "system",
+			Layout: "sidebar",
+		},
 		Postgres: PostgresConfig{
 			DSN:          "postgres://x:y@localhost/db",
 			MaxOpenConns: 30,

@@ -63,6 +63,11 @@ func TestLoadAllDefaults(t *testing.T) {
 		{"Worker.Concurrency", cfg.Worker.Concurrency, 10},
 		{"Worker.RetryBaseDelay", cfg.Worker.RetryBaseDelay, 5 * time.Second},
 		{"Worker.RetryMaxDelay", cfg.Worker.RetryMaxDelay, time.Hour},
+		{"Docs.Title", cfg.Docs.Title, "API Docs"},
+		{"Docs.Theme", cfg.Docs.Theme, "system"},
+		{"Docs.Layout", cfg.Docs.Layout, "sidebar"},
+		{"Docs.HideTryIt", cfg.Docs.HideTryIt, false},
+		{"Docs.HideSchemas", cfg.Docs.HideSchemas, false},
 	}
 	for _, c := range checks {
 		if c.got != c.want {

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"go-skeleton/config"
 	"go-skeleton/internal/handler"
 	"go-skeleton/internal/oapi"
 	applog "go-skeleton/pkg/log"
@@ -39,7 +40,7 @@ func buildEngine(t *testing.T, devTokenEnabled bool) *gin.Engine {
 	healthH := &handler.HealthHandler{}
 	engine.GET("/livez", healthH.Live)
 	engine.GET("/health", healthH.Health)
-	engine.GET("/openapi.json", handler.NewOpenAPIHandler().Spec)
+	engine.GET("/openapi.json", handler.NewOpenAPIHandler(config.DocsConfig{Theme: "system", Layout: "sidebar"}).Spec)
 
 	api := engine.Group("/api/v1")
 

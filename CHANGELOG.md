@@ -25,6 +25,11 @@ Commit prefixes follow the convention in `CLAUDE.md`
   把 UI 框架编译进 Go（swaggo/swag、gin-swagger）的重型方案，而 Stoplight
   Elements 是纯 CDN web component，零 Go 依赖、不接管路由，不带来这些代价；
   CLAUDE.md / AGENTS.md 已同步修订。依赖外网 CDN，内网/离线环境无法渲染。
+  页面外观由启动期 `DOCS_*` env 配置（`DOCS_TITLE` / `DOCS_THEME`
+  light·dark·system / `DOCS_LAYOUT` sidebar·stacked / `DOCS_HIDE_TRY_IT` /
+  `DOCS_HIDE_SCHEMAS` / `DOCS_LOGO`），在 `NewOpenAPIHandler` 里一次性预渲染、
+  运行时不变；`DOCS_THEME=system` 跟随系统 `prefers-color-scheme` 切换明/暗，
+  并修复 Elements dark 模式代码高亮配色。
 - **Security response headers middleware**:
   `internal/middleware/security_headers.go` writes `X-Content-Type-Options:
   nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` on

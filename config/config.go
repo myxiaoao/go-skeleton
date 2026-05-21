@@ -30,6 +30,12 @@ func Load() (*Config, error) {
 			GinMode:        getEnvOrDefault("GIN_MODE", "release"),
 			TrustedProxies: parseCSV(os.Getenv("TRUSTED_PROXIES")),
 		},
+		Docs: DocsConfig{
+			Title:  getEnvOrDefault("DOCS_TITLE", "API Docs"),
+			Theme:  getEnvOrDefault("DOCS_THEME", "system"),
+			Layout: getEnvOrDefault("DOCS_LAYOUT", "sidebar"),
+			Logo:   os.Getenv("DOCS_LOGO"),
+		},
 		Postgres: PostgresConfig{
 			DSN:      os.Getenv("POSTGRES"),
 			LogLevel: os.Getenv("GORM_LOG_LEVEL"),
@@ -72,6 +78,11 @@ func Load() (*Config, error) {
 	cfg.Server.BodyMaxBytes, err = int64Env("BODY_MAX_BYTES", 1<<20)
 	collect(err)
 	cfg.Server.MetricsEnabled, err = boolEnv("METRICS_ENABLED", true)
+	collect(err)
+
+	cfg.Docs.HideTryIt, err = boolEnv("DOCS_HIDE_TRY_IT", false)
+	collect(err)
+	cfg.Docs.HideSchemas, err = boolEnv("DOCS_HIDE_SCHEMAS", false)
 	collect(err)
 
 	cfg.Postgres.MaxIdleConns, err = intEnv("DB_MAX_IDLE_CONNS", 15)

@@ -23,6 +23,7 @@ type Config struct {
 	// 的严格度，不参与业务逻辑分支。
 	Env       Environment
 	Server    ServerConfig
+	Docs      DocsConfig
 	Postgres  PostgresConfig
 	Redis     RedisConfig
 	Auth      AuthConfig
@@ -61,6 +62,26 @@ type ServerConfig struct {
 	// 指标中间件。默认 true；关掉只在某些非常受限的部署形态（如不希望任何
 	// 调试端点）用。生产保持默认。
 	MetricsEnabled bool
+}
+
+// DocsConfig 是 /docs 在线文档页（Stoplight Elements）的渲染配置。这些值在
+// 启动期一次性读入并预渲染进 HTML，运行时不变。它们只影响文档 UI 的展示，
+// 不参与任何业务逻辑，也不进 OpenAPI 契约。
+type DocsConfig struct {
+	// Title 是文档页 <title>，默认 "API Docs"。
+	Title string
+	// Theme 控制配色：light / dark / system（跟随系统 prefers-color-scheme）。
+	// 默认 system。非法值在启动期被拒。
+	Theme string
+	// HideTryIt 为 true 时隐藏 Elements 的 TryIt 调试面板（只读文档）。
+	HideTryIt bool
+	// HideSchemas 为 true 时隐藏左侧 Schemas 列表。
+	HideSchemas bool
+	// Layout 是 Elements 布局：sidebar（左侧导航）或 stacked（单列堆叠）。
+	// 默认 sidebar。非法值在启动期被拒。
+	Layout string
+	// Logo 是文档页左上角 logo 的 URL；空表示不显示。
+	Logo string
 }
 
 // PostgresConfig 是数据库连接配置。DSN 为空时所有 DB 相关功能均不启用，

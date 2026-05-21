@@ -13,8 +13,12 @@ info:
     name: go-skeleton
 
 servers:
+  # 这个 URL 仅用于把 spec 导入 Postman / Bruno 等工具时的默认 base。
+  # /docs（Stoplight Elements）在运行时会把 servers 覆盖成当前访问页面的
+  # origin（见 internal/handler/openapi.go 的 docsTemplate），所以无论本地
+  # 还是部署到任意域名，TryIt 都打同源、不受这里写死的值影响、也不触发 CORS。
   - url: http://127.0.0.1:3000
-    description: Local development
+    description: Local development (import default; /docs overrides at runtime)
 
 tags:
   - name: health

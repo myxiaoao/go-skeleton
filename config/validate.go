@@ -47,6 +47,17 @@ func validate(cfg *Config) error {
 		add(fmt.Sprintf("RATE_LIMIT_PER_MINUTE must be >= 0 (0=unlimited), got %d", cfg.RateLimit.RequestsPerMinute))
 	}
 
+	switch cfg.Docs.Theme {
+	case "light", "dark", "system":
+	default:
+		add(fmt.Sprintf("DOCS_THEME must be one of light/dark/system, got %q", cfg.Docs.Theme))
+	}
+	switch cfg.Docs.Layout {
+	case "sidebar", "stacked":
+	default:
+		add(fmt.Sprintf("DOCS_LAYOUT must be one of sidebar/stacked, got %q", cfg.Docs.Layout))
+	}
+
 	// JWT_SECRET 非空 → JWT_ISSUER 必须非空。pkg/auth.JWTManager 在 issuer 为空时
 	// 会**跳过** iss claim 校验，这意味着任何持有相同 secret 但用不同 iss 颁发的
 	// token 都能通过本服务验证。运维有可能 JWT_ISSUER= 显式清空覆盖 default，

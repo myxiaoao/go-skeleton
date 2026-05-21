@@ -90,11 +90,14 @@ func main() {
 
 	// sd_notify watchdog 心跳：systemd Type=notify + WatchdogSec 时，定期发
 	// WATCHDOG=1 让 systemd 知道进程还活着；ctx 取消时自然退出。非 Linux 是 noop。
+	// 注意：Watchdog 不再负责发 READY=1——READY 推迟到端口真正绑定成功后
+	// （server.Run 的 onReady 回调）才发，避免绑定失败时也骗 systemd "已就绪"。
 	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- server.Run()
+		// onReady 在端口绑定成功、即将接请求时回调——此刻发 READY=1 最准确。
+		errCh <- server.Run(sdnotify.Ready)
 	}()
 
 	applog.L().Info("starting web server", zap.String("addr", cfg.Server.Port))

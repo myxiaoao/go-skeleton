@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"time"
@@ -109,12 +110,24 @@ func queueNames(queues map[string]int) []string {
 
 // Run 开始监听并接 HTTP 请求，直到 Shutdown 被调。屏蔽
 // http.ErrServerClosed——那是正常 Shutdown 的副产品。
-func (s *Server) Run() error {
+//
+// onReady 在端口绑定成功、即将开始 Serve 时回调一次（端口已抢到、马上能接
+// 请求）——给 systemd sd_notify READY=1 一个精确时机：早于此发 READY 会在
+// 端口绑定失败时也骗 systemd "已就绪"。onReady 为 nil 时跳过。这里不用
+// ListenAndServe 而是显式 net.Listen，正是为了把"绑定成功"这个时刻暴露出来。
+func (s *Server) Run(onReady func()) error {
 	if s == nil || s.HTTP == nil {
 		return errNilHTTPServer
 	}
-	if err := s.HTTP.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("listen and serve http server: %w", err)
+	ln, err := net.Listen("tcp", s.HTTP.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", s.HTTP.Addr, err)
+	}
+	if onReady != nil {
+		onReady()
+	}
+	if err := s.HTTP.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve http server: %w", err)
 	}
 	return nil
 }

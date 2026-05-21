@@ -54,6 +54,8 @@ func Load() (*Config, error) {
 	}
 
 	var err error
+	cfg.Env, err = environmentEnv("APP_ENV", EnvDevelopment)
+	collect(err)
 	cfg.Server.RequestTimeout, err = durationEnv("REQUEST_TIMEOUT", 30*time.Second)
 	collect(err)
 	cfg.Server.StartupProbeTimeout, err = durationEnv("STARTUP_PROBE_TIMEOUT", 5*time.Second)
@@ -154,6 +156,24 @@ func queueWeightsEnv(key string, fallback map[string]int) (map[string]int, error
 		return fallback, fmt.Errorf("%s: no queue entries parsed from %q", key, raw)
 	}
 	return out, nil
+}
+
+// environmentEnv 解析 APP_ENV，只接受 development / production（大小写不敏感）。
+// 空 → fallback；非法值 → 返 fallback + error，由 errors.Join 兜底报启动失败，
+// 避免把打错的环境名（如 "prod"）静默当成 development 而放过生产 guard。
+func environmentEnv(key string, fallback Environment) (Environment, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	switch Environment(strings.ToLower(raw)) {
+	case EnvDevelopment:
+		return EnvDevelopment, nil
+	case EnvProduction:
+		return EnvProduction, nil
+	default:
+		return fallback, fmt.Errorf("%s=%q: must be one of development|production", key, raw)
+	}
 }
 
 func getEnvOrDefault(key, fallback string) string {

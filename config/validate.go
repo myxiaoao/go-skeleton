@@ -56,8 +56,51 @@ func validate(cfg *Config) error {
 		add("JWT_ISSUER must be non-empty when JWT_SECRET is set; empty issuer disables iss claim validation")
 	}
 
+	// 生产环境安全 guard：把"复制 .env.example 上生产"这种最常见的事故拦在
+	// 启动期。development 下放行，方便本地快速起服。限流 0（无限）不在这里
+	// 拦——它可能是有意的（内网服务靠上游限流），只在启动日志里 warn（见 main）。
+	if cfg.Env.IsProduction() {
+		validateProductionSecrets(cfg, add)
+	}
+
 	if len(errs) == 0 {
 		return nil
 	}
 	return fmt.Errorf("config validation failed: %w", errors.Join(errs...))
+}
+
+// insecureJWTSecrets 是绝不能用于生产的占位 secret（.env.example 默认值等）。
+var insecureJWTSecrets = map[string]struct{}{
+	"change-me-in-production": {},
+	"change-me":               {},
+	"secret":                  {},
+}
+
+// minJWTSecretBytes 是生产环境 HS256 secret 的最小长度。32 字节对应
+// HMAC-SHA256 的输出宽度，低于它会显著降低暴力破解成本。
+const minJWTSecretBytes = 32
+
+// validateProductionSecrets 在 production 环境收紧 secret 相关约束：JWT_SECRET
+// 必须存在、不是已知占位值、且足够长。任一不满足都 fail-fast，拒绝带着公开
+// 或弱 secret 启动（攻击者能用相同 secret 伪造任意 token）。
+func validateProductionSecrets(cfg *Config, add func(string)) {
+	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
+	switch {
+	case secret == "":
+		add("JWT_SECRET must be set in production (APP_ENV=production)")
+	case isInsecureJWTSecret(secret):
+		add("JWT_SECRET is a known placeholder; set a real high-entropy secret in production (openssl rand -base64 48)")
+	case len(secret) < minJWTSecretBytes:
+		add(fmt.Sprintf("JWT_SECRET must be at least %d bytes in production, got %d", minJWTSecretBytes, len(secret)))
+	}
+
+	// dev-only 的 token 端点给任意 caller 颁 token，生产开着等于无鉴权后门。
+	if cfg.Auth.DevTokenEndpointEnabled {
+		add("AUTH_DEV_TOKEN_ENABLED must be false in production")
+	}
+}
+
+func isInsecureJWTSecret(secret string) bool {
+	_, ok := insecureJWTSecrets[strings.ToLower(secret)]
+	return ok
 }

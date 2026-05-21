@@ -57,6 +57,13 @@ func main() {
 	}
 	defer func() { _ = applog.Sync() }()
 
+	// 生产环境无限流（RATE_LIMIT_PER_MINUTE=0）只 warn 不拦——它可能是有意的
+	// （内网服务靠上游 LB/WAF 限流），但裸暴露公网时大概率是漏配，留条日志线索。
+	if cfg.Env.IsProduction() && cfg.RateLimit.RequestsPerMinute == 0 {
+		applog.L().Warn("rate limiting disabled in production",
+			zap.String("hint", "set RATE_LIMIT_PER_MINUTE > 0 unless an upstream proxy enforces it"))
+	}
+
 	registry, err := bootstrap.InitAPI(cfg)
 	if err != nil {
 		applog.L().Fatal("initialize application", zap.Error(err))

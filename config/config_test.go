@@ -18,6 +18,7 @@ func TestLoadAllDefaults(t *testing.T) {
 	// 清空可能从父进程继承下来的 env，让默认值生效——否则本地 shell 里
 	// export 过 SERVER_PORT 等变量会污染默认值断言。
 	for _, k := range []string{
+		"APP_ENV",
 		"SERVER_PORT", "GIN_MODE", "REQUEST_TIMEOUT",
 		"POSTGRES", "GORM_LOG_LEVEL",
 		"DB_MAX_IDLE_CONNS", "DB_MAX_OPEN_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
@@ -41,6 +42,7 @@ func TestLoadAllDefaults(t *testing.T) {
 		got  any
 		want any
 	}{
+		{"Env", cfg.Env, EnvDevelopment},
 		{"Server.Port", cfg.Server.Port, ":3000"},
 		{"Server.GinMode", cfg.Server.GinMode, "release"},
 		{"Server.RequestTimeout", cfg.Server.RequestTimeout, 30 * time.Second},
@@ -162,6 +164,36 @@ func TestLoadStillReturnsConfigOnError(t *testing.T) {
 	}
 	if cfg.Postgres.MaxOpenConns != 30 {
 		t.Errorf("MaxOpenConns = %d, want 30 (fallback)", cfg.Postgres.MaxOpenConns)
+	}
+}
+
+func TestEnvironmentEnv(t *testing.T) {
+	cases := []struct {
+		raw     string
+		want    Environment
+		wantErr bool
+	}{
+		{"", EnvDevelopment, false}, // 空 → fallback
+		{"development", EnvDevelopment, false},
+		{"production", EnvProduction, false},
+		{"PRODUCTION", EnvProduction, false}, // 大小写不敏感
+		{"prod", EnvDevelopment, true},       // 非法值 → 报错 + fallback
+		{"staging", EnvDevelopment, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv("APP_ENV", tc.raw)
+			got, err := environmentEnv("APP_ENV", EnvDevelopment)
+			if tc.wantErr && err == nil {
+				t.Fatalf("environmentEnv(%q): want error, got nil", tc.raw)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("environmentEnv(%q): unexpected error %v", tc.raw, err)
+			}
+			if got != tc.want {
+				t.Errorf("environmentEnv(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 

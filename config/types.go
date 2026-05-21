@@ -2,9 +2,26 @@ package config
 
 import "time"
 
+// Environment 标识进程运行的部署环境。它只影响"启动期安全 guard"的严格度
+// （见 validate）：production 下把不安全的默认值（如示例 JWT secret）当致命
+// 错误拒绝启动，development 下放行。它**不**等同于 GIN_MODE——后者是 gin
+// 框架的日志/panic 行为开关，语义不同，不要互相代用。
+type Environment string
+
+const (
+	EnvDevelopment Environment = "development"
+	EnvProduction  Environment = "production"
+)
+
+// IsProduction 报告是否运行在生产环境。
+func (e Environment) IsProduction() bool { return e == EnvProduction }
+
 // Config 是进程启动期一次性加载的所有配置。运行时不应再修改它的字段；要
 // "动态配置"的需求请走外部配置中心，不要在代码里读这里又写这里。
 type Config struct {
+	// Env 是部署环境标识（APP_ENV），默认 development。仅用于启动期安全 guard
+	// 的严格度，不参与业务逻辑分支。
+	Env       Environment
 	Server    ServerConfig
 	Postgres  PostgresConfig
 	Redis     RedisConfig

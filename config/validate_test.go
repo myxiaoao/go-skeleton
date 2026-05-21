@@ -132,6 +132,64 @@ func TestValidateTableDriven(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "production 占位 JWT_SECRET 被拒",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = "change-me-in-production"
+				c.Auth.JWTIssuer = "go-skeleton"
+			},
+			wantErr:     true,
+			wantInclude: "JWT_SECRET",
+		},
+		{
+			name: "production 空 JWT_SECRET 被拒",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = ""
+			},
+			wantErr:     true,
+			wantInclude: "JWT_SECRET",
+		},
+		{
+			name: "production 过短 JWT_SECRET 被拒",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = "tooshort"
+				c.Auth.JWTIssuer = "go-skeleton"
+			},
+			wantErr:     true,
+			wantInclude: "at least",
+		},
+		{
+			name: "production 足够长的真 secret 放行",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = strings.Repeat("a", minJWTSecretBytes)
+				c.Auth.JWTIssuer = "go-skeleton"
+			},
+			wantErr: false,
+		},
+		{
+			name: "production 开 dev token 端点被拒",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = strings.Repeat("a", minJWTSecretBytes)
+				c.Auth.JWTIssuer = "go-skeleton"
+				c.Auth.DevTokenEndpointEnabled = true
+			},
+			wantErr:     true,
+			wantInclude: "AUTH_DEV_TOKEN_ENABLED",
+		},
+		{
+			name: "development 占位 JWT_SECRET 放行（guard 仅生产）",
+			mutate: func(c *Config) {
+				c.Env = EnvDevelopment
+				c.Auth.JWTSecret = "change-me-in-production"
+				c.Auth.JWTIssuer = "go-skeleton"
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range tests {

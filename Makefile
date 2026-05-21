@@ -338,13 +338,18 @@ migrate-status: ## 打印各迁移的应用状态（需要 POSTGRES 配置）
 	$(GO) run ./cmd/migrate -cmd status
 
 .PHONY: migrate-create
+# case 白名单把 name 限定为 [a-z0-9_]+，挡住空格 / 连字符 / 中文等手滑输入，并防止
+# `;` `"` 这类元字符在 shell recipe 里断句。注意：这是本地开发者命令，无法防御开发者
+# 自己写 `name='$(shell ...)'`——命令行变量里的 $(shell) 由 Make 在解析期执行，早于
+# recipe，任何 recipe 内校验都拦不住。这里只兜底常规误输入，不当安全边界。
 migrate-create: ## 新建空迁移文件（UTC 时间戳前缀）：make migrate-create name=add_email_to_examples
 	@if [ -z "$(name)" ]; then echo "用法: make migrate-create name=<描述>"; exit 1; fi
-	@case "$(name)" in \
-		*[!a-z0-9_]*) echo "ERROR: name 只能含小写字母/数字/下划线 [a-z0-9_]，收到: $(name)"; exit 1;; \
-	esac
-	@ts=$$(date -u +%Y%m%d%H%M%S); \
-	f="migrations/$${ts}_$(name).sql"; \
+	@migrate_name='$(name)'; \
+	case "$$migrate_name" in \
+		*[!a-z0-9_]*) echo "ERROR: name 只能含小写字母/数字/下划线 [a-z0-9_]，收到: $$migrate_name"; exit 1;; \
+	esac; \
+	ts=$$(date -u +%Y%m%d%H%M%S); \
+	f="migrations/$${ts}_$${migrate_name}.sql"; \
 	printf -- '-- +goose Up\n\n-- +goose Down\n' > "$$f"; \
 	echo "created $$f"
 

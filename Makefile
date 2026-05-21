@@ -490,15 +490,21 @@ sec: vuln gosec ## 安全扫描一站式（govulncheck + gosec）
 # 写集成测试的模板：
 #   //go:build integration
 #   package xxx_test
+#   func TestXxxIntegration_...(t *testing.T) { ... }   // 函数名必须含 "Integration"
 # 然后 `make test-integration` 触发；需要先起 `make dev-up`。
+#
+# 命名约定（重要）：集成测试函数名必须含 "Integration"。test-integration 用
+# `-run Integration` 收口，只跑集成测试本身——否则 `-tags=integration ./...`
+# 会把所有单元测试也一起重跑，让集成 job 变成"单测+集成"的超集，既慢又会把
+# 单测的偶发波动算到集成 job 头上。
 
 .PHONY: test
 test: ## 跑单元测试（不含 integration tag）
 	$(GO) test ./...
 
 .PHONY: test-integration
-test-integration: ## 跑集成测试（需要 make dev-up 起 Postgres + Redis）
-	$(GO) test -tags=integration -count=1 ./...
+test-integration: ## 跑集成测试（需要 make dev-up 起 Postgres + Redis）；-run Integration 只跑集成测试，不重跑单测
+	$(GO) test -tags=integration -count=1 -run Integration ./...
 
 .PHONY: test-race
 test-race: ## 跑单元测试并开启 race detector

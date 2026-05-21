@@ -26,7 +26,7 @@ cp .env.example .env
 
 ```sh
 make dev-up        # 起 Postgres + Redis 容器（后台）
-go run ./cmd/migrate
+make run-migrate   # 跑迁移 up（详见下方"本地起完整三进程"）
 ```
 
 ### B. 用本机已装的 Postgres + Redis（不用 docker）

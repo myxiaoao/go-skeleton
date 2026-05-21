@@ -28,7 +28,7 @@ cp .env.example .env
 初始化 DB + 起服务：
 
 ```sh
-go run ./cmd/migrate     # 建表（GORM AutoMigrate）
+make run-migrate         # 跑迁移 up（应用 migrations/ 待执行的 SQL，建表）
 go run ./cmd/api         # :3000
 go run ./cmd/worker      # 另一终端跑 Asynq 消费
 ```
@@ -120,13 +120,14 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 
 ## 八、改 DB schema
 
-当前用 `cmd/migrate` 跑 GORM AutoMigrate（不用 SQL 迁移工具）：
+用 [goose](https://github.com/pressly/goose) 跑版本化 SQL 迁移（真相源是 [`migrations/`](../migrations/) 下的 `*.sql`，**不是** Go struct；`AutoMigrate` 已移除）：
 
-1. 改 [`internal/model/`](../internal/model/) 的 struct
-2. 在 [`cmd/migrate/main.go`](../cmd/migrate/main.go) 的 `AutoMigrate(&model.Xxx{})` 加新 model
-3. `go run ./cmd/migrate`
+1. `make migrate-create name=add_xxx` 生成时间戳前缀的空迁移文件
+2. 在该文件里填 `-- +goose Up` / `-- +goose Down` 两段 SQL（DDL 自己写，可删列 / 改类型 / 数据回填）
+3. 改 [`internal/model/`](../internal/model/) 的 struct 让 GORM 运行时映射对得上（struct 与迁移文件需手动保持一致）
+4. `make run-migrate` 应用；回滚一版 `make migrate-down`，看状态 `make migrate-status`
 
-> AutoMigrate 只加列 / 加索引，**不删 / 不改类型**。生产环境破坏性变更要走人工 SQL，runbook 没固化流程——避免误用。
+> 命令详解（含 `-cmd up/down/status`、命名约定）见 [runbook §本地起完整三进程](./runbook.md#本地起完整三进程)。和 AutoMigrate 不同，破坏性变更（删列 / 改类型）现在由你显式写在 Down/Up 里，goose 不会替你跳过。
 
 ---
 

@@ -3,7 +3,7 @@
 // systemd 路径零改动。cmd/migrate 用 goose 库 API 消费 FS 执行 up/down/status。
 //
 // 新增迁移：跑 `make migrate-create name=add_email_to_examples` 生成一个时间戳
-// 前缀的空文件（goose 时间戳风格、对齐 Laravel，形如
+// 前缀的空文件（goose 时间戳风格，形如
 // 20260521143022_add_email_to_examples.sql），再填 SQL。版本号是文件名首个 `_`
 // 前的纯数字段（连写的 YYYYMMDDHHMMSS），不要在时间戳里插下划线。文件内用 goose
 // 注解分隔 Up/Down：

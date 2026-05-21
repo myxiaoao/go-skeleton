@@ -30,7 +30,7 @@ cp .env.example .env
 
 ```sh
 make dev-up          # 起 Postgres + Redis 容器
-go run ./cmd/migrate # 跑迁移 up（建表）；-cmd down 回滚 / -cmd status 看状态
+make run-migrate     # 跑迁移 up（建表）；回滚/状态见 docs/runbook.md
 go run ./cmd/api     # 监听 :3000
 ```
 
@@ -43,7 +43,7 @@ brew install postgresql@17 redis && brew services start postgresql@17 && brew se
 
 # 建与 .env.example 对齐的 user / db（见 docs/runbook.md 详细命令）
 make dev-deps-check  # 探活 Postgres :5432 + Redis :6379，不通会给出装包提示
-go run ./cmd/migrate
+make run-migrate
 go run ./cmd/api
 ```
 

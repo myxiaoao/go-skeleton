@@ -1,35 +1,59 @@
 package migrations
 
 import (
+	"fmt"
+	"io/fs"
+	"path"
+	"strconv"
+	"strings"
 	"testing"
-
-	"github.com/pressly/goose/v3"
 )
 
-// TestMigrationsAreCollectible 静态校验所有 embed 的迁移文件：能被 goose 解析、
-// 版本号严格递增且无重复。不连数据库，只读 embed FS——能在 make verify 里挡住
-// "迁移文件写坏 / 版本号撞车" 这类低级错误，不依赖跑起一个真实库。
-func TestMigrationsAreCollectible(t *testing.T) {
-	goose.SetBaseFS(FS)
-	t.Cleanup(func() { goose.SetBaseFS(nil) })
-	if err := goose.SetDialect("postgres"); err != nil {
-		t.Fatalf("set dialect: %v", err)
-	}
-
-	// current=0, target=max：收集全部迁移。
-	got, err := goose.CollectMigrations(".", 0, int64(1)<<62)
+// TestMigrationsAreValid 静态校验所有 embed 的迁移文件：文件名版本号（首段数字）
+// 可解析、严格递增无重复，且每个文件都带 `-- +goose Up` 注解。不连数据库、不依赖
+// goose 的 Provider（它强制要 *sql.DB）——纯读 embed FS，能在 make verify 里挡住
+// "迁移文件写坏 / 版本号撞车 / 漏写 goose 注解" 这类低级错误。
+func TestMigrationsAreValid(t *testing.T) {
+	names, err := fs.Glob(FS, "*.sql")
 	if err != nil {
-		t.Fatalf("collect migrations: %v", err)
+		t.Fatalf("glob migrations: %v", err)
 	}
-	if len(got) == 0 {
-		t.Fatal("no migrations found in embed FS; expected at least the initial schema")
+	if len(names) == 0 {
+		t.Fatal("no *.sql migrations found in embed FS; expected at least the initial schema")
 	}
 
 	var prev int64
-	for _, m := range got {
-		if m.Version <= prev {
-			t.Errorf("migration version %d not strictly increasing (prev=%d, file=%s)", m.Version, prev, m.Source)
+	for _, name := range names {
+		version, err := parseVersion(name)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
 		}
-		prev = m.Version
+		if version <= prev {
+			t.Errorf("%s: version %d not strictly increasing (prev=%d)", name, version, prev)
+		}
+		prev = version
+
+		body, err := fs.ReadFile(FS, name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if !strings.Contains(string(body), "-- +goose Up") {
+			t.Errorf("%s: missing `-- +goose Up` annotation", name)
+		}
 	}
+}
+
+// parseVersion 取文件名首个 `_` 前的数字段作版本号（goose 约定）。
+func parseVersion(name string) (int64, error) {
+	base := path.Base(name)
+	i := strings.IndexByte(base, '_')
+	if i <= 0 {
+		return 0, fmt.Errorf("filename must be `<version>_<desc>.sql`")
+	}
+	v, err := strconv.ParseInt(base[:i], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("version prefix %q is not numeric: %w", base[:i], err)
+	}
+	return v, nil
 }

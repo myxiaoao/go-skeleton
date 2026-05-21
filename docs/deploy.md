@@ -140,10 +140,29 @@ curl -fsS http://127.0.0.1:3000/health | jq '.build'
 
 1. `make release` 出新版本 tarball
 2. 在 stage 主机上做完整升级 + 烟雾测试
-3. 生产机器逐台升级：摘流量 → `migrate`（仅一次） → 装新二进制 → `systemctl restart` → 健康检查通过 → 加回流量
-4. 全量更新完后整体跑端到端校验
+3. **先跑一次 migration**（任一台执行即可，不必每台）：`go-skeleton-migrate.service`
+4. 生产机器逐台升级：摘流量 → 装新二进制 → `systemctl restart` → 健康检查通过 → 加回流量
+5. 全量更新完后整体跑端到端校验
+
+> **迁移与代码部署的时序（重要）**：migration 在第一台执行后 schema 就全局生效，
+> 但其余实例此刻还跑旧代码——会短暂出现"新 schema + 旧代码"。因此**迁移必须对
+> 旧代码向后兼容**（加列、加表、加索引这类"只增不破坏"的变更天然安全）。破坏性
+> 变更（删列 / 改类型 / 重命名）不要一步到位，走 **expand-contract 两阶段发布**：
+>
+> 1. **expand**：先加新列、双写新旧字段、部署能读写两者的代码；
+> 2. **contract**：等所有实例都在新代码上、确认旧字段不再被读后，下一个版本再发
+>    删旧列的迁移。
+>
+> 这样任意时刻"当前 schema"都能被"当前在线的任意代码版本"安全访问，滚动升级和
+> 回滚都不会因 schema 漂移炸掉。
+>
+> 并发安全：`cmd/migrate` 用 Postgres advisory lock（goose session locker），多台
+> 同时跑也只有一个真正执行、其余阻塞等待，不会竞态——但仍建议按上面"任一台跑一次"
+> 的流程,把迁移当成独立步骤而非每台都跑。
 
 ## 5. 回滚
+
+### 5.1 回滚代码（二进制）
 
 ```sh
 # 假设旧版本二进制保留在 /opt/go-skeleton/bin/api.previous
@@ -154,6 +173,27 @@ sudo systemctl restart go-skeleton-api.service
 ```
 
 部署脚本建议每次升级前 `cp api api.previous` 留一份，回滚单条命令搞定。
+
+### 5.2 回滚 schema（迁移）
+
+**首选：不回滚 schema。** 如果迁移遵循了 §4 的 expand-contract 原则（只增不破坏），
+旧代码能直接跑在新 schema 上——回滚二进制即可，**不用动数据库**。这是最安全的路径。
+
+只有当新版本带了**破坏性迁移**、且必须把 schema 也退回时，才用 goose 回滚：
+
+```sh
+# 回滚最近一版迁移（执行该版本的 -- +goose Down 段）
+sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd down
+# 看当前版本确认已退回
+sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd status
+```
+
+> ⚠️ **schema 回滚有数据风险**：`down` 执行的是迁移文件里的 `-- +goose Down` 段。
+> 如果 Up 是"删列"、Down 是"重新加列"，回滚**不会恢复列里原来的数据**（已经随
+> Up 丢了）。所以：
+> - 写迁移时认真写 Down，但别指望它能还原数据；
+> - 真正的数据安全靠**升级前对数据库做备份**（如 `pg_dump`），而不是靠 `down`；
+> - 生产环境优先用 expand-contract 避免回滚 schema，把 `down` 当应急手段而非常规操作。
 
 ## 6. 日常运维
 

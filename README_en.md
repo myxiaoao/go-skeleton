@@ -32,7 +32,7 @@ Pick one path for dependencies (Postgres + Redis) — both align with `.env.exam
 
 ```sh
 make dev-up          # boot Postgres + Redis containers
-go run ./cmd/migrate # migrate up (create tables); -cmd down rolls back / -cmd status shows state
+make run-migrate     # migrate up (create tables); rollback/status in docs/runbook.md
 go run ./cmd/api     # serves on :3000
 ```
 
@@ -45,7 +45,7 @@ brew install postgresql@17 redis && brew services start postgresql@17 && brew se
 
 # Create user / db matching .env.example (full commands in docs/runbook.md)
 make dev-deps-check  # probe Postgres :5432 + Redis :6379, prints install hints if unreachable
-go run ./cmd/migrate
+make run-migrate
 go run ./cmd/api
 ```
 

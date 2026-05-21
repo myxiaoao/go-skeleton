@@ -71,15 +71,23 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 - **数据库迁移从 GORM AutoMigrate 切到 goose 版本化 SQL**: 真相源从 Go struct
   改为仓库根 `migrations/*.sql`（goose 格式，经 `//go:embed` 打进二进制）。
-  `cmd/migrate` 改用 goose 库 API，支持 `-cmd up`（默认）/ `down`（回滚一版）/
-  `status`（看状态）；Makefile 配套 `run-migrate` / `migrate-down` /
-  `migrate-status` / `migrate-create name=xxx`。迁移文件用时间戳前缀命名
-  （goose 时间戳风格、对齐 Laravel，`<YYYYMMDDHHMMSS>_<描述>.sql`），首版
-  `20260521000001_create_examples_table.sql` 用 `IF NOT EXISTS` 兼容已跑过
+  `cmd/migrate` 用 goose 的 **Provider API**（不是全局函数）跑迁移，支持
+  `-cmd up`（默认）/ `down`（回滚一版）/ `status`（看状态）；Makefile 配套
+  `run-migrate` / `migrate-down` / `migrate-status` / `migrate-create name=xxx`。
+  迁移文件用时间戳前缀命名（goose 时间戳风格，`<YYYYMMDDHHMMSS>_<描述>.sql`），
+  首版 `20260521000001_create_examples_table.sql` 用 `IF NOT EXISTS` 兼容已跑过
   AutoMigrate 的旧库。
+  **运维加固**：Provider 绑死 `DialectPostgres`（本项目只支持 Postgres，不拉其他
+  方言的注册与依赖），并配 Postgres session advisory lock
+  （`lock.NewPostgresSessionLocker`）——多实例/多机同时跑 migrate 时只有一个持锁
+  执行、其余阻塞等待（默认重试 5s × 60 = 最多 5min），把"migrate 仅一次"从靠
+  人工纪律变成机制保证、杜绝并发 DDL 竞态。迁移结果以结构化返回经 zap 汇报，
+  不依赖 goose 全局 stdout logger。
   **破坏性流程变更**：改表结构不再靠改 model 等自动同步，必须写迁移文件；
   `AutoMigrate` 已**移除**（不留兜底，避免两套真相源打架）。新增
   `migrations` 包静态校验测试（不连库，校验迁移可解析、版本递增无重复）。
+  生产滚动升级的迁移时序与 schema 回滚（expand-contract / `pg_dump` 备份优先）
+  见 `docs/deploy.md` §4–§5。
 - **Docker build injects buildinfo**: `Dockerfile` adds `VERSION` /
   `COMMIT` / `BUILD_TIME` build-args wired into the same
   `-ldflags -X go-skeleton/pkg/buildinfo.*` as the Makefile; `make

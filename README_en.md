@@ -175,16 +175,28 @@ flowchart TD
 ## API Contract
 
 The service ships with an OpenAPI 3.1 spec at `api/openapi.yaml`. At runtime
-the embedded spec is served as JSON at:
+it is exposed through the following endpoints:
 
 ```
-GET /openapi.json
+GET /openapi.json   # embedded spec (JSON), for tool import (non-production only)
+GET /docs           # Stoplight Elements docs UI (needs public CDN, non-production only)
 ```
 
-Import it into Postman, Bruno, Insomnia, or any OpenAPI-aware tool to explore
-the API. The spec is the single source of truth for request/response shapes;
-the generated `internal/oapi/oapi.gen.go` enforces it at compile time via
-`oapi.ServerInterface`.
+`/openapi.json` can be imported into Postman, Bruno, Insomnia, or any
+OpenAPI-aware tool to explore the API. `/docs` renders the same spec with
+Stoplight Elements for in-browser browsing/testing; it depends on a public CDN
+and won't render in an air-gapped/offline environment. For debugging, run
+`localStorage.setItem('go_skeleton_token','<jwt>')` in the browser console —
+after a refresh, TryIt requests carry the `Authorization` header automatically.
+The docs page appearance is configurable via startup `DOCS_*` env vars (title,
+theme light/dark/system, layout, hide TryIt/Schemas, logo; defaults in
+`.env.example`). The spec is the single source of truth for request/response
+shapes; the generated `internal/oapi/oapi.gen.go` enforces it at compile time
+via `oapi.ServerInterface`.
+
+When `APP_ENV=production`, **neither route is registered** (requests get a 404),
+hiding the API contract and docs UI to reduce the information-disclosure
+surface; non-production environments (local, staging) expose them as usual.
 
 Regenerate after editing `api/openapi.yaml`:
 

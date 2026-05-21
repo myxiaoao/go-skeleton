@@ -172,11 +172,13 @@ flowchart TD
 服务自带一份 OpenAPI 3.1 spec，位于 `api/openapi.yaml`。运行时通过下面的端点暴露：
 
 ```
-GET /openapi.json   # 内嵌的 spec（JSON），供工具导入
-GET /docs           # Stoplight Elements 在线文档页（依赖外网 CDN）
+GET /openapi.json   # 内嵌的 spec（JSON），供工具导入（仅非生产）
+GET /docs           # Stoplight Elements 在线文档页（依赖外网 CDN，仅非生产）
 ```
 
 `/openapi.json` 可导入 Postman / Bruno / Insomnia 或任意支持 OpenAPI 的工具浏览接口。`/docs` 用 Stoplight Elements 渲染同一份 spec，可在浏览器直接浏览/调试；它依赖外网 CDN，内网/离线环境无法渲染。调试时在浏览器 console 执行 `localStorage.setItem('go_skeleton_token','<jwt>')`，刷新后 TryIt 发出的请求会自动带 `Authorization` 头。文档页外观可通过启动期 `DOCS_*` env 调整（标题、主题 light/dark/system、布局、隐藏 TryIt/Schemas、logo，默认值见 `.env.example`）。spec 是请求/响应结构的唯一真相源；生成的 `internal/oapi/oapi.gen.go` 通过 `oapi.ServerInterface` 在编译期强制对齐。
+
+`APP_ENV=production` 时这两条路由**都不注册**（访问得到 404），隐藏 API 契约与文档 UI，减少信息泄露面；本地/预发等非生产环境正常暴露。
 
 修改 `api/openapi.yaml` 后重新生成：
 

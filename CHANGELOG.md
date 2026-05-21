@@ -29,7 +29,9 @@ Commit prefixes follow the convention in `CLAUDE.md`
   light·dark·system / `DOCS_LAYOUT` sidebar·stacked / `DOCS_HIDE_TRY_IT` /
   `DOCS_HIDE_SCHEMAS` / `DOCS_LOGO`），在 `NewOpenAPIHandler` 里一次性预渲染、
   运行时不变；`DOCS_THEME=system` 跟随系统 `prefers-color-scheme` 切换明/暗，
-  并修复 Elements dark 模式代码高亮配色。
+  并修复 Elements dark 模式代码高亮配色。`/docs` 与 `/openapi.json` 只在非
+  生产环境注册（`newEngine` 里 `!Env.IsProduction()` 守卫）——`APP_ENV=production`
+  时两条路由都不存在、访问得 404，隐藏 API 契约与文档 UI 减少信息泄露面。
 - **Security response headers middleware**:
   `internal/middleware/security_headers.go` writes `X-Content-Type-Options:
   nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` on

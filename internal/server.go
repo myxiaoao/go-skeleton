@@ -240,10 +240,14 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 
 	engine.GET("/livez", handlers.Health.Live)
 	engine.GET("/health", handlers.Health.Health)
-	engine.GET("/openapi.json", handlers.OpenAPI.Spec)
-	// /docs 是 Stoplight Elements 在线文档页（HTML，依赖外网 CDN），
-	// 复用同域 /openapi.json，不进 oapi.ServerInterface、不改 openapi.yaml。
-	engine.GET("/docs", handlers.OpenAPI.Docs)
+	// /openapi.json（spec）+ /docs（Stoplight Elements 在线文档页，HTML，依赖
+	// 外网 CDN，复用同域 /openapi.json）只在非生产环境注册：生产隐藏 API 契约
+	// 与文档 UI，减少信息泄露面。production 下两条路由根本不存在，访问得到 404。
+	// 不进 oapi.ServerInterface、不改 openapi.yaml。
+	if !reg.Cfg.Env.IsProduction() {
+		engine.GET("/openapi.json", handlers.OpenAPI.Spec)
+		engine.GET("/docs", handlers.OpenAPI.Docs)
+	}
 	// /metrics 故意挂在 /api/v1 之外、且不走 BearerAuth：Prometheus / Grafana
 	// Agent 抓数据时不该带业务身份。生产环境靠网络层（不暴露公网 + LB
 	// allowlist）保护，本地开发直接 curl 即可。

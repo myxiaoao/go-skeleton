@@ -413,6 +413,9 @@ CMD_TARGET   ?= api
 docker-build: ## 构建 multi-stage 镜像（CMD_TARGET=api|worker|migrate）
 	docker build \
 		--build-arg CMD_TARGET=$(CMD_TARGET) \
+		--build-arg VERSION='$(VERSION)' \
+		--build-arg COMMIT='$(COMMIT)' \
+		--build-arg BUILD_TIME='$(BUILD_TIME)' \
 		-t $(DOCKER_IMAGE)-$(CMD_TARGET):$(DOCKER_TAG) .
 
 .PHONY: docker-run

@@ -44,8 +44,14 @@ func thisDir(t *testing.T) string {
 	return filepath.Dir(self)
 }
 
-// runScript 在 workdir 里跑 `go run <scripts/>/<script>` 加可选 args，返回
-// 退出码 + 合并的 stdout/stderr。stderr 合到一起方便断言。
+// runScript 在 workdir 里跑脚本。两种模式：
+//  1. 如果脚本只 import 标准库（env-verify / architecture-verify / docs-verify），
+//     直接 `go run /abs/path/script.go`——workdir 不需要 go.mod。
+//  2. 如果脚本 import 第三方库（new-endpoint 用到 kin-openapi），先在主仓库
+//     用 `go build` 编出 binary（带主 go.mod 的依赖解析），再在 workdir 跑
+//     这个 binary——workdir 不需要 go.mod。
+//
+// runScript 默认走模式 1。new-endpoint 测试自己用 runBinary 走模式 2。
 func runScript(t *testing.T, workdir, script string, args ...string) (int, string) {
 	t.Helper()
 	scriptPath := filepath.Join(thisDir(t), script)
@@ -66,6 +72,45 @@ func runScript(t *testing.T, workdir, script string, args ...string) (int, strin
 		return ee.ExitCode(), out
 	}
 	t.Fatalf("exec %s: %v\noutput:\n%s", script, err, out)
+	return -1, out
+}
+
+// buildNewEndpoint 在主仓库 cwd 下用 go build 把 scripts/new-endpoint.go 编
+// 成 tmp 可执行 binary，返回 binary 路径。共享给所有 new-endpoint 测试用例，
+// 避免每个 case 重编一次。Cleanup 在 binary 与 t.TempDir 同生命周期。
+func buildNewEndpoint(t *testing.T) string {
+	t.Helper()
+	scriptPath := filepath.Join(thisDir(t), "new-endpoint.go")
+	// 在 scripts/ 同目录 build：这样 go 能找到主仓库的 go.mod。
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "new-endpoint")
+	cmd := exec.Command("go", "build", "-o", binPath, scriptPath)
+	cmd.Dir = thisDir(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build new-endpoint: %v\n%s", err, out)
+	}
+	return binPath
+}
+
+// runBinary 在 workdir 跑 binary 加 args，返回 exit code + combined output。
+func runBinary(t *testing.T, workdir, binPath string, args ...string) (int, string) {
+	t.Helper()
+	cmd := exec.Command(binPath, args...)
+	cmd.Dir = workdir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	out := buf.String()
+	if err == nil {
+		return 0, out
+	}
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode(), out
+	}
+	t.Fatalf("exec %s: %v\noutput:\n%s", binPath, err, out)
 	return -1, out
 }
 
@@ -259,41 +304,73 @@ func TestArchitectureVerify_Clean(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // new-endpoint
+//
+// 改造后 new-endpoint 从 api/openapi.yaml + internal/oapi/oapi.gen.go 反向
+// 驱动。fixture 要同时准备这两个文件 + 5 个锚点宿主（server.go / router.go /
+// openapi.go）。脚本依赖 kin-openapi 第三方库，所以测试走 binary 模式（先在
+// 主仓库 go build，再在 tmp workdir 跑 binary）。
 
-// newEndpointFixture 准备一个最小可注入的"假仓库"。脚本要求：
-//   - internal/{handler,service,repository,model,task}/example.go 各一个
-//   - internal/server.go 含 4 个 // NEH 锚点
-//   - internal/router/router.go 含 2 个 // NEH 锚点
+// newEndpointFixture 准备一个最小可注入的"假仓库"：
+//   - api/openapi.yaml 含 Order 资源的 3 个 operation（list/create/get）
+//   - internal/oapi/oapi.gen.go 含对应 ServerInterface 方法
+//   - internal/server.go / router/router.go / handler/openapi.go 各带必需锚点
 func newEndpointFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	initRepo(t, dir)
 
-	for _, layer := range []string{"handler", "service", "repository", "model", "task"} {
-		writeFile(t,
-			filepath.Join(dir, "internal", layer, "example.go"),
-			"package "+layer+"\n\n// Example placeholder for "+layer+".\ntype Example struct{}\n",
-		)
-	}
+	// 1) api/openapi.yaml —— 三个 Order operation（含 path param 形态的 getOrder）
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info:
+  title: fixture
+  version: 0.1.0
+paths:
+  /api/v1/orders:
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: createOrder
+      responses:
+        '200': { description: OK }
+  /api/v1/orders/{id}:
+    get:
+      operationId: getOrder
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+`)
 
+	// 2) internal/oapi/oapi.gen.go —— 模拟 oapi-codegen 已经跑过的产物
+	//    （只需要 ServerInterface 接口，其它生成内容不影响脚本逻辑）。
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+// fixture: ServerInterface 模拟 oapi-codegen 产物——脚本扫这里的方法集。
+type ServerInterface interface {
+	ListOrders(c interface{})
+	CreateOrder(c interface{})
+	GetOrder(c interface{}, id string)
+}
+`)
+
+	// 3) server.go / router.go / handler/openapi.go —— 三处锚点宿主。
 	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
 
 type handlers struct {
-	Example string
 	// NEH handlers-fields
 }
 
 func newHTTPHandlers() *handlers {
-	example := "example"
-	_ = example
 	// NEH handlers-deps
 
-	exampleH := "h"
-	_ = exampleH
 	// NEH handlers-construct
 
 	return &handlers{
-		Example: exampleH,
 		// NEH handlers-return
 	}
 }
@@ -304,34 +381,37 @@ func newHTTPHandlers() *handlers {
 import "github.com/gin-gonic/gin"
 
 type Dependencies struct {
-	Example string
 	// NEH deps-fields
 }
 
 func RegisterRoutes(r *gin.RouterGroup, deps Dependencies) error {
-	registerExampleRoutes(r, deps)
 	// NEH routes-register
 	return nil
 }
+`)
 
-func registerExampleRoutes(r *gin.RouterGroup, deps Dependencies) {
-	_ = r
-	_ = deps
+	writeFile(t, filepath.Join(dir, "internal", "handler", "openapi.go"), `package handler
+
+type APIServer struct {
+	// NEH apiserver-fields
 }
+
+// NEH apiserver-methods
 `)
 
 	return dir
 }
 
 func TestNewEndpoint_InjectsAnchors(t *testing.T) {
+	bin := buildNewEndpoint(t)
 	dir := newEndpointFixture(t)
 
-	code, out := runScript(t, dir, "new-endpoint.go", "Order")
+	code, out := runBinary(t, dir, bin, "Order")
 	if code != 0 {
 		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
 	}
 
-	// 复制结果：5 个分层文件 + 3 个测试模板都该在。
+	// 生成产物：5 个分层文件 + 3 个测试。
 	for _, p := range []string{
 		"internal/handler/order.go",
 		"internal/service/order.go",
@@ -347,30 +427,47 @@ func TestNewEndpoint_InjectsAnchors(t *testing.T) {
 		}
 	}
 
-	// server.go 应注入了 Order 相关行；锚点本身要保留（脚本插在锚点前）。
+	// handler/order.go 应有 3 个方法（List/Create/Get）——按 yaml 反推。
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	for _, want := range []string{
+		"func (h *OrderHandler) List(",
+		"func (h *OrderHandler) Create(",
+		"func (h *OrderHandler) Get(",
+		`c.Param("id")`,
+	} {
+		if !strings.Contains(handler, want) {
+			t.Errorf("handler/order.go missing %q\n--- file ---\n%s", want, handler)
+		}
+	}
+
+	// service/order.go 应返 errcode.NotImplementedYet。
+	serviceBytes, err := os.ReadFile(filepath.Join(dir, "internal", "service", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := string(serviceBytes)
+	if !strings.Contains(service, "errcode.NotImplementedYet") {
+		t.Errorf("service/order.go missing NotImplementedYet placeholder")
+	}
+
+	// server.go 装配。
 	serverBytes, err := os.ReadFile(filepath.Join(dir, "internal", "server.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := string(serverBytes)
-	// 字段声明经 gofmt 对齐会有多空格——用 token 顺序匹配规避；其他无空白
-	// 敏感的片段照常 strings.Contains。
-	tokenChecks := [][]string{
-		{"Order", "*handler.OrderHandler"},
-		{"Order:", "orderH,"},
-	}
-	for _, toks := range tokenChecks {
-		if !containsTokens(server, toks...) {
-			t.Errorf("server.go missing tokens %v after injection", toks)
-		}
+	if !containsTokens(server, "Order", "*handler.OrderHandler") {
+		t.Errorf("server.go missing Order field\n%s", server)
 	}
 	for _, want := range []string{
 		"orderRepository := repository.NewOrderRepository",
 		"orderService := service.NewOrderService",
 		"orderH := handler.NewOrderHandler",
 		"// NEH handlers-fields",
-		"// NEH handlers-deps",
-		"// NEH handlers-construct",
 		"// NEH handlers-return",
 	} {
 		if !strings.Contains(server, want) {
@@ -378,37 +475,69 @@ func TestNewEndpoint_InjectsAnchors(t *testing.T) {
 		}
 	}
 
-	// router.go 应同时拿到 Dependencies 字段 + 注册行 + register<Name>Routes 函数。
+	// router.go —— 字段 + register 调用 + 末尾 register<Name>Routes 函数 +
+	// 按 yaml verb 推的 3 条路由。
 	routerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "router", "router.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := string(routerBytes)
-	if !containsTokens(router, "Order", "*handler.OrderHandler") {
-		t.Errorf("router.go missing Order field after injection")
-	}
 	for _, want := range []string{
 		"registerOrderRoutes(r, deps)",
 		"func registerOrderRoutes(",
-		"// NEH deps-fields",
-		"// NEH routes-register",
+		`g.GET("", deps.Order.List)`,
+		`g.POST("", deps.Order.Create)`,
+		`g.GET("/:id", deps.Order.Get)`,
 	} {
 		if !strings.Contains(router, want) {
-			t.Errorf("router.go missing %q after injection", want)
+			t.Errorf("router.go missing %q\n%s", want, router)
+		}
+	}
+
+	// handler/openapi.go —— APIServer 字段 + 3 个转发方法。
+	apiBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "openapi.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := string(apiBytes)
+	for _, want := range []string{
+		"func (s *APIServer) ListOrders(",
+		"func (s *APIServer) CreateOrder(",
+		"func (s *APIServer) GetOrder(",
+		"s.Order.List(c)",
+		"s.Order.Create(c)",
+		"s.Order.Get(c)",
+	} {
+		if !strings.Contains(api, want) {
+			t.Errorf("handler/openapi.go missing %q\n%s", want, api)
 		}
 	}
 }
 
-func TestNewEndpoint_RejectsDuplicate(t *testing.T) {
+func TestNewEndpoint_RejectsMissingInYAML(t *testing.T) {
+	bin := buildNewEndpoint(t)
 	dir := newEndpointFixture(t)
 
-	// 第一次注入应成功。
-	if code, out := runScript(t, dir, "new-endpoint.go", "Order"); code != 0 {
+	// NAME 在 yaml 里没有对应 operation，应被 fail-fast 拒绝。
+	code, out := runBinary(t, dir, bin, "Phantom")
+	if code == 0 {
+		t.Fatalf("expected fail when yaml has no Phantom operations\n%s", out)
+	}
+	if !strings.Contains(out, "找不到") {
+		t.Errorf("expected '找不到' in error, got:\n%s", out)
+	}
+}
+
+func TestNewEndpoint_RejectsDuplicate(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := newEndpointFixture(t)
+
+	// 第一次成功。
+	if code, out := runBinary(t, dir, bin, "Order"); code != 0 {
 		t.Fatalf("first run exit=%d, expected 0\n%s", code, out)
 	}
-
-	// 第二次同名应被预检查拦截（拒绝覆盖已存在文件）。
-	code, out := runScript(t, dir, "new-endpoint.go", "Order")
+	// 第二次同名应被预检查拦截。
+	code, out := runBinary(t, dir, bin, "Order")
 	if code == 0 {
 		t.Fatalf("second run should fail (file exists)\n%s", out)
 	}
@@ -418,14 +547,92 @@ func TestNewEndpoint_RejectsDuplicate(t *testing.T) {
 }
 
 func TestNewEndpoint_RejectsBadName(t *testing.T) {
+	bin := buildNewEndpoint(t)
 	dir := newEndpointFixture(t)
 
 	// 小写起头、非 CamelCase 形态，应被 camelCaseRe 拒。
-	code, out := runScript(t, dir, "new-endpoint.go", "order")
+	code, out := runBinary(t, dir, bin, "order")
 	if code == 0 {
 		t.Fatalf("expected reject for lower-case name\n%s", out)
 	}
 	if !strings.Contains(out, "CamelCase") {
 		t.Errorf("expected CamelCase complaint, got:\n%s", out)
+	}
+}
+
+// TestNewEndpoint_XHandlerMethodOverride 验证 yaml extension 覆盖动作名：
+// operationId "orderCheckout"、x-handler-method "Checkout" → handler 方法名 Checkout。
+func TestNewEndpoint_XHandlerMethodOverride(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// 自定义 yaml：单一 operation 用 x-handler-method。
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders/checkout:
+    post:
+      operationId: orderCheckout
+      x-handler-method: Checkout
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	OrderCheckout(c interface{})
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
+
+type handlers struct {
+	// NEH handlers-fields
+}
+
+func newHTTPHandlers() *handlers {
+	// NEH handlers-deps
+
+	// NEH handlers-construct
+
+	return &handlers{
+		// NEH handlers-return
+	}
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "router", "router.go"), `package router
+
+import "github.com/gin-gonic/gin"
+
+type Dependencies struct {
+	// NEH deps-fields
+}
+
+func RegisterRoutes(r *gin.RouterGroup, deps Dependencies) error {
+	// NEH routes-register
+	return nil
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "handler", "openapi.go"), `package handler
+
+type APIServer struct {
+	// NEH apiserver-fields
+}
+
+// NEH apiserver-methods
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	if !strings.Contains(handler, "func (h *OrderHandler) Checkout(") {
+		t.Errorf("expected method name 'Checkout' from x-handler-method override\n%s", handler)
 	}
 }

@@ -30,4 +30,9 @@ var (
 	QueueUnavailable = newError(9003, "QUEUE_UNAVAILABLE")
 	// QueueError 包裹 service 层暴露的异步任务投递失败。
 	QueueError = newError(9004, "QUEUE_ERROR")
+	// NotImplementedYet 给 make new-endpoint 生成的方法骨架占位。
+	// 业务实现填上后应换成具体错误码（或返 nil 成功）；保留这个值是为了
+	// 让骨架 make verify 通过 + 跑起来时给出明确的"未实现"信号，而不是
+	// 静默返 200 误导调用方。
+	NotImplementedYet = newError(9005, "NOT_IMPLEMENTED_YET")
 )

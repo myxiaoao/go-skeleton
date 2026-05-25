@@ -106,6 +106,8 @@ func MessageFor(reason string) string {
 		return "queue unavailable"
 	case "QUEUE_ERROR":
 		return "queue error"
+	case "NOT_IMPLEMENTED_YET":
+		return "not implemented yet"
 	default:
 		return "operation failed"
 	}

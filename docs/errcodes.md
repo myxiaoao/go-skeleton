@@ -17,3 +17,4 @@ API 业务错误统一走 HTTP 200，错误信息靠下表的 `code` / `reason` 
 | 9002 | `DATABASE_ERROR` | database error | `errcode.DatabaseError` |
 | 9003 | `QUEUE_UNAVAILABLE` | queue unavailable | `errcode.QueueUnavailable` |
 | 9004 | `QUEUE_ERROR` | queue error | `errcode.QueueError` |
+| 9005 | `NOT_IMPLEMENTED_YET` | not implemented yet | `errcode.NotImplementedYet` |

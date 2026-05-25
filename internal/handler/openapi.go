@@ -15,11 +15,17 @@ import (
 // oapi.ServerInterface。每个方法只是对真实 handler 的薄转发；方法签名
 // 必须严格匹配 oapi.ServerInterface，文件末尾的编译期断言保证 yaml 和
 // 代码漂移时 build 直接失败。
+//
+// 新增资源不要手改这里——跑 `make new-endpoint NAME=<Name>`：脚本读
+// api/openapi.yaml + internal/oapi/oapi.gen.go，按"// NEH apiserver-fields"
+// 锚点注入字段、按"// NEH apiserver-methods"锚点注入转发方法。锚点行
+// 的位置 / 格式不要乱动，否则脚本注入会失败。
 type APIServer struct {
 	Auth    *AuthHandler
 	Health  *HealthHandler
 	Example *ExampleHandler
 	OpenAPI *OpenAPIHandler
+	// NEH apiserver-fields
 }
 
 // 编译期保险线：APIServer 必须满足 oapi 生成的 ServerInterface 契约。
@@ -67,6 +73,8 @@ func (s *APIServer) EnqueueExampleTask(c *gin.Context) {
 func (s *APIServer) GetOpenAPISpec(c *gin.Context) {
 	s.OpenAPI.Spec(c)
 }
+
+// NEH apiserver-methods
 
 // elementsVersion 锁定 Stoplight Elements 的 CDN 版本，与 scramble 一致。
 // 升级时改这一处即可（同时影响 web-components.min.js 与 styles.min.css）。

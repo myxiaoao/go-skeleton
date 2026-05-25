@@ -742,3 +742,281 @@ type APIServer struct {
 		t.Errorf("expected method name 'Checkout' from x-handler-method override\n%s", handler)
 	}
 }
+
+// minimalAnchorsFixture 准备一个只含锚点宿主的极简 fixture：server.go /
+// router.go / handler/openapi.go 三个文件 + 一个空 oapi.gen.go。yaml 与
+// ServerInterface 内容由 caller 自己写。
+func minimalAnchorsFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	initRepo(t, dir)
+	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
+
+type handlers struct {
+	// NEH handlers-fields
+}
+
+func newHTTPHandlers() *handlers {
+	// NEH handlers-deps
+
+	// NEH handlers-construct
+
+	return &handlers{
+		// NEH handlers-return
+	}
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "router", "router.go"), `package router
+
+import "github.com/gin-gonic/gin"
+
+type Dependencies struct {
+	// NEH deps-fields
+}
+
+func RegisterRoutes(r *gin.RouterGroup, deps Dependencies) error {
+	// NEH routes-register
+	return nil
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "handler", "openapi.go"), `package handler
+
+type APIServer struct {
+	// NEH apiserver-fields
+}
+
+// NEH apiserver-methods
+`)
+	return dir
+}
+
+// TestNewEndpoint_RouterPathFromYAML 验证 register<Name>Routes 用 yaml 真实
+// resource path（如 /order-items）做 r.Group，而不是写死的 "/" + lower + "s"。
+// 审计 case：原版会把 /api/v1/order-items 注册成 /orderitemss → spec 404。
+func TestNewEndpoint_RouterPathFromYAML(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/order-items:
+    get:
+      operationId: listOrderItems
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: createOrderItem
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrderItems(c interface{})
+	CreateOrderItem(c interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "OrderItem")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	routerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "router", "router.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := string(routerBytes)
+
+	if !strings.Contains(router, `g := r.Group("/order-items")`) {
+		t.Errorf("expected r.Group(\"/order-items\") matching yaml path, got:\n%s", router)
+	}
+	// 反例：旧实现会用 /orderitems / /orderitemss。
+	for _, bad := range []string{`r.Group("/orderitems")`, `r.Group("/orderitemss")`} {
+		if strings.Contains(router, bad) {
+			t.Errorf("router.go should not contain %q (legacy /<lower>s behavior)\n%s", bad, router)
+		}
+	}
+}
+
+// TestNewEndpoint_PathParamName 验证 yaml 里 {order_id} 这种 path 参数名能
+// 正确传到生成的 handler / service 里。审计 case：原版写死 c.Param("id")，
+// yaml 改名后 gin 路径变 /:order_id 但 handler 取 id 拿空字符串。
+func TestNewEndpoint_PathParamName(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders/{order_id}:
+    get:
+      operationId: getOrder
+      parameters:
+        - in: path
+          name: order_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	GetOrder(c interface{}, order_id string)
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	// handler 用真实 path 参数名取值。
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	if !strings.Contains(handler, `c.Param("order_id")`) {
+		t.Errorf("expected handler to call c.Param(\"order_id\"), got:\n%s", handler)
+	}
+	if strings.Contains(handler, `c.Param("id")`) {
+		t.Errorf("handler should not fall back to c.Param(\"id\")\n%s", handler)
+	}
+
+	// service 方法签名带真实参数名。
+	serviceBytes, err := os.ReadFile(filepath.Join(dir, "internal", "service", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := string(serviceBytes)
+	if !strings.Contains(service, "Get(ctx context.Context, order_id string)") {
+		t.Errorf("expected service Get(ctx, order_id string), got:\n%s", service)
+	}
+
+	// router 注册的 gin 路径是 /:order_id。
+	routerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "router", "router.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := string(routerBytes)
+	if !strings.Contains(router, `g.GET("/:order_id", deps.Order.Get)`) {
+		t.Errorf("expected gin route /:order_id, got:\n%s", router)
+	}
+}
+
+// TestNewEndpoint_RouterTestDepsInjected 验证 router_test.go::buildEngine 的
+// deps fixture 也被注入新资源。审计 case：原版只注入 router.go，新 spec 路径
+// 走 TestRouterCoversAllSpecOperations 时 404。
+func TestNewEndpoint_RouterTestDepsInjected(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+}
+`)
+	// 关键 fixture：router_test.go 含 // NEH test-deps 锚点。
+	writeFile(t, filepath.Join(dir, "internal", "router", "router_test.go"), `package router
+
+func buildEngine() {
+	deps := Dependencies{
+		// NEH test-deps
+	}
+	_ = deps
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	bs, err := os.ReadFile(filepath.Join(dir, "internal", "router", "router_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(bs)
+	if !containsTokens(got, "Order:", "&handler.OrderHandler{},") {
+		t.Errorf("router_test.go missing Order injection\n%s", got)
+	}
+	if !strings.Contains(got, "// NEH test-deps") {
+		t.Errorf("router_test.go: anchor should be preserved after injection\n%s", got)
+	}
+}
+
+// TestNewEndpoint_RouterTestDepsOptional 验证：没 router_test.go（已被
+// drop-example 清理或开发者主动删除）时，脚本不报错，只跳过该注入步骤。
+func TestNewEndpoint_RouterTestDepsOptional(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+}
+`)
+	// 不创建 router_test.go——脚本应跳过这一步。
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint should still succeed when router_test.go is absent, exit=%d\n%s", code, out)
+	}
+}
+
+// TestNewEndpoint_RejectsMultiPathParam 验证 path 含 >1 个 path 参数（如
+// /users/{uid}/orders/{oid}）时 fail-fast——脚本只覆盖 0/1 个参数的模板。
+func TestNewEndpoint_RejectsMultiPathParam(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/users/{uid}/orders/{oid}:
+    get:
+      operationId: getUserOrder
+      parameters:
+        - in: path
+          name: uid
+          required: true
+          schema: { type: string }
+        - in: path
+          name: oid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+`)
+
+	code, out := runBinary(t, dir, bin, "UserOrder")
+	if code == 0 {
+		t.Fatalf("expected fail-fast on multi path-param, got success\n%s", out)
+	}
+	if !strings.Contains(out, "path 参数") || !strings.Contains(out, "x-handler-method") {
+		t.Errorf("expected error mentioning path 参数 + x-handler-method, got:\n%s", out)
+	}
+}

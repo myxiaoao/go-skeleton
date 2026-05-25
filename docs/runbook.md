@@ -165,6 +165,23 @@ git add internal/oapi/oapi.gen.go
 
 ## 本地起完整三进程
 
+**推荐**（一条命令搞定，前台跟随两路日志，Ctrl-C 优雅停）：
+
+```sh
+make dev-up        # 起依赖（已起则跳过）
+make dev-all       # 探活 → 迁移 → 并发起 API + Worker（前缀 [api] / [worker]）
+```
+
+`make dev-all` 是 `scripts/dev-all.sh` 的薄封装，做 4 件事：
+- `dev-deps-check` 探活 Postgres + Redis（不可达直接 fail，不自动起 docker）
+- `go run ./cmd/migrate -cmd up`（迁移完才放行后续）
+- 并发起 API + Worker，stdout 前缀化方便区分
+- Ctrl-C 触发优雅停：先 SIGTERM，等 `GRACEFUL_SHUTDOWN_TIMEOUT`（默认 15s）再 SIGKILL 兜底
+
+任一子进程退出会带走另一个（先挂的 exit code 透传给 make）。
+
+**手动分步**（需要单独 attach / 调试某个进程时用）：
+
 ```sh
 make dev-up
 go run ./cmd/migrate           # goose up，应用 migrations/ 待执行迁移（建表）

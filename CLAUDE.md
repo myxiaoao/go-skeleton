@@ -209,7 +209,7 @@ oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。
 声明任务完成前必须跑过：
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅，便于定位失败）
+make verify   # fmt + vet + test + lint + architecture-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅，便于定位失败）
 ```
 
 需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
@@ -314,7 +314,7 @@ feat(service): example 新增分页参数校验
 每次 commit 前一条命令搞定：
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+make verify   # fmt + vet + test + lint + architecture-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
 ```
 
 任意一项挂了**不要 `--no-verify` 跳过**——按通用规则，hook 失败先修问题再重新 commit，不要 amend。

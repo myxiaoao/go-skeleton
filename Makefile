@@ -214,6 +214,10 @@ oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
 	oapi-codegen -config $(OAPI_CFG) $(OAPI_SPEC)
 	@echo "generated: $(OAPI_OUTPUT)"
 
+.PHONY: architecture-verify
+architecture-verify: ## 校验分层 import 边界（gin / gorm 包外溢、pkg→internal 反向依赖、service/handler 误用 context.Background）
+	@bash scripts/architecture-verify.sh
+
 .PHONY: docs-verify
 docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
 	@bash scripts/docs-verify.sh
@@ -552,11 +556,12 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify）
+verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify）
 	@$(MAKE) --no-print-directory _verify-step STEP=fmt
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
 	@$(MAKE) --no-print-directory _verify-step STEP=lint
+	@$(MAKE) --no-print-directory _verify-step STEP=architecture-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=tidy-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=oapi-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-verify

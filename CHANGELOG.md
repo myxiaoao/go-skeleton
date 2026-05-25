@@ -66,6 +66,22 @@ Commit prefixes follow the convention in `CLAUDE.md`
   Previously only the cache (go-redis) client honored it; the queue
   connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
   stays cache-only (asynq does not expose it).
+- **架构静态校验接入 `make verify`**：新增 `make architecture-verify`
+  + `scripts/architecture-verify.sh`，把以前只写在 CLAUDE.md / AGENTS.md
+  里的 import 边界从"靠 AI / 人记住"变成"机器拦截"。失败时输出违规文
+  件 + 行号，CI / 提交前直接定位。当前覆盖四条规则：
+  - service / repository / model / task / worker / taskqueue 禁止 import
+    gin（service 也被 worker 消费，绑 transport 框架会让 worker 跑不通）
+  - `gorm.io/gorm` 只允许出现在 repository / model / bootstrap / pkg/database
+    持久化装配链上，其他层禁止 import
+  - `pkg/` 反向依赖 `internal/` 会让 pkg 失去"理论可被其他项目复用"的属性，
+    一律禁止
+  - service / handler 运行时代码禁止 `context.Background()`——这两层一定
+    有外部传入的 ctx（HTTP request / asynq task），用 Background 会丢
+    trace_id / 超时；bootstrap / `server.go` 起后台 goroutine 是合法例外，
+    不在本规则范围
+  测试文件统一豁免（mock 持 stub gin/gorm 是合法）。新增规则时同步更新
+  脚本顶部 header + CLAUDE.md / AGENTS.md 对应规则段。
 - **Asynq 幂等约定固化成 helper**：`internal/task/header.go` 提供一套统一
   约定，取代以前每个 NewXxxTask 工厂自己 hard-code MaxRetry / 单独写
   payload 字段的散乱写法。

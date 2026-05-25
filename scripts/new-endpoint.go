@@ -73,6 +73,7 @@ type operation struct {
 	IfaceMethod     string // oapi.ServerInterface 上的方法名，如 "CreateExample"
 	IfaceSig        serverIfaceSig
 	IsPathParameter bool // path 有没有 {var}
+	RequiresAuth    bool // yaml security 含 bearerAuth：路由注册时塞 deps.AuthRequired
 }
 
 func main() {
@@ -228,6 +229,7 @@ func collectOperations(name string) ([]operation, error) {
 				Path:            path,
 				IfaceMethod:     ifaceMethod,
 				IsPathParameter: strings.Contains(path, "{"),
+				RequiresAuth:    requiresBearerAuth(op, doc),
 			})
 		}
 	}
@@ -320,6 +322,37 @@ func deriveHandlerMethod(op *openapi3.Operation, name string) (string, error) {
 
 	return "", fmt.Errorf("operationId=%q 推不出 handler 方法名（去掉 %q 后剩余为空或非法）；"+
 		`yaml 里加 "x-handler-method: <Action>" 显式指定`, op.OperationID, name)
+}
+
+// requiresBearerAuth 判定一个 operation 在路由注册时是否要塞 deps.AuthRequired。
+// OpenAPI security 语义：
+//
+//	op.Security == nil           → 继承文档级 security
+//	op.Security != nil && empty  → 显式关闭鉴权（OpenAPI 标准，空数组表示"覆盖全局，无鉴权"）
+//	op.Security != nil && non-empty → 用 op-level 的
+//
+// 在选定生效列表后，扫每个 SecurityRequirement（一个 entry 是 map[string][]string）
+// 看是否含 "bearerAuth" key（与项目 components.securitySchemes 里的命名对齐）。
+// 命中一个就返 true——OR 语义。
+//
+// 其他 security scheme（API key / OAuth2 / ...）项目当前不支持，脚本忽略；
+// 未来要支持时按 scheme 类型映射到不同中间件。
+func requiresBearerAuth(op *openapi3.Operation, doc *openapi3.T) bool {
+	// op.Security 是指针：nil → 继承全局；非 nil 但 len 0 → 显式关闭。
+	// doc.Security 是值类型：nil 或空 list 都视作"无全局鉴权"。
+	var reqs openapi3.SecurityRequirements
+	switch {
+	case op.Security != nil:
+		reqs = *op.Security
+	default:
+		reqs = doc.Security
+	}
+	for _, req := range reqs {
+		if _, ok := req["bearerAuth"]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // pascalize 把 "createExample" 转成 "CreateExample"——oapi-codegen 生成
@@ -1009,11 +1042,26 @@ func register%[1]sRoutes(r *gin.RouterGroup, deps Dependencies) {
 
 	g := r.Group("%[2]s")
 `, name, groupPath)
+	// 拆成两组写：先无鉴权，再走 g.Use(deps.AuthRequired) 后的鉴权组——
+	// 这样不需要给每条 RequiresAuth 路由单独 prepend middleware 参数，也避免
+	// authRequired==nil 时 nil middleware 当成 handler 调用炸进 gin。
+	// 任一组为空时整段省略；全部需要鉴权时所有路由都跑在第二组。
+	var publicOps, authOps []operation
 	for _, op := range ops {
-		method := strings.ToUpper(op.HTTPVerb)
-		// gin 方法名首字母大写形式（GET / POST / ...）。
-		fmt.Fprintf(&b, "\tg.%s(%q, deps.%s.%s)\n",
-			method, op.GinPath, name, op.HandlerMethod)
+		if op.RequiresAuth {
+			authOps = append(authOps, op)
+		} else {
+			publicOps = append(publicOps, op)
+		}
+	}
+	writeRouteGroup(&b, "g", name, publicOps)
+	if len(authOps) > 0 {
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "\t// yaml security: bearerAuth → 这一组需要鉴权。deps.AuthRequired 未注入时跳过整组。")
+		fmt.Fprintln(&b, "\tif deps.AuthRequired != nil {")
+		fmt.Fprintln(&b, "\t\tauthed := g.Group(\"\", deps.AuthRequired)")
+		writeRouteGroup(&b, "authed", name, authOps)
+		fmt.Fprintln(&b, "\t}")
 	}
 	fmt.Fprintln(&b, "}")
 
@@ -1027,6 +1075,20 @@ func register%[1]sRoutes(r *gin.RouterGroup, deps Dependencies) {
 		return fmt.Errorf("append to %s: %w", path, err)
 	}
 	return nil
+}
+
+// writeRouteGroup 把 ops 里每条路由按 verb 写到 b。group 是 gin RouterGroup
+// 变量名（"g" 或鉴权子组里的 "authed"）；authed 组在 if 块里要多一层缩进。
+func writeRouteGroup(b *bytes.Buffer, group, name string, ops []operation) {
+	indent := "\t"
+	if group != "g" {
+		indent = "\t\t"
+	}
+	for _, op := range ops {
+		method := strings.ToUpper(op.HTTPVerb)
+		fmt.Fprintf(b, "%s%s.%s(%q, deps.%s.%s)\n",
+			indent, group, method, op.GinPath, name, op.HandlerMethod)
+	}
 }
 
 // groupPathFor 给 r.Group 选一个路径。约定走 "/<lower(name)>s" 形态——

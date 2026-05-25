@@ -560,6 +560,112 @@ func TestNewEndpoint_RejectsBadName(t *testing.T) {
 	}
 }
 
+// TestNewEndpoint_SecurityBearerAuth 验证 yaml security 含 bearerAuth 时，
+// 生成的 register<Name>Routes 函数会把这些路由放到 deps.AuthRequired 子组。
+func TestNewEndpoint_SecurityBearerAuth(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// yaml：两个 operation——createOrder 公开、getOrder 要鉴权。
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    post:
+      operationId: createOrder
+      responses:
+        '200': { description: OK }
+  /api/v1/orders/{id}:
+    get:
+      operationId: getOrder
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	CreateOrder(c interface{})
+	GetOrder(c interface{}, id string)
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
+
+type handlers struct {
+	// NEH handlers-fields
+}
+
+func newHTTPHandlers() *handlers {
+	// NEH handlers-deps
+
+	// NEH handlers-construct
+
+	return &handlers{
+		// NEH handlers-return
+	}
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "router", "router.go"), `package router
+
+import "github.com/gin-gonic/gin"
+
+type Dependencies struct {
+	AuthRequired gin.HandlerFunc
+	// NEH deps-fields
+}
+
+func RegisterRoutes(r *gin.RouterGroup, deps Dependencies) error {
+	// NEH routes-register
+	return nil
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "handler", "openapi.go"), `package handler
+
+type APIServer struct {
+	// NEH apiserver-fields
+}
+
+// NEH apiserver-methods
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	routerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "router", "router.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := string(routerBytes)
+
+	// 公开路由直接挂 g 上；鉴权路由必须在 deps.AuthRequired 子组里。
+	for _, want := range []string{
+		`g.POST("", deps.Order.Create)`,
+		`if deps.AuthRequired != nil`,
+		`authed := g.Group("", deps.AuthRequired)`,
+		`authed.GET("/:id", deps.Order.Get)`,
+	} {
+		if !strings.Contains(router, want) {
+			t.Errorf("router.go missing %q\n--- file ---\n%s", want, router)
+		}
+	}
+	// 反例：Get 不应直接挂在 g 上。
+	if strings.Contains(router, `g.GET("/:id", deps.Order.Get)`) {
+		t.Errorf("router.go: getOrder should be in authed group, not on g directly\n%s", router)
+	}
+}
+
 // TestNewEndpoint_XHandlerMethodOverride 验证 yaml extension 覆盖动作名：
 // operationId "orderCheckout"、x-handler-method "Checkout" → handler 方法名 Checkout。
 func TestNewEndpoint_XHandlerMethodOverride(t *testing.T) {

@@ -200,7 +200,7 @@ new-endpoint: ## 拷贝 5 文件骨架（handler/service/repo/model/task）；NA
 		echo "usage: make new-endpoint NAME=Order"; \
 		exit 1; \
 	fi
-	@bash scripts/new-endpoint.sh "$(NAME)"
+	$(GO) run scripts/new-endpoint.go "$(NAME)"
 
 .PHONY: mod-upgrade
 mod-upgrade: ## 干跑：列出可升的直接依赖（patch/minor）。APPLY=1 真升 + verify + 失败回滚

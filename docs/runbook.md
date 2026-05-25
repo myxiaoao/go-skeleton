@@ -94,14 +94,14 @@ make drop-example   # 一次性脚本，需 clean checkout
 
 - 删 `internal/{handler,service,repository,model,task}/example*.go` + 集成测试 + worker handler 测试
 - 删 `migrations/2026...examples_table.sql`，留一个 `00010101000001_placeholder.sql` 让 `//go:embed *.sql` 不空（接入第一条真迁移后删它）
-- 清掉 `internal/server.go` / `router.go` / `worker.go` / `handler/openapi.go` 里的 Example 装配 + 转发方法，**保留** `// NEH ...` 锚点供 `new-endpoint.sh` 后续注入
+- 清掉 `internal/server.go` / `router.go` / `worker.go` / `handler/openapi.go` 里的 Example 装配 + 转发方法，**保留** `// NEH ...` 锚点供 `make new-endpoint` 后续注入
 - 清掉 `api/openapi.yaml` 里 `/api/v1/examples`、`/examples/tasks` 路径 + 8 个 `Example*` schemas + `tags.example`
 - 跑 `make oapi` 重新生成 `internal/oapi/oapi.gen.go`、`go mod tidy` 收敛依赖
 - 跑构建 + 测试 + 静态校验子集（fmt/vet/test/lint/architecture-verify/env-verify/tidy-verify/docs-verify）确认不破坏
 
-跑完手动 commit 后再跑一次 `make verify`，让 oapi-verify / docs-deploy-check / docs-errcodes-verify（这些比对工作树 vs HEAD）也变绿。然后 `./scripts/new-endpoint.sh <Name>` 接真业务。
+跑完手动 commit 后再跑一次 `make verify`，让 oapi-verify / docs-deploy-check / docs-errcodes-verify（这些比对工作树 vs HEAD）也变绿。然后 `make new-endpoint NAME=<Name>` 接真业务。
 
-> 注意：`new-endpoint.sh` 依赖 `internal/<layer>/example.go` 当模板。drop 跑过后模板就没了——再起新模块需从 git 历史 `git checkout <pre-drop-sha> -- internal/<layer>/example.go` 恢复模板，或干脆先 `git revert` drop-example 那条 commit。
+> 注意：`make new-endpoint` 依赖 `internal/<layer>/example.go` 当模板。drop 跑过后模板就没了——再起新模块需从 git 历史 `git checkout <pre-drop-sha> -- internal/<layer>/example.go` 恢复模板，或干脆先 `git revert` drop-example 那条 commit。
 
 ## 新增一个 HTTP API endpoint
 
@@ -109,7 +109,7 @@ make drop-example   # 一次性脚本，需 clean checkout
 # 1. 一条命令生成 5 个分层文件 + 测试 stub + server.go / router.go 装配。
 #    脚本按 internal/server.go 和 internal/router/router.go 里的 // NEH
 #    锚点注释自动注入，不要手动改这些锚点行。
-./scripts/new-endpoint.sh <Name>          # 如 ./scripts/new-endpoint.sh Order
+make new-endpoint NAME=<Name>             # 如 make new-endpoint NAME=Order
 
 # 2. 按脚本最后打印的提示补两件人工活：
 #    a. api/openapi.yaml：加 paths + components.schemas（脚本给了 stub）

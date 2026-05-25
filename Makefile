@@ -232,7 +232,7 @@ env-verify: ## 校验 config/ 读取的 env key 与 .env.example 模板同步
 
 .PHONY: docs-verify
 docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
-	@bash scripts/docs-verify.sh
+	$(GO) run scripts/docs-verify.go
 
 .PHONY: docs-deploy-check
 docs-deploy-check: ## 校验 docs/deploy.md 与 deploy/systemd/*.service 一致

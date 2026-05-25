@@ -77,11 +77,27 @@ type operation struct {
 }
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] == "" {
-		fatal(fmt.Errorf(`usage: new-endpoint <Name>
-  Name 必须 CamelCase 首字母大写，不含空格/特殊字符（如 Order、UserGroup）`))
+	// 解析 args：第一个非 flag 是 NAME；--dry-run / -n 切到只 plan 不写盘。
+	// 也接受环境变量 DRY_RUN=1（make new-endpoint NAME=Order DRY_RUN=1）。
+	var name string
+	dryRun := os.Getenv("DRY_RUN") == "1"
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--dry-run", "-n":
+			dryRun = true
+		case "":
+			// skip
+		default:
+			if name == "" {
+				name = arg
+			}
+		}
 	}
-	name := os.Args[1]
+	if name == "" {
+		fatal(fmt.Errorf(`usage: new-endpoint <Name> [--dry-run]
+  Name 必须 CamelCase 首字母大写，不含空格/特殊字符（如 Order、UserGroup）
+  --dry-run / DRY_RUN=1：只打印将生成 / 注入的内容，不写盘`))
+	}
 	if !camelCaseRe.MatchString(name) {
 		fatal(fmt.Errorf("NAME=%q 必须 CamelCase 首字母大写，仅字母数字（如 Order、UserGroup）", name))
 	}
@@ -114,6 +130,16 @@ func main() {
 	// ---- 2. 预检查：文件不存在 + 锚点都在 ----
 	if err := preflight(lower); err != nil {
 		fatal(err)
+	}
+
+	// dry-run：跑到这里所有解析 / 校验都过了，打印 plan 不写盘。Plan 包括：
+	//   - ops 表（method / path / handler / auth）
+	//   - 将生成 / 修改的文件清单
+	//   - group path
+	// 不调任何 writeFile / patch*，直接 return。
+	if dryRun {
+		fmt.Print(renderDryRunPlan(name, lower, ops, groupPath))
+		return
 	}
 
 	// ---- 3. 生成 5 个分层文件 ----
@@ -190,7 +216,7 @@ func main() {
 	}
 
 	// ---- 9. 打印剩余手工步骤 ----
-	fmt.Print(renderNextSteps(name, lower, ops))
+	fmt.Print(renderNextSteps(name, lower, ops, groupPath))
 }
 
 // ---------------------------------------------------------------------------
@@ -213,17 +239,18 @@ func collectOperations(name string) ([]operation, string, error) {
 		return nil, "", fmt.Errorf("load api/openapi.yaml: %w", err)
 	}
 
-	lowerName := strings.ToLower(name)
 	var ops []operation
 
 	// PathItem.Operations() 把 GET/POST/PUT/DELETE/PATCH 等 verb 一并给出，
 	// 顺序不保证——稳定排序到末尾。
 	for path, item := range doc.Paths.Map() {
+		// path 级 x-resource：所有 op 共享的默认归属。
+		pathResource := xResourceFromExtensions(item.Extensions)
 		for verb, op := range item.Operations() {
 			if op.OperationID == "" {
 				continue
 			}
-			if !strings.Contains(strings.ToLower(op.OperationID), lowerName) {
+			if !belongsToResource(op, pathResource, name) {
 				continue
 			}
 
@@ -348,6 +375,44 @@ func deriveHandlerMethod(op *openapi3.Operation, name string) (string, error) {
 
 	return "", fmt.Errorf("operationId=%q 推不出 handler 方法名（去掉 %q 后剩余为空或非法）；"+
 		`yaml 里加 "x-handler-method: <Action>" 显式指定`, op.OperationID, name)
+}
+
+// belongsToResource 判定 op 是否属于 NAME 资源。三层语义（按优先级）：
+//  1. operation 级 x-resource: 显式声明 → 严格按值匹配 NAME（大小写不敏感）
+//  2. path 级 x-resource: 同 path 下所有 op 共享 → 同上严格匹配
+//  3. fallback：operationId 大小写不敏感包含 NAME（向后兼容老 yaml）
+//
+// 第 1/2 层只要其中之一显式声明了 x-resource，**就走 x-resource 路径**（不会
+// 再 fallback 到 operationId 包含）——避免开发者声明了 x-resource: OrderPayment
+// 但 fallback 把它也归到 NAME=Order 下，违背显式声明的意图。
+func belongsToResource(op *openapi3.Operation, pathResource, name string) bool {
+	opResource := xResourceFromExtensions(op.Extensions)
+	switch {
+	case opResource != "":
+		return strings.EqualFold(opResource, name)
+	case pathResource != "":
+		return strings.EqualFold(pathResource, name)
+	default:
+		return strings.Contains(strings.ToLower(op.OperationID), strings.ToLower(name))
+	}
+}
+
+// xResourceFromExtensions 从 kin-openapi 的 Extensions map 里取 x-resource
+// 的字符串值。值不是字符串视为未声明（返空串），不报错——让 caller fallback
+// 到下一层语义。
+func xResourceFromExtensions(ext map[string]any) string {
+	if ext == nil {
+		return ""
+	}
+	raw, ok := ext["x-resource"]
+	if !ok {
+		return ""
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 // extractPathParams 从 yaml path 字符串里按出现顺序提取 {var} 的 var 名。
@@ -1321,17 +1386,85 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+// renderDryRunPlan 给 --dry-run 模式打印的执行计划。让用户在跑真正生成
+// 之前 review：NAME 匹配到了哪些 op、router 路径推得对不对、auth 分组、
+// 将创建 / 修改哪些文件。pure plan，不写盘。
+func renderDryRunPlan(name, lower string, ops []operation, groupPath string) string {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "\n[DRY-RUN] new-endpoint NAME=%s\n", name)
+	fmt.Fprintln(&b)
+
+	fmt.Fprintf(&b, "Matched %d operation(s) (r.Group(%q) under /api/v1):\n", len(ops), groupPath)
+	maxPathLen := 0
+	for _, op := range ops {
+		if l := len(op.Path); l > maxPathLen {
+			maxPathLen = l
+		}
+	}
+	for _, op := range ops {
+		group := "public"
+		if op.RequiresAuth {
+			group = "bearerAuth"
+		}
+		paramHint := ""
+		if len(op.PathParamNames) == 1 {
+			paramHint = "  c.Param(\"" + op.PathParamNames[0] + "\")"
+		}
+		fmt.Fprintf(&b, "  %-6s %-*s  %-10s → %sHandler.%s%s\n",
+			strings.ToUpper(op.HTTPVerb), maxPathLen, op.Path, group, name, op.HandlerMethod, paramHint)
+	}
+
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Files to be created:")
+	for _, layer := range layers {
+		fmt.Fprintf(&b, "  + internal/%s/%s.go\n", layer, lower)
+	}
+	for _, layer := range testLayers {
+		fmt.Fprintf(&b, "  + internal/%s/%s_test.go\n", layer, lower)
+	}
+
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Files to be modified (via // NEH ... anchors):")
+	fmt.Fprintln(&b, "  ~ internal/server.go              (handlers struct + assembly)")
+	fmt.Fprintln(&b, "  ~ internal/router/router.go       (Dependencies + register"+name+"Routes)")
+	fmt.Fprintln(&b, "  ~ internal/handler/openapi.go     (APIServer field + ServerInterface forwarders)")
+	if _, err := os.Stat("internal/router/router_test.go"); err == nil {
+		fmt.Fprintln(&b, "  ~ internal/router/router_test.go  (buildEngine deps fixture)")
+	}
+
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Re-run without --dry-run to apply.")
+	return b.String()
+}
+
 // renderNextSteps 跑完打印的提示——业务实现填进 service / repository 后
 // 跑 make verify 确认全链路绿。
-func renderNextSteps(name, lower string, ops []operation) string {
+//
+// 输出两段：
+//  1. router 表：按 yaml 实际 verb + path 列出每条路由，并标 public / bearerAuth
+//     分组——比"方法集"更接近 gin 真实注册行为，便于 review
+//  2. 落地业务清单
+func renderNextSteps(name, lower string, ops []operation, groupPath string) string {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, `
-✅ %[1]s 骨架已生成 + 装配 + 注入完成。生成的方法集（基于 api/openapi.yaml）：
-`, name)
+	fmt.Fprintf(&b, "\n✅ %s 骨架已生成 + 装配 + 注入完成。\n", name)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "router 表（按 api/openapi.yaml 反推；r.Group(\""+groupPath+"\") 下挂）:")
+	// 算列宽：verb 最长 6（DELETE）；path 用每条 op.Path 算最长，再 +2 pad。
+	maxPathLen := 0
 	for _, op := range ops {
-		fmt.Fprintf(&b, "   %s %-25s → %sHandler.%s\n",
-			strings.ToUpper(op.HTTPVerb), op.Path, name, op.HandlerMethod)
+		if l := len(op.Path); l > maxPathLen {
+			maxPathLen = l
+		}
 	}
+	for _, op := range ops {
+		group := "public"
+		if op.RequiresAuth {
+			group = "bearerAuth"
+		}
+		fmt.Fprintf(&b, "  %-6s %-*s  %-10s → %sHandler.%s\n",
+			strings.ToUpper(op.HTTPVerb), maxPathLen, op.Path, group, name, op.HandlerMethod)
+	}
+
 	fmt.Fprintf(&b, `
 现在仓库应当 make verify 通过——所有方法返 NotImplementedYet 占位。
 

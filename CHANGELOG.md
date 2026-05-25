@@ -14,6 +14,19 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`make drop-example` 一键拔示例模块**:
+  `scripts/drop-example.go`（//go:build ignore + go run，与
+  `scripts/gen-errcodes.go` 同风格，不引第三方依赖）。删 12 个 Example
+  分层文件 + 集成测试 + worker handler 测试 + 示例迁移；清 `server.go` /
+  `router.go` / `worker.go` / `handler/openapi.go` 里的 Example 装配
+  与转发方法（保留 `// NEH ...` 锚点）；清 `api/openapi.yaml` 的 paths
+  / schemas / tags；保留 `db := reg.DB.DB()` 加 `_ = db` 静音占位
+  （new-endpoint.sh 注入仍能拿到 db）；给 `dbFromContext` / `txFromContext`
+  加静音哨兵；留 `migrations/00010101000001_placeholder.sql` 让
+  `//go:embed *.sql` 不空。跑完调 `make oapi` + `go mod tidy` + verify
+  子集（fmt/vet/test/lint/architecture/env/tidy/docs-verify）自检。安全
+  网：拒绝 dirty checkout、每步 patch 幂等、找到多处文本视为模板漂移
+  fail-fast。`docs/runbook.md` 加「移除骨架自带的 Example 示例模块」段。
 - **`make dev-all` 一条命令起本地三进程**:
   `scripts/dev-all.sh` 串联 `dev-deps-check` → `cmd/migrate -cmd up` →
   并发起 API + Worker，stdout 加 `[api]` / `[worker]` 前缀；bash 3.2

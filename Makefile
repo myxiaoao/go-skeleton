@@ -258,6 +258,14 @@ docs-errcodes-verify: docs-errcodes ## 校验 docs/errcodes.md 与代码同步
 oapi-breaking: ## 用 oasdiff 检测 OpenAPI 破坏性变更（对比 OAPI_BREAKING_BASE_REF，默认 origin/master）
 	@bash scripts/oapi-breaking.sh
 
+# drop-example 是一次性收尾脚本：把骨架自带的 Example 示例模块从代码 /
+# 路由 / openapi.yaml / 迁移里整体拔掉，留出干净的脚手架接真业务。
+# 工作区必须干净（脚本会拒绝 dirty checkout）；跑完调 make oapi + verify
+# 自检。如果对结果不满意，git reset --hard 回退。
+.PHONY: drop-example
+drop-example: ## 拔掉骨架自带的 Example 示例模块（一次性；需 clean checkout）
+	$(GO) run scripts/drop-example.go
+
 .PHONY: oapi-verify
 oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
 	@if ! git diff --quiet -- $(OAPI_OUTPUT); then \

@@ -2,9 +2,7 @@
 
 [中文](./README.md) | **English**
 
-This is a clean Go service skeleton extracted from the original project shape.
-Business modules were intentionally removed; the only domain-like code left is
-the `Example` flow used to demonstrate the app layers.
+This is a Go service skeleton extracted from a real project. Business modules have been cleared out; only the `Example` flow is kept as a reference for the layered structure.
 
 **Requires Go 1.26+.**
 
@@ -31,9 +29,9 @@ Pick one path for dependencies (Postgres + Redis) — both align with `.env.exam
 ### A. Use docker compose (recommended, zero config)
 
 ```sh
-make dev-up          # boot Postgres + Redis containers
+make dev-up          # start Postgres + Redis containers
 make run-migrate     # migrate up (create tables); rollback/status in docs/runbook.md
-go run ./cmd/api     # serves on :3000
+go run ./cmd/api     # listens on :3000
 ```
 
 ### B. Use host-installed Postgres + Redis (no docker)
@@ -49,7 +47,7 @@ make run-migrate
 go run ./cmd/api
 ```
 
-Run the worker in another terminal when Redis is configured:
+Run the worker in another terminal once Redis is configured:
 
 ```sh
 go run ./cmd/worker
@@ -68,19 +66,15 @@ make docker-build        # build go-skeleton-api:dev (default CMD_TARGET=api)
 make docker-run          # run it locally, talking to make dev-up dependencies
 ```
 
-`CMD_TARGET=worker make docker-build` and `CMD_TARGET=migrate make docker-build`
-reuse the same `Dockerfile` for the other two processes.
+`CMD_TARGET=worker make docker-build` and `CMD_TARGET=migrate make docker-build` reuse the same `Dockerfile` to build images for the other two processes.
 
-Production container orchestration (running migrations as a standalone Job / Helm
-hook, rolling upgrades, rollback, concurrency safety) is covered in
-[`docs/deploy.md` §10](./docs/deploy.md#10-docker--k8s-路径); this section only covers
-local bootstrapping.
+Production container orchestration (running migrations as a standalone Job / Helm hook, rolling upgrades, rollback, concurrency safety) is covered in [`docs/deploy.md` §10](./docs/deploy.md#10-docker--k8s-路径); this section only covers local bootstrapping.
 
 ## Using this Skeleton
 
-Steps to take after cloning this repo as the starting point of a new service:
+Steps to take after cloning this repo as the starting point for a new service:
 
-1. Run the one-shot rename script to re-brand everything in one go:
+1. Run the one-shot rename script to replace every `go-skeleton` reference:
 
    ```sh
    ./scripts/rename.sh github.com/your-org/your-service your-service
@@ -88,15 +82,14 @@ Steps to take after cloning this repo as the starting point of a new service:
    #                    NEW_MODULE                      NEW_SHORTNAME
    ```
 
-   This rewrites Go imports, `go.mod`, Makefile vars, `.env.example`,
-   `.golangci.yml`, OpenAPI title, systemd unit filenames + contents,
-   `docker-compose` container names, JWT issuer defaults, and test fixtures.
-   It runs `make fmt + vet + test + lint + docs-verify` to confirm the
-   rewrite builds and lints, then prints a small list of remaining manual
-   touch-ups (Documentation= URLs in systemd units, comments referencing
-   the skeleton's history).
+   The script rewrites: Go imports, `go.mod`, Makefile variables, `.env.example`,
+   `.golangci.yml`, the OpenAPI title, systemd unit filenames + contents,
+   `docker-compose` container names, the JWT issuer default, and test fixtures.
+   It then runs `make fmt + vet + test + lint + docs-verify` to confirm nothing
+   broke, and lists the few remaining manual touch-ups (Documentation= URLs in
+   systemd units, comments referencing the skeleton's history).
 
-   After reviewing the diff and committing, delete the script:
+   Review the diff, commit, then delete the script:
 
    ```sh
    git rm scripts/rename.sh && git commit -m 'chore: drop rename script (one-shot)'
@@ -104,26 +97,35 @@ Steps to take after cloning this repo as the starting point of a new service:
 
 2. Set production-safe values in `.env`:
    - `JWT_SECRET` (mandatory; the default is a placeholder)
-   - `POSTGRES`, `REDIS_ADDR` if not using `make dev-up`
+   - `POSTGRES`, `REDIS_ADDR` when not using `make dev-up`
 
-3. Delete or rename the `Example` module once your real module is wired up:
+3. After your real module is wired up, drop or rename the `Example` module:
    - `internal/handler/example.go`, `internal/service/example.go`,
      `internal/repository/example.go`, `internal/model/example.go`
    - `internal/task/example.go`, `internal/worker/handler.go` (Asynq registration)
    - The `/api/v1/examples*` paths in `api/openapi.yaml`
-   - Tests that reference `Example`
+   - Tests referencing `Example`
 
-4. Add a new module by copying the `Example` shape:
-   - Define the request/response in `api/openapi.yaml`, run `make oapi`.
-   - Add `handler` → `service` → `repository` → `model` files matching the pattern.
-   - Wire it in `internal/server.go::newHTTPHandlers` and `internal/router/router.go`.
-   - Worker side: register the task in `internal/task/` and the handler in
-     `internal/worker/handler.go`.
+4. Add a new module via the yaml-driven workflow:
+   - Define the request/response in `api/openapi.yaml`. Use camelCase `operationId`
+     (`listOrders` / `createOrder` / `getOrder`). Add `security: [{ bearerAuth: [] }]`
+     when the operation requires auth. When the action name cannot be derived,
+     add the yaml extension `x-handler-method: <Action>`.
+   - Run `make oapi` to regenerate `internal/oapi/oapi.gen.go`.
+   - Run `make new-endpoint NAME=<Name>` — the script reads the yaml, generates
+     the 5-layer skeleton + test templates, and injects `internal/server.go` /
+     `internal/router/router.go` / `internal/handler/openapi.go::APIServer`.
+     Generated `service` / `repository` methods return
+     `errcode.NotImplementedYet` (9005), so the repo stays `make verify`-green
+     immediately; swap in real logic when you implement.
+   - Fill in business logic: handler `c.ShouldBind...`, service rules, repository
+     SQL, model fields. Async tasks: define the type in `internal/task/` and
+     register the handler in `internal/worker/handler.go`.
 
-5. Make sure CI is happy:
+5. Keep CI green:
 
    ```sh
-   make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+   make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
    ```
 
 ## Runtime Dependencies
@@ -132,7 +134,7 @@ Steps to take after cloning this repo as the starting point of a new service:
 - Redis is optional for the API process. When configured, it enables cache and queue publishing.
 - The worker process requires `REDIS_ADDR`.
 - Postgres is optional for the worker process.
-- JWT auth example routes are enabled when `JWT_SECRET` is configured.
+- JWT auth example routes are enabled only when `JWT_SECRET` is configured.
 
 ## Example API
 
@@ -179,54 +181,41 @@ flowchart TD
 
 ## API Contract
 
-The service ships with an OpenAPI 3.1 spec at `api/openapi.yaml`. At runtime
-it is exposed through the following endpoints:
+The service ships with an OpenAPI 3.1 spec at `api/openapi.yaml`. At runtime it is exposed via:
 
 ```
 GET /openapi.json   # embedded spec (JSON), for tool import (non-production only)
 GET /docs           # Stoplight Elements docs UI (needs public CDN, non-production only)
 ```
 
-`/openapi.json` can be imported into Postman, Bruno, Insomnia, or any
-OpenAPI-aware tool to explore the API. `/docs` renders the same spec with
-Stoplight Elements for in-browser browsing/testing; it depends on a public CDN
-and won't render in an air-gapped/offline environment. For debugging, run
-`localStorage.setItem('go_skeleton_token','<jwt>')` in the browser console —
-after a refresh, TryIt requests carry the `Authorization` header automatically.
-The docs page appearance is configurable via startup `DOCS_*` env vars (title,
-theme light/dark/system, layout, hide TryIt/Schemas, logo; defaults in
-`.env.example`). The spec is the single source of truth for request/response
-shapes; the generated `internal/oapi/oapi.gen.go` enforces it at compile time
-via `oapi.ServerInterface`.
+`/openapi.json` can be imported into Postman / Bruno / Insomnia or any OpenAPI-aware tool to explore the API. `/docs` renders the same spec with Stoplight Elements for in-browser browsing/testing; it depends on a public CDN and won't render in an air-gapped/offline environment. For debugging, run `localStorage.setItem('go_skeleton_token','<jwt>')` in the browser console — after a refresh, TryIt requests carry the `Authorization` header automatically. The docs page appearance is configurable via startup `DOCS_*` env vars (title, theme light/dark/system, layout, hide TryIt/Schemas, logo; defaults in `.env.example`), rendered once at startup in `handler.NewOpenAPIHandler`. The spec is the single source of truth for request/response shapes; the generated `internal/oapi/oapi.gen.go` enforces it at compile time via `oapi.ServerInterface`.
 
-When `APP_ENV=production`, **neither route is registered** (requests get a 404),
-hiding the API contract and docs UI to reduce the information-disclosure
-surface; non-production environments (local, staging) expose them as usual.
+When `APP_ENV=production`, **neither route is registered** (requests get a 404), hiding the API contract and docs UI to reduce the information-disclosure surface; non-production environments (local, staging) expose them as usual.
 
 Regenerate after editing `api/openapi.yaml`:
 
 ```sh
 make oapi          # regenerate internal/oapi/oapi.gen.go
-make oapi-verify   # fail if generated code is out of sync (used by make verify)
+make oapi-verify   # fail if the generated code is out of sync (used by make verify)
 ```
 
 ## Production Checklist
 
 Tick these off before pointing real traffic at this service:
 
-- [ ] Set `APP_ENV=production`. This enables startup guards: items marked **block** fail fast when misconfigured; items marked **warn** are logged by `config.ProductionWarnings` but do not stop startup.
-- [ ] **block** Replace `JWT_SECRET` with a high-entropy value (≥ 32 bytes, e.g. `openssl rand -base64 48`).
-- [ ] **block** Set `AUTH_DEV_TOKEN_ENABLED=false` (the route stays registered and returns `SERVICE_DISABLED`).
-- [ ] **block** Set `GIN_MODE=release`; non-release modes are rejected in production.
-- [ ] **block** Set `LOG_FORMAT=json`; non-json formats are rejected in production.
-- [ ] Make `CORS_ALLOW_ORIGINS` an explicit allow-list; never leave it on `*` or as a wide pattern.
-- [ ] **warn** Configure `TRUSTED_PROXIES` to match your load balancer; otherwise `c.ClientIP()` uses the proxy IP and rate limits / audit logs lose real-client accuracy. Direct, no-LB deployments may leave it empty.
+- [ ] `APP_ENV=production`. This enables startup safety guards: items marked **block** below cause fail-fast exit when misconfigured; items marked **warn** are logged at startup by `config.ProductionWarnings` but do not stop the process. Treat this as the checklist's automated executor — it does not replace going through every item by hand.
+- [ ] **block** Replace `JWT_SECRET` with a high-entropy random value (≥ 32 bytes, e.g. `openssl rand -base64 48`). Under `APP_ENV=production`, placeholder / empty / too-short values are rejected.
+- [ ] **block** `AUTH_DEV_TOKEN_ENABLED=false` (the route stays registered and returns `SERVICE_DISABLED`). Under `APP_ENV=production`, setting it to true is rejected.
+- [ ] **block** `GIN_MODE=release`. Under `APP_ENV=production`, non-release modes are rejected (debug/test would leak the routing table and panic stacks into responses).
+- [ ] **block** `LOG_FORMAT=json`. Under `APP_ENV=production`, non-json formats are rejected (console-format logs are unparseable by log collectors).
+- [ ] Set `CORS_ALLOW_ORIGINS` to an explicit allow-list. Don't leave it empty and don't use `*`.
+- [ ] **warn** Configure `TRUSTED_PROXIES` to match your real LB network range; otherwise `c.ClientIP()` falls back to `RemoteAddr` and every client looks like the proxy IP behind the LB, breaking rate limiting and audit logs. Direct deployments without an LB may leave it empty.
 - [ ] **warn** Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget; keep 0 only when an upstream LB/WAF enforces limits.
-- [ ] **warn** Set `METRICS_ADDR` to a separate address such as `127.0.0.1:9090`, so `/metrics` is isolated from the business API at L4. Empty means `/metrics` is served on the business port.
-- [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do not point liveness at `/health` — a DB blip would restart healthy pods.
-- [ ] Size `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections` budget. The defaults (30 / 15 / 30m) are tuned for development, not production.
+- [ ] **warn** Set `METRICS_ADDR` to a separate address (e.g. `127.0.0.1:9090`) so `/metrics` is isolated from the business API at L4. Empty means `/metrics` is served on the business port; exposing it publicly leaks metrics along with it.
+- [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do **not** point liveness at `/health` — a DB blip would restart healthy pods.
+- [ ] Tune `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections`. The defaults (30 / 15 / 30m) are development-tier, not production-tier.
 - [ ] Run `go run ./cmd/migrate` (goose up, applies pending `migrations/`) before the API process starts.
-- [ ] Decide on the worker process: deploy it separately if any `*/tasks` endpoints are reachable, otherwise queued tasks accumulate without consumers.
+- [ ] Decide on the worker process: if any `*/tasks` endpoints are reachable but no consumer is deployed, queued tasks pile up indefinitely.
 
 ## Deployment
 
@@ -234,59 +223,44 @@ Two supported paths:
 
 ### Container
 
-Use the multi-stage [`Dockerfile`](./Dockerfile) (`make docker-build` /
-`make docker-run`). The same Dockerfile produces images for `api`, `worker`,
-and `migrate` via the `CMD_TARGET` build-arg.
+Use the multi-stage [`Dockerfile`](./Dockerfile) (`make docker-build` / `make docker-run`). The same Dockerfile builds `worker` / `migrate` images via the `CMD_TARGET` build-arg.
 
-### Binary (systemd)
+### Binary + systemd
 
-Static Linux binaries are produced with `make build-linux` (or `make release`
-to also produce tarballs + `SHA256SUMS`). Step-by-step host setup, systemd
-unit installation, rolling upgrades, rollback, and journald log queries are
-in [`docs/deploy.md`](./docs/deploy.md).
+`make build-linux` produces static Linux binaries (`make release` also produces tarballs + `SHA256SUMS`). Step-by-step host setup, systemd unit installation, rolling upgrades, rollback, and journald log queries live in [`docs/deploy.md`](./docs/deploy.md).
 
-GitHub Releases attach `linux-amd64` / `linux-arm64` tarballs automatically
-on every `v*` tag push (see [`.github/workflows/release.yml`](./.github/workflows/release.yml)).
-Binaries embed `version`, `commit`, and `build_time` via ldflags — surfaces
-via `<binary> -version`, the `/livez` `version` field, and the `/health`
-`build` object.
+Every `v*` tag push triggers GitHub Actions to publish `linux-amd64` / `linux-arm64` tarballs (see [`.github/workflows/release.yml`](./.github/workflows/release.yml)). Binaries embed `version` / `commit` / `build_time` via ldflags — readable via `<binary> -version`, the `/livez` `version` field, or the `/health` `build` object.
 
 ### Notes (both paths)
 
-- The OpenAPI spec is generated at build time from `api/openapi.yaml`; the
-  generated `internal/oapi/oapi.gen.go` is checked into the repo, so deployment
-  does not need to run codegen.
-- `CORS_ALLOW_ORIGINS` is a comma-separated allow list. Empty means no CORS allow headers.
+- The OpenAPI spec is generated at build time from `api/openapi.yaml`; `internal/oapi/oapi.gen.go` is checked into the repo, so deployment doesn't need to run codegen.
+- `CORS_ALLOW_ORIGINS` is a comma-separated allow-list. Empty means no CORS allow headers are emitted.
 - Replace `JWT_SECRET` before using the auth example outside local development.
-- API business errors use the JSON envelope `code`, `message`, and `reason`; most API errors are returned with HTTP 200 by convention.
+- Business endpoint errors use the JSON envelope `code` / `message` / `reason`; by convention, most API errors are returned with HTTP 200.
 - `/livez` is the liveness probe (always 200); `/health` is the readiness probe and returns 503 when required dependencies are unavailable.
 
-## Development workflow
+## Development Workflow
 
-- Narrative guide (timeline from clone to PR, with layering rules / tests /
-  commit style / CI): [`docs/development.md`](./docs/development.md)
-- Command cheat sheet (per-scenario: add endpoint / task / troubleshoot):
+- Narrative guide (timeline from clone to PR, with layering rules / tests / commit style / CI):
+  [`docs/development.md`](./docs/development.md)
+- Command cheat sheet (by scenario: add endpoint / task / troubleshoot):
   [`docs/runbook.md`](./docs/runbook.md)
 - Binary deployment (systemd / rolling upgrade / rollback):
   [`docs/deploy.md`](./docs/deploy.md)
 
 ## Verify
 
-Run the one-shot check that gates every commit:
+One-stop check before every commit:
 
 ```sh
-make verify   # fmt + vet + test + lint + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
 ```
 
-Or call the underlying targets individually (`make test`, `make lint`, ...).
-See `make help` for the full list.
+Or call the underlying targets individually (`make test`, `make lint`, ...). See `make help` for the full list.
 
 ## Changelog
 
-User-visible changes are tracked in [CHANGELOG.md](./CHANGELOG.md), kept by
-hand in the [Keep a Changelog](https://keepachangelog.com/) format. No
-automation — just append to the `Unreleased` section as part of the PR that
-makes the change.
+User-visible changes are tracked in [CHANGELOG.md](./CHANGELOG.md), kept by hand in the [Keep a Changelog](https://keepachangelog.com/) format. No automation — just append to the `Unreleased` section as part of the PR that makes the change.
 
 ## License
 

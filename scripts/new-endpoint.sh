@@ -150,41 +150,266 @@ for layer in "${LAYERS[@]}"; do
   echo "✓ created $dst"
 done
 
-# -------- 2. 生成测试 stub --------
+# -------- 2. 生成测试模板 --------
 #
-# 直接复制 example_test.go 走不通：同包级 helper（setupRouter / dbCapture
-# 等）会因重名编译失败；跨包类型引用（service.ExampleRepository）也不在
-# sed 替换范围里。改成生成最小 stub，让 go test 不报 "no test files"，
-# 新开发者按 example_test.go 的风格手补真实用例。
+# 模板按 example_<layer>_test.go 的风格生成可直接编译跑通的最小用例；
+# 不复制 example_test.go 原文（同包 helper 重名 / 跨包类型引用走不通），
+# 而是用 ${NAME}/${LOWER} 前缀避开冲突：
+#   handler:    setup${NAME}Router / mock${NAME}Repo / mock${NAME}Queue
+#   service:    mock${NAME}Repo / mock${NAME}Queue
+#   repository: ${LOWER}DryRunDB / ${LOWER}Capture
+#
+# 假设：新模块沿用 example 模板的方法集（Create / List / EnqueueTask /
+# Process${NAME}），即 NewExampleService→New${NAME}Service / NewExampleHandler→
+# New${NAME}Handler 接口形态。如果改了业务签名（删 EnqueueTask、加新方法等），
+# 删掉对应 *_test.go 用例再按真实接口手补。这比生成 TestPlaceholder Skip
+# 强：至少能跑通一遍证明业务接口与脚手架的形态一致。
 
-for layer in "${TEST_LAYERS[@]}"; do
-  dst="internal/$layer/${LOWER}_test.go"
-  cat > "$dst" <<EOF
-package ${layer}
+# handler 层测试模板
+cat > "internal/handler/${LOWER}_test.go" <<EOF
+package handler
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 
+	"go-skeleton/internal/model"
+	"go-skeleton/internal/service"
+	applog "go-skeleton/pkg/log"
+	"go-skeleton/pkg/response"
+	"go-skeleton/pkg/validator"
+)
+
+// mock${NAME}Repo 提供 service.${NAME}Repository 接口的可注入 mock，
+// 用 func 字段而不是 if/else 让每个用例只写要关心的行为。
+type mock${NAME}Repo struct {
+	createFunc func(ctx context.Context, ${LOWER} *model.${NAME}) error
+	listFunc   func(ctx context.Context, limit, offset int) ([]model.${NAME}, int64, error)
+}
+
+func (m *mock${NAME}Repo) Create(ctx context.Context, e *model.${NAME}) error {
+	return m.createFunc(ctx, e)
+}
+
+func (m *mock${NAME}Repo) List(ctx context.Context, limit, offset int) ([]model.${NAME}, int64, error) {
+	return m.listFunc(ctx, limit, offset)
+}
+
+type mock${NAME}Queue struct {
+	available   bool
+	enqueueFunc func(ctx context.Context, t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
+func (m *mock${NAME}Queue) Available() bool { return m.available }
+func (m *mock${NAME}Queue) Enqueue(ctx context.Context, t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return m.enqueueFunc(ctx, t, opts...)
+}
+
+// setup${NAME}Router 构造一个仅注册 /${LOWER}s/* 路由的最小 gin engine，
+// 替代去 internal/server.go 拉整套依赖。注入"试探性 trace_id"中间件让
+// response.metadata.trace_id 测得到。
+func setup${NAME}Router(repo service.${NAME}Repository, queues ...service.${NAME}Queue) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("trace_id", "test-trace")
+		c.Next()
+	})
+
+	var queue service.${NAME}Queue
+	if len(queues) > 0 {
+		queue = queues[0]
+	}
+	svc := service.New${NAME}Service(repo, queue)
+	h := New${NAME}Handler(svc)
+	r.POST("/${LOWER}s", h.Create)
+	r.GET("/${LOWER}s", h.List)
+	r.POST("/${LOWER}s/tasks", h.EnqueueTask)
+	return r
+}
+
+func init() {
+	// 静音业务日志，避免审计 / trace log 刷屏 stdout；validator 初始化让
+	// binding 校验报错文案非空（与 example_test.go 一致）。
+	applog.SetLogger(zap.NewNop())
+	validator.InitValidator()
+}
+
+// Test${NAME}HandlerCreateSuccess 是 new-endpoint.sh 生成的"smoke 模板"，
+// 验证 handler → service → repo 的接通能正常返 code=0。按真实业务字段
+// 调整 payload 后追加 validation / database error / 边界值用例，参考
+// example_test.go 的写法。
+func Test${NAME}HandlerCreateSuccess(t *testing.T) {
+	repo := &mock${NAME}Repo{
+		createFunc: func(_ context.Context, e *model.${NAME}) error {
+			e.ID = 1
+			return nil
+		},
+	}
+	router := setup${NAME}Router(repo)
+
+	req := httptest.NewRequest(http.MethodPost, "/${LOWER}s",
+		strings.NewReader(\`{"name":"smoke"}\`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp response.Response
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("code = %d, want 0", resp.Code)
+	}
+}
+EOF
+echo "✓ created internal/handler/${LOWER}_test.go"
+
+# service 层测试模板
+cat > "internal/service/${LOWER}_test.go" <<EOF
+package service
+
+import (
+	"context"
+	"testing"
+
+	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
+
+	"go-skeleton/internal/model"
 	applog "go-skeleton/pkg/log"
 )
 
+type mock${NAME}Repo struct {
+	createFunc func(ctx context.Context, ${LOWER} *model.${NAME}) error
+	listFunc   func(ctx context.Context, limit, offset int) ([]model.${NAME}, int64, error)
+}
+
+func (m *mock${NAME}Repo) Create(ctx context.Context, e *model.${NAME}) error {
+	return m.createFunc(ctx, e)
+}
+
+func (m *mock${NAME}Repo) List(ctx context.Context, limit, offset int) ([]model.${NAME}, int64, error) {
+	return m.listFunc(ctx, limit, offset)
+}
+
+type mock${NAME}Queue struct {
+	available   bool
+	enqueueFunc func(ctx context.Context, t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
+func (m *mock${NAME}Queue) Available() bool { return m.available }
+func (m *mock${NAME}Queue) Enqueue(ctx context.Context, t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return m.enqueueFunc(ctx, t, opts...)
+}
+
 func init() {
-	// 静音业务日志，避免测试输出被审计 / trace log 刷屏；与 example_test.go
-	// 风格保持一致。handler / service / repository 测试都需要这个。
 	applog.SetLogger(zap.NewNop())
 }
 
-// TestPlaceholder 是 new-endpoint.sh 生成的占位测试，让 go test 不报
-// "no test files" 即可。删掉本函数 + 按 example_${layer}.go 的同名
-// 测试风格（标准库 testing + 手写 mock）补真实用例。
-func TestPlaceholder(t *testing.T) {
-	t.Skip("TODO: replace with real ${NAME} ${layer} tests")
+// Test${NAME}ServiceCreateSuccess 是 new-endpoint.sh 生成的 smoke 模板。
+// 按真实业务追加边界（重复创建 / 关联失败 / 队列不可用）、并参考
+// example_test.go 的 errcode.Error 断言写法补真实错误码用例。
+func Test${NAME}ServiceCreateSuccess(t *testing.T) {
+	repo := &mock${NAME}Repo{
+		createFunc: func(_ context.Context, e *model.${NAME}) error {
+			e.ID = 1
+			return nil
+		},
+	}
+	svc := New${NAME}Service(repo, nil)
+
+	got, err := svc.Create(context.Background(), &Create${NAME}Req{Name: "smoke"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.ID != 1 {
+		t.Fatalf("ID = %d, want 1", got.ID)
+	}
+	if got.Name != "smoke" {
+		t.Fatalf("Name = %q, want smoke", got.Name)
+	}
 }
 EOF
-  echo "✓ created $dst"
-done
+echo "✓ created internal/service/${LOWER}_test.go"
+
+# repository 层测试模板
+cat > "internal/repository/${LOWER}_test.go" <<EOF
+package repository
+
+import (
+	"context"
+	"testing"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+
+	"go-skeleton/internal/model"
+)
+
+// ${LOWER}Capture 收集 GORM 回调里看到的 SQL，给断言用。DryRun 模式下
+// 真正不会发到 DB，但 callback 链照走，足以验证 repo 生成的 SQL 形状。
+type ${LOWER}Capture struct {
+	createCalls int
+	queries     []string
+}
+
+// new${NAME}DryRunDB 起一个 DryRun 模式的 gorm.DB，不连真实 Postgres。
+// 提供独立 helper 避免和 example_test.go 的 newDryRunDB 同名冲突。
+func new${NAME}DryRunDB(t *testing.T, capture *${LOWER}Capture) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(postgres.Open("postgres://u:p@127.0.0.1:5432/db?sslmode=disable"), &gorm.Config{
+		DryRun:                 true,
+		DisableAutomaticPing:   true,
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open dry run: %v", err)
+	}
+	if capture == nil {
+		return db
+	}
+
+	if err := db.Callback().Create().After("gorm:create").Register("test:${LOWER}_capture_create", func(tx *gorm.DB) {
+		capture.createCalls++
+		if tx.Statement != nil {
+			capture.queries = append(capture.queries, tx.Statement.SQL.String())
+		}
+	}); err != nil {
+		t.Fatalf("register create callback: %v", err)
+	}
+	return db
+}
+
+// Test${NAME}RepositoryCreate 是 new-endpoint.sh 生成的 smoke 模板，
+// 验证 Create 至少触发了一次 INSERT。参考 example_test.go 追加
+// query 形状断言（ORDER BY / LIMIT / 字段名等）。
+func Test${NAME}RepositoryCreate(t *testing.T) {
+	capture := &${LOWER}Capture{}
+	db := new${NAME}DryRunDB(t, capture)
+	repo := New${NAME}Repository(db)
+
+	if err := repo.Create(context.Background(), &model.${NAME}{Name: "smoke"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if capture.createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1", capture.createCalls)
+	}
+}
+EOF
+echo "✓ created internal/repository/${LOWER}_test.go"
 
 # -------- 3. 注入 server.go 装配 --------
 #

@@ -65,15 +65,15 @@ var (
 // 一条 operation 同时承载：handler 方法名（生成代码用）、HTTP verb + path
 // （router 注册用）、ServerInterface 方法名（APIServer 转发方法用）。
 type operation struct {
-	OperationID     string // yaml 原值，如 "createExample"
-	HandlerMethod   string // 推出的 handler 方法名，如 "Create"
-	HTTPVerb        string // "GET" / "POST" / ...
-	Path            string // yaml 原 path，如 "/api/v1/examples/{id}"
-	GinPath         string // gin 形式，如 "/:id"（去掉资源前缀后剩下的）
-	IfaceMethod     string // oapi.ServerInterface 上的方法名，如 "CreateExample"
-	IfaceSig        serverIfaceSig
-	IsPathParameter bool // path 有没有 {var}
-	RequiresAuth    bool // yaml security 含 bearerAuth：路由注册时塞 deps.AuthRequired
+	OperationID    string // yaml 原值，如 "createExample"
+	HandlerMethod  string // 推出的 handler 方法名，如 "Create"
+	HTTPVerb       string // "GET" / "POST" / ...
+	Path           string // yaml 原 path，如 "/api/v1/examples/{id}"
+	GinPath        string // gin 形式，如 "/:id"（去掉资源前缀后剩下的）
+	IfaceMethod    string // oapi.ServerInterface 上的方法名，如 "CreateExample"
+	IfaceSig       serverIfaceSig
+	PathParamNames []string // path 里 {var} 按出现顺序的名字；空切片表示无 path 参数
+	RequiresAuth   bool     // yaml security 含 bearerAuth：路由注册时塞 deps.AuthRequired
 }
 
 func main() {
@@ -96,7 +96,7 @@ func main() {
 	}
 
 	// ---- 1. 解析 yaml + oapi.gen.go ----
-	ops, err := collectOperations(name)
+	ops, groupPath, err := collectOperations(name)
 	if err != nil {
 		fatal(err)
 	}
@@ -151,7 +151,7 @@ func main() {
 	fmt.Println("✓ patched internal/server.go")
 
 	// ---- 6. 注入 router.go ----
-	if err := patchRouter(name, lower, ops); err != nil {
+	if err := patchRouter(name, lower, ops, groupPath); err != nil {
 		fatal(err)
 	}
 	fmt.Println("✓ patched internal/router/router.go")
@@ -167,6 +167,10 @@ func main() {
 		"internal/server.go",
 		"internal/router/router.go",
 		"internal/handler/openapi.go",
+	}
+	// router_test.go 是可选锚点宿主；存在就一起 gofmt + parseCheck。
+	if _, err := os.Stat("internal/router/router_test.go"); err == nil {
+		patched = append(patched, "internal/router/router_test.go")
 	}
 	if err := runGofmt(patched...); err != nil {
 		fatal(fmt.Errorf("gofmt: %w", err))
@@ -194,12 +198,19 @@ func main() {
 
 // collectOperations 解析 api/openapi.yaml，找所有 operationId 包含 name 的
 // operation。资源名识别：operationId 大小写不敏感包含 name 即认为属于该资源。
-func collectOperations(name string) ([]operation, error) {
+//
+// 返回：
+//   - 排序后的 operation 列表
+//   - groupPath: 给 router.RegisterRoutes 里的 r.Group 用的相对路径
+//     （resourcePrefix 去掉 /api/v1 前缀；router.go 顶层 RegisterRoutes 已经
+//     被挂在 /api/v1 group 下了）。例 /api/v1/orders → "/orders"；
+//     /api/v1/order-items → "/order-items"。
+func collectOperations(name string) ([]operation, string, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = false
 	doc, err := loader.LoadFromFile("api/openapi.yaml")
 	if err != nil {
-		return nil, fmt.Errorf("load api/openapi.yaml: %w", err)
+		return nil, "", fmt.Errorf("load api/openapi.yaml: %w", err)
 	}
 
 	lowerName := strings.ToLower(name)
@@ -218,18 +229,22 @@ func collectOperations(name string) ([]operation, error) {
 
 			handlerMethod, err := deriveHandlerMethod(op, name)
 			if err != nil {
-				return nil, fmt.Errorf("%s %s: %w", verb, path, err)
+				return nil, "", fmt.Errorf("%s %s: %w", verb, path, err)
 			}
 
 			ifaceMethod := pascalize(op.OperationID)
+			pathParams, err := extractPathParams(path)
+			if err != nil {
+				return nil, "", fmt.Errorf("%s %s: %w", verb, path, err)
+			}
 			ops = append(ops, operation{
-				OperationID:     op.OperationID,
-				HandlerMethod:   handlerMethod,
-				HTTPVerb:        verb,
-				Path:            path,
-				IfaceMethod:     ifaceMethod,
-				IsPathParameter: strings.Contains(path, "{"),
-				RequiresAuth:    requiresBearerAuth(op, doc),
+				OperationID:    op.OperationID,
+				HandlerMethod:  handlerMethod,
+				HTTPVerb:       verb,
+				Path:           path,
+				IfaceMethod:    ifaceMethod,
+				PathParamNames: pathParams,
+				RequiresAuth:   requiresBearerAuth(op, doc),
 			})
 		}
 	}
@@ -252,7 +267,18 @@ func collectOperations(name string) ([]operation, error) {
 		ops[i].GinPath = ginPath(ops[i].Path, resourcePrefix)
 	}
 
-	return ops, nil
+	// router.RegisterRoutes 接到的 *gin.RouterGroup 已是 engine.Group("/api/v1")，
+	// r.Group 的相对路径要把这层前缀去掉。yaml 习惯所有业务 path 都以
+	// /api/v1 开头，命中即剥；不命中（罕见，如挂了 /admin 这种顶层路径）原样
+	// 透传，由 caller 处理。
+	groupPath := strings.TrimPrefix(resourcePrefix, "/api/v1")
+	if groupPath == "" {
+		// resourcePrefix 恰好等于 "/api/v1"——理论上 ops 至少一个 path 比这个长，
+		// 不会发生；防御一下，让 r.Group("") 也能跑。
+		groupPath = "/"
+	}
+
+	return ops, groupPath, nil
 }
 
 // verbRank 给 HTTP verb 排序权重——常见顺序 GET → POST → PUT → PATCH → DELETE，
@@ -322,6 +348,34 @@ func deriveHandlerMethod(op *openapi3.Operation, name string) (string, error) {
 
 	return "", fmt.Errorf("operationId=%q 推不出 handler 方法名（去掉 %q 后剩余为空或非法）；"+
 		`yaml 里加 "x-handler-method: <Action>" 显式指定`, op.OperationID, name)
+}
+
+// extractPathParams 从 yaml path 字符串里按出现顺序提取 {var} 的 var 名。
+//
+//	/api/v1/orders               → []
+//	/api/v1/orders/{id}          → ["id"]
+//	/api/v1/orders/{order_id}    → ["order_id"]
+//	/api/v1/users/{uid}/orders/{oid}  → ["uid", "oid"]
+//
+// path 参数 ≥2 时返 error——脚本模板只覆盖 0/1 个参数的常规 REST 形态；
+// 多参数嵌套资源建议用 yaml extension `x-handler-method` 指定方法名后手写。
+var pathParamRe = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+func extractPathParams(path string) ([]string, error) {
+	matches := pathParamRe.FindAllStringSubmatch(path, -1)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, m[1])
+	}
+	if len(names) > 1 {
+		return nil, fmt.Errorf("path %q 含 %d 个参数 %v——脚本只支持 0/1 个 path 参数的常规模板；"+
+			`多参数嵌套资源用 x-handler-method 指定方法名后手写 handler / 路由`,
+			path, len(names), names)
+	}
+	return names, nil
 }
 
 // requiresBearerAuth 判定一个 operation 在路由注册时是否要塞 deps.AuthRequired。
@@ -609,9 +663,13 @@ func New%[1]sHandler(svc *service.%[1]sService) *%[1]sHandler {
 // renderHandlerMethod 按动作类型给一个方法挑模板。NotImplementedYet 占位
 // 让骨架直接编译通过；业务实现填上后换 nil 或具体错误码。
 func renderHandlerMethod(name, lower string, op operation) string {
+	// pathVar / pathArg：op.PathParamNames[0] 决定从 c.Param 取啥、传 service 啥。
+	// 没 path 参数时 pathArg 空，handler body 也不再做 c.Param。
+	pathVar := ""
 	pathArg := ""
-	if op.IsPathParameter {
-		pathArg = ", id"
+	if len(op.PathParamNames) == 1 {
+		pathVar = op.PathParamNames[0]
+		pathArg = ", " + pathVar
 	}
 	switch op.HandlerMethod {
 	case "List":
@@ -639,7 +697,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	case "Get", "Delete":
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
-	id := c.Param("id")
+	%[7]s := c.Param(%[8]q)
 	res, err := h.svc.%[3]s(c.Request.Context()%[6]s)
 	if err != nil {
 		response.WriteError(c, err)
@@ -647,11 +705,11 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	}
 	response.WriteSuccess(c, res)
 }
-`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg)
+`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg, pathVar, pathVar)
 	case "Update":
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
-	id := c.Param("id")
+	%[7]s := c.Param(%[8]q)
 	res, err := h.svc.%[3]s(c.Request.Context()%[6]s)
 	if err != nil {
 		response.WriteError(c, err)
@@ -659,7 +717,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	}
 	response.WriteSuccess(c, res)
 }
-`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg)
+`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg, pathVar, pathVar)
 	case "EnqueueTask":
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s——把任务投到 Asynq 队列。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
@@ -735,6 +793,16 @@ func New%[1]sService(repo %[1]sRepository, queue %[1]sQueue) *%[1]sService {
 	return b.String()
 }
 
+// serviceParamName 返回 op 用在 service 方法签名里的 path 参数名。
+// 默认取 yaml path 的实际名（如 order_id）；没声明 path 参数（不该走到 Get/
+// Update/Delete case，防御 fallback）返 "id"。
+func serviceParamName(op operation) string {
+	if len(op.PathParamNames) == 1 {
+		return op.PathParamNames[0]
+	}
+	return "id"
+}
+
 // renderServiceMethod 生成 service 方法签名 + 占位实现。
 // 入参：context.Context + (Get/Update/Delete) id string + (Create/Update) 后续手补 req。
 // 返回：(any, error) ——精确返回类型让填业务的人换。
@@ -755,29 +823,32 @@ func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
 }
 `, name, op.HandlerMethod)
 	case "Get":
-		return fmt.Sprintf(`// %[2]s TODO: 按 id 查单条。
-func (s *%[1]sService) %[2]s(ctx context.Context, id string) (any, error) {
+		pathVar := serviceParamName(op)
+		return fmt.Sprintf(`// %[2]s TODO: 按 %[3]s 查单条。
+func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string) (any, error) {
 	_ = ctx
-	_ = id
+	_ = %[3]s
 	return nil, errcode.NotImplementedYet
 }
-`, name, op.HandlerMethod)
+`, name, op.HandlerMethod, pathVar)
 	case "Update":
-		return fmt.Sprintf(`// %[2]s TODO: 按 id 更新。请求结构按业务补。
-func (s *%[1]sService) %[2]s(ctx context.Context, id string) (any, error) {
+		pathVar := serviceParamName(op)
+		return fmt.Sprintf(`// %[2]s TODO: 按 %[3]s 更新。请求结构按业务补。
+func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string) (any, error) {
 	_ = ctx
-	_ = id
+	_ = %[3]s
 	return nil, errcode.NotImplementedYet
 }
-`, name, op.HandlerMethod)
+`, name, op.HandlerMethod, pathVar)
 	case "Delete":
-		return fmt.Sprintf(`// %[2]s TODO: 按 id 删除。
-func (s *%[1]sService) %[2]s(ctx context.Context, id string) (any, error) {
+		pathVar := serviceParamName(op)
+		return fmt.Sprintf(`// %[2]s TODO: 按 %[3]s 删除。
+func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string) (any, error) {
 	_ = ctx
-	_ = id
+	_ = %[3]s
 	return nil, errcode.NotImplementedYet
 }
-`, name, op.HandlerMethod)
+`, name, op.HandlerMethod, pathVar)
 	case "EnqueueTask":
 		return fmt.Sprintf(`// %[2]s TODO: 投异步任务。请求结构 / 任务 payload 按业务补。
 func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
@@ -968,6 +1039,17 @@ func routerMarkers() []marker {
 	}
 }
 
+// routerTestMarker 是 internal/router/router_test.go::buildEngine 里 deps
+// fixture 的注入点。新增资源时往这里塞一个 zero-value handler，让 spec
+// coverage 测试（TestRouterCoversAllSpecOperations）拿到的 Dependencies
+// 覆盖到 yaml 新增路径，而不是 404。
+//
+// 注意：测试文件是可选锚点——如果 fixture 缺锚点（例如骨架仓库自己删过），
+// 注入步骤被跳过而不是 fail-fast，让脚本仍可用。
+func routerTestMarker() marker {
+	return marker{"internal/router/router_test.go", "test-deps"}
+}
+
 func apiServerMarkers() []marker {
 	return []marker{
 		{"internal/handler/openapi.go", "apiserver-fields"},
@@ -1009,7 +1091,7 @@ func patchServer(name, lower string) error {
 //   - Dependencies 字段
 //   - registerRoutes 调用
 //   - 末尾 append register<Name>Routes 函数（按 ops 推 verb + path）
-func patchRouter(name, lower string, ops []operation) error {
+func patchRouter(name, lower string, ops []operation, groupPath string) error {
 	patches := []struct {
 		marker string
 		line   string
@@ -1022,14 +1104,34 @@ func patchRouter(name, lower string, ops []operation) error {
 			return err
 		}
 	}
-	return appendRouterFunc(name, lower, ops)
+	if err := appendRouterFunc(name, ops, groupPath); err != nil {
+		return err
+	}
+	return patchRouterTest(name)
+}
+
+// patchRouterTest 给 internal/router/router_test.go::buildEngine 的 deps
+// fixture 注入新资源的 zero-value handler。锚点存在就注，没有就跳过——
+// 测试文件可选，不强制存在。
+func patchRouterTest(name string) error {
+	m := routerTestMarker()
+	if _, err := os.Stat(m.file); err != nil {
+		return nil
+	}
+	if err := requireMarker(m.file, m.name); err != nil {
+		// 没锚点视为开发者主动移除，跳过而非 fail-fast。
+		return nil
+	}
+	line := fmt.Sprintf("\t\t%s: &handler.%sHandler{},", name, name)
+	if err := insertBeforeMarker(m.file, m.name, line); err != nil {
+		return err
+	}
+	return nil
 }
 
 // appendRouterFunc 把 register<Name>Routes 函数 append 到 router.go 末尾。
-// 按 yaml path 推 r.Group("/<resource>") + 子路径注册。
-func appendRouterFunc(name, lower string, ops []operation) error {
-	groupPath := groupPathFor(name, lower)
-
+// groupPath 来自 collectOperations 算出的 resourcePrefix 去掉 /api/v1。
+func appendRouterFunc(name string, ops []operation, groupPath string) error {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, `
 // register%[1]sRoutes 挂 %[2]s 路由——由 make new-endpoint NAME=%[1]s 按
@@ -1089,15 +1191,6 @@ func writeRouteGroup(b *bytes.Buffer, group, name string, ops []operation) {
 		fmt.Fprintf(b, "%s%s.%s(%q, deps.%s.%s)\n",
 			indent, group, method, op.GinPath, name, op.HandlerMethod)
 	}
-}
-
-// groupPathFor 给 r.Group 选一个路径。约定走 "/<lower(name)>s" 形态——
-// 与现有 example 路由一致；如果 yaml 里资源前缀不是这个形态（罕见），
-// 生成的 group path 可能与 path 拼起来不完全等于 yaml，但 gin 路由实际效果
-// 不受影响（OpenAPI 的 verify 已经保证 ServerInterface 在 oapi 这一侧契约对齐）。
-func groupPathFor(name, lower string) string {
-	_ = name
-	return "/" + lower + "s"
 }
 
 // patchAPIServer 注入 internal/handler/openapi.go：

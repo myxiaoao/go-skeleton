@@ -57,6 +57,7 @@ func buildEngine(t *testing.T, devTokenEnabled bool) *gin.Engine {
 		Auth:         &handler.AuthHandler{DevTokenAvailable: devTokenEnabled},
 		AuthRequired: authRequired,
 		Example:      &handler.ExampleHandler{},
+		// NEH test-deps
 	}
 	if err := RegisterRoutes(api, deps); err != nil {
 		t.Fatalf("RegisterRoutes: %v", err)

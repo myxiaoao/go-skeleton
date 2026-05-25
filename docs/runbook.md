@@ -208,6 +208,22 @@ make run-worker &              # 消费 Asynq
 > 改表结构走"写 `migrations/<序号>_<描述>.sql` + 跑 `make run-migrate`"，不要改 model
 > 等 AutoMigrate（已移除）。
 
+### 迁移文件 lint（commit 前会自动跑）
+
+`make verify` 通过 `migrations/migrations_test.go` 强制三道门：
+
+1. **文件名**：`<14 位 UTC 时间戳>_<snake_case>.sql`（`make migrate-create` 默认输出格式）。少时分秒会同日撞版本号；带大写 / 连字符跨工具脚本兼容性差。
+2. **goose 注解**：必须同时含 `-- +goose Up` 和 `-- +goose Down`。
+3. **破坏性 DDL 必须标注**：检测 Up 段里的 `DROP TABLE` / `DROP COLUMN` / `DROP CONSTRAINT` / `ALTER COLUMN TYPE` / `SET NOT NULL` / `RENAME COLUMN|TO` / `TRUNCATE`，命中后必须配 `-- breaking: <reason>`（或 `-- +breaking <reason>`）显式标注：
+
+   ```sql
+   -- +goose Up
+   -- breaking: 配合 v2.4 服务下线，old_email 列已无引用方
+   ALTER TABLE users DROP COLUMN old_email;
+   ```
+
+   挡住"无声 DROP COLUMN"这类回滚困难的提交；真要 expand-contract 时 marker 是"自证已做风险评估"的痕迹。配合 `docs/deploy.md` §5 升级 / 回滚段使用。
+
 停服：
 
 ```sh

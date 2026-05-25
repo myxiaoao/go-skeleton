@@ -14,6 +14,44 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`make dev-all` 一条命令起本地三进程**:
+  `scripts/dev-all.sh` 串联 `dev-deps-check` → `cmd/migrate -cmd up` →
+  并发起 API + Worker，stdout 加 `[api]` / `[worker]` 前缀；bash 3.2
+  兼容（macOS 自带），Ctrl-C 优雅停（SIGTERM →
+  `GRACEFUL_SHUTDOWN_TIMEOUT` 默认 15s → SIGKILL 兜底）。任一子进程
+  退出会带走另一个，exit code 透传给 make。`docs/runbook.md` 同步
+  「本地起完整三进程」段。
+- **`make oapi-breaking` + CI 检测 OpenAPI 破坏性变更**:
+  `scripts/oapi-breaking.sh` 用 [oasdiff](https://github.com/oasdiff/oasdiff)
+  pin 版本 v1.16.0，对比 `OAPI_BREAKING_BASE_REF`（默认 origin/master）
+  与工作树的 `api/openapi.yaml`，`--fail-on ERR` 只在确凿 breaking 时
+  退出非零；空 base ref 给 fetch-depth 提示；同 ref 自比直接放过。
+  `.github/workflows/ci.yml` 新增 oapi-breaking job，仅 PR 上跑，
+  fetch-depth 0，base_ref 通过 env 传 + 字符白名单校验避免 GitHub
+  Actions expression injection；故意 expand-contract 时用
+  `OAPI_ALLOW_BREAKING=1` 跳过并在 PR 描述写明缘由。**不接入 `make
+  verify`**：定位是 PR / 发版前门禁，本地不一定有 fresh origin/master，
+  expand-contract 阶段会故意 breaking。
+- **`new-endpoint.sh` 测试模板升级成可直接跑通的 smoke 用例**:
+  handler / service / repository 各生成
+  `Test${NAME}HandlerCreateSuccess` / `Test${NAME}ServiceCreateSuccess` /
+  `Test${NAME}RepositoryCreate`，用 `mock${NAME}Repo` /
+  `setup${NAME}Router` / `${LOWER}DryRunDB` 等带前缀的 helper 避开
+  `example_test.go` 同包重名；生成后 `go test` 可立即通过，替代原
+  `TestPlaceholder Skip`。假设新模块沿用 example 接口形态（Create /
+  List / EnqueueTask）；改了业务签名后按 `example_test.go` 风格手补。
+- **迁移文件 lint（migrations/migrations_test.go 扩充）**:
+  在原有"版本号严格递增 + +goose Up/Down 注解"基础上新增两道门：
+  (1) `TestMigrationsFilenameFormat` 强制
+  `<14位 UTC 时间戳>_<snake_case>.sql`；
+  (2) `TestMigrationsBreakingDDLMustBeMarked` 检测 Up 段里的
+  `DROP TABLE/COLUMN/CONSTRAINT`、`ALTER COLUMN TYPE/SET NOT NULL`、
+  `RENAME COLUMN/TO`、`TRUNCATE` 等破坏性 DDL，必须配
+  `-- breaking: <reason>`（或 `-- +breaking <reason>`）显式标注，
+  把 expand-contract 决策从"review 拍脑袋"提升成"commit 时必须自证"。
+  另加 `TestMigrationsBreakingDDLDetectionLogic` 走表驱动反向用例
+  确保正则真能拦下来，避免现仓库没破坏性 DDL 时 lint 沉默失败。
+  CLAUDE.md / AGENTS.md 顶层目录段同步说明。
 - **`/docs` 在线 API 文档（Stoplight Elements）**:
   `internal/handler/openapi.go` 新增 `OpenAPIHandler.Docs`，返回内嵌的
   Stoplight Elements 页面（unpkg CDN，锁版本 `@stoplight/elements@8.4.2`），

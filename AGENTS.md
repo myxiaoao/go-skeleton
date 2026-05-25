@@ -27,6 +27,8 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——`AutoMigrate` 已移除，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`cmd/migrate` 用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
 
+迁移文件 lint 由 `migrations/migrations_test.go` 在 `make verify` 链里执行，强制三道门：(1) 文件名严格 `<14位时间戳>_<snake_case>.sql`；(2) 必须含 `-- +goose Up` 与 `-- +goose Down` 注解；(3) Up 段里 `DROP TABLE/COLUMN/CONSTRAINT`、`ALTER COLUMN TYPE/SET NOT NULL`、`RENAME COLUMN/TO`、`TRUNCATE` 这类破坏性 DDL 必须配 `-- breaking: <reason>`（或 `-- +breaking <reason>`）显式标注。新增危险 DDL 形态时同步更新 `migrations_test.go::dangerousDDL`。
+
 ## 通用工作准则（适用于所有 AI 编码助手）
 
 - **始终使用简体中文回复**；技术术语保持英文原文。

@@ -121,6 +121,29 @@ type ListExamplesRes struct {
 	Total    int64           `json:"total"`
 }
 
+// ProcessExample 是 example 异步任务的业务入口——满足
+// internal/worker.ExampleProcessor 接口。worker 消费到 example task 后调
+// 它，service 在这里把"调 repository / 通知外部系统 / 落审计"等真实业务
+// 步骤串起来。
+//
+// 当前模板态只是落一条 example 记录 + 打日志：让接入新业务时有一个清晰的
+// "改这里"靶点，而不是空函数。返回 error 会让 asynq 按 MaxRetry 重试。
+func (s *ExampleService) ProcessExample(ctx context.Context, payload task.ExamplePayload) error {
+	example := model.Example{Name: payload.Name}
+	if err := s.repo.Create(ctx, &example); err != nil {
+		applog.FromContext(ctx).Error("process example task: persist failed",
+			zap.String("name", payload.Name),
+			zap.Error(err),
+		)
+		return err
+	}
+	applog.FromContext(ctx).Info("example task processed",
+		zap.String("name", payload.Name),
+		zap.Uint64("example_id", example.ID),
+	)
+	return nil
+}
+
 // List 返回分页 example 列表。Limit 缺省给 20 是项目内约定，让前端不传
 // 也有可用默认值；想改默认值前先看一下分页 UI 设计。
 func (s *ExampleService) List(ctx context.Context, req *ListExamplesReq) (*ListExamplesRes, error) {

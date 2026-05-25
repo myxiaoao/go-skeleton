@@ -109,10 +109,22 @@ make verify
 
 ```sh
 # 1. internal/task/<name>.go：定义任务类型常量 + payload struct
-# 2. internal/worker/handler.go::RegisterHandlers 注册消费 handler
-# 3. service 通过 ExampleQueue 接口发布（不要直接拿 *asynq.Client）
+# 2. internal/worker/handler.go：
+#    a. 定义 typed processor 接口（如 XxxProcessor.ProcessXxx(ctx, payload) error），
+#       不要回退到 interface{} —— 让 worker handler 调"有名有姓"的方法，
+#       接错 service 时编译期就能发现。
+#    b. 在 Deps 上加一个 Xxx 字段，类型用上一步的接口。
+#    c. RegisterHandlers 里 mux.HandleFunc(task.TypeXxx, deps.HandleXxxTask)。
+#    d. 写一个 HandleXxxTask：解 payload → 调 deps.Xxx.ProcessXxx(ctx, p)。
+# 3. service：给对应 Service 加一个方法实现该接口（落库 / 调外部系统）。
+# 4. internal/worker.go::buildWorkerDeps：把 service 实例注入 Deps.Xxx。
+# 5. service 一侧通过 ExampleQueue 接口发布任务（不要直接拿 *asynq.Client）。
 make verify
 ```
+
+注意：Deps.Example 未注入时 RegisterHandlers 会回填 noopExampleProcessor 兜底
+（避免模板态 nil deref），但它只打 warn 不真处理；真实业务必须显式注入，
+否则任务会被"消费"但没有副作用。
 
 ## 跑测试
 

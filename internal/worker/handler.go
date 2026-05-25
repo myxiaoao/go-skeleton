@@ -15,15 +15,38 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// ExampleProcessor 示意"业务依赖怎么注入到 worker"。worker 不直接持
-// *gorm.DB —— 那是 repository 的事；业务逻辑挂在 service / usecase 上，
-// 通过本地接口隔离引入。当前 example 任务没有真正的业务步骤，所以接口里
-// 没有方法，仅作 nil-vs-not-nil 的可用性信号。
+// ExampleProcessor 是 example 异步任务的业务处理契约——给 worker handler
+// 提供一个 "有名有姓" 的方法签名而不是空 interface。worker 不直接持
+// *gorm.DB——那是 repository 的事；业务逻辑挂在 service / usecase 上，通过
+// 本地接口隔离引入。
 //
-// 真正的业务任务应该把 service 方法暴露成接口（如 OrderShipper.MarkShipped
-// (ctx, orderID) error），然后 internal/worker.go::buildWorkerDeps 注入
-// service 实例，worker handler 调接口完成业务。
-type ExampleProcessor interface{}
+// 接入新业务任务时，按这个模板做：
+//
+//  1. 在 internal/task/<domain>.go 定义 payload + NewXxxTask 工厂；
+//  2. 在本文件定义 XxxProcessor 接口（方法签名收 ctx + 已解码 payload）；
+//  3. 在 service 包给对应 Service 加方法实现接口；
+//  4. internal/worker.go::buildWorkerDeps 注入 service 实例；
+//  5. RegisterHandlers 里 mux.HandleFunc 调 typed 接口。
+//
+// 默认 noopExampleProcessor 让模板态（service 未接入）也能跑起来，日志会
+// 提示业务未接入；真实业务必须显式注入，避免静默吞任务。
+type ExampleProcessor interface {
+	ProcessExample(ctx context.Context, payload task.ExamplePayload) error
+}
+
+// noopExampleProcessor 是 Deps.Example 未注入时的兜底实现：保留模板的
+// "任务被消费到了"信号，避免新接 worker 的开发者以为任务丢了，同时打 warn
+// 提醒"该接业务了"。生产业务必须替换它，否则任务跑了但不会有实际副作用。
+type noopExampleProcessor struct{}
+
+// ProcessExample 是 noopExampleProcessor 的兜底实现：只打 warn，不返回 error
+// （返 error 会触发 asynq 重试，模板态下重试无意义）。
+func (noopExampleProcessor) ProcessExample(ctx context.Context, payload task.ExamplePayload) error {
+	applog.FromContext(ctx).Warn("example task consumed by noop processor; wire ExampleProcessor in buildWorkerDeps",
+		zap.String("name", payload.Name),
+	)
+	return nil
+}
 
 // Deps 收拢所有异步任务 handler 共用的依赖。
 //
@@ -39,24 +62,34 @@ type Deps struct {
 	Queue   *taskqueue.Queue
 }
 
-// HandleExampleTask 消费 example 异步任务。当前 demo 仅打日志，真实业务
-// 会改成调 Example service 接口完成持久化 / 外部调用。
+// HandleExampleTask 消费 example 异步任务：解 payload → 调 typed
+// ExampleProcessor。处理失败返回 error 让 asynq 走重试策略；解析失败也返
+// error 但属于不可恢复（数据错），上层 asynq 会按 MaxRetry 控制。
+//
+// Deps.Example 在 RegisterHandlers 阶段已经回填了 noopExampleProcessor，
+// 所以这里**不**再 nil 兜底——如果 nil 进来说明 RegisterHandlers 被绕过
+// 了，让 panic / nil deref 暴露出来比静默吞任务好。
 func (d *Deps) HandleExampleTask(ctx context.Context, t *asynq.Task) error {
 	var p task.ExamplePayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
 		return fmt.Errorf("unmarshal example payload: %w", err)
 	}
-
-	applog.FromContext(ctx).Info("example task executed",
-		zap.String("name", p.Name),
-		zap.Bool("example_processor_available", d != nil && d.Example != nil),
-	)
+	if err := d.Example.ProcessExample(ctx, p); err != nil {
+		applog.FromContext(ctx).Error("example task processing failed",
+			zap.String("name", p.Name),
+			zap.Error(err),
+		)
+		return err
+	}
 	return nil
 }
 
 // RegisterHandlers 把所有异步任务 handler 注册到 mux 上。注册 TraceMiddleware
 // 让 task 调用链自带 trace_id；deps 为 nil 兜底成空 Deps，让 mux.Handle 注
 // 册路径仍然完整。
+//
+// Example 未注入时回填 noopExampleProcessor：避免 HandleExampleTask 走到
+// nil deref，保留模板可运行性，但 noop 会打 warn 提醒接业务。
 func RegisterHandlers(mux *asynq.ServeMux, deps *Deps) {
 	if mux == nil {
 		return
@@ -64,6 +97,9 @@ func RegisterHandlers(mux *asynq.ServeMux, deps *Deps) {
 	registerTraceMiddleware(mux)
 	if deps == nil {
 		deps = &Deps{}
+	}
+	if deps.Example == nil {
+		deps.Example = noopExampleProcessor{}
 	}
 	mux.HandleFunc(task.TypeExampleTask, deps.HandleExampleTask)
 }

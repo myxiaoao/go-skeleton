@@ -9,9 +9,16 @@ import (
 	"go.uber.org/zap"
 
 	"go-skeleton/internal/model"
+	"go-skeleton/internal/task"
 	"go-skeleton/pkg/errcode"
 	applog "go-skeleton/pkg/log"
 )
+
+// taskExamplePayload 构造测试用的 example task payload，避免在每个用例里
+// 写一遍 struct literal 噪音。
+func taskExamplePayload(name string) task.ExamplePayload {
+	return task.ExamplePayload{Name: name}
+}
 
 type mockExampleRepo struct {
 	createFunc func(ctx context.Context, example *model.Example) error
@@ -102,6 +109,45 @@ func TestEnqueueTaskQueueUnavailable(t *testing.T) {
 	}
 	if ec.Code() != errcode.QueueUnavailable.Code() {
 		t.Fatalf("expected queue unavailable code, got %d", ec.Code())
+	}
+}
+
+// TestProcessExampleSuccess 覆盖 worker 消费链：payload → repo.Create → 成功。
+// payload.Name 必须传给 repo，否则任务等于丢了。
+func TestProcessExampleSuccess(t *testing.T) {
+	var gotName string
+	repo := &mockExampleRepo{
+		createFunc: func(_ context.Context, example *model.Example) error {
+			gotName = example.Name
+			example.ID = 42
+			return nil
+		},
+	}
+	svc := NewExampleService(repo, nil)
+
+	err := svc.ProcessExample(applog.WithTraceID(context.Background(), "trace-x"),
+		taskExamplePayload("queued-job"))
+	if err != nil {
+		t.Fatalf("ProcessExample: %v", err)
+	}
+	if gotName != "queued-job" {
+		t.Fatalf("repo got name=%q, want %q", gotName, "queued-job")
+	}
+}
+
+// TestProcessExampleRepoError 验证 repo 报错时 ProcessExample 透传原 error，
+// 让 asynq 走 MaxRetry。这里**不**包装成 errcode——异步路径没有客户端，
+// 重试策略只看 error 是否 nil，而不是错误码。
+func TestProcessExampleRepoError(t *testing.T) {
+	want := errors.New("db down")
+	repo := &mockExampleRepo{
+		createFunc: func(context.Context, *model.Example) error { return want },
+	}
+	svc := NewExampleService(repo, nil)
+
+	err := svc.ProcessExample(context.Background(), taskExamplePayload("x"))
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
 	}
 }
 

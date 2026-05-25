@@ -1,0 +1,107 @@
+package worker
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/hibiken/asynq"
+
+	"go-skeleton/internal/task"
+)
+
+// mockExampleProcessor 是 ExampleProcessor 的 inline mock：捕获最近一次调用
+// 的 payload，processFunc 允许注入返回的 error 路径。
+type mockExampleProcessor struct {
+	lastPayload task.ExamplePayload
+	called      int
+	processFunc func(ctx context.Context, payload task.ExamplePayload) error
+}
+
+func (m *mockExampleProcessor) ProcessExample(ctx context.Context, payload task.ExamplePayload) error {
+	m.called++
+	m.lastPayload = payload
+	if m.processFunc != nil {
+		return m.processFunc(ctx, payload)
+	}
+	return nil
+}
+
+func makeExampleTaskBytes(t *testing.T, p task.ExamplePayload) []byte {
+	t.Helper()
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
+// TestHandleExampleTaskDispatchesToProcessor 验证 typed contract：handler
+// 解 payload 后必须调到注入的 ExampleProcessor，且把 payload 原样传过去。
+func TestHandleExampleTaskDispatchesToProcessor(t *testing.T) {
+	proc := &mockExampleProcessor{}
+	deps := &Deps{Example: proc}
+	body := makeExampleTaskBytes(t, task.ExamplePayload{Name: "hello", TraceID: "trace-1"})
+
+	if err := deps.HandleExampleTask(context.Background(),
+		asynq.NewTask(task.TypeExampleTask, body)); err != nil {
+		t.Fatalf("HandleExampleTask: %v", err)
+	}
+	if proc.called != 1 {
+		t.Fatalf("processor.called = %d, want 1", proc.called)
+	}
+	if proc.lastPayload.Name != "hello" || proc.lastPayload.TraceID != "trace-1" {
+		t.Fatalf("payload = %+v, want {Name:hello TraceID:trace-1}", proc.lastPayload)
+	}
+}
+
+// TestHandleExampleTaskPropagatesProcessorError 验证 processor 返 error 时
+// handler 透传——让 asynq 走重试策略，不要静默吞错。
+func TestHandleExampleTaskPropagatesProcessorError(t *testing.T) {
+	wantErr := errors.New("downstream blew up")
+	deps := &Deps{Example: &mockExampleProcessor{
+		processFunc: func(context.Context, task.ExamplePayload) error { return wantErr },
+	}}
+	body := makeExampleTaskBytes(t, task.ExamplePayload{Name: "fail"})
+
+	err := deps.HandleExampleTask(context.Background(),
+		asynq.NewTask(task.TypeExampleTask, body))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err = %v, want %v", err, wantErr)
+	}
+}
+
+// TestHandleExampleTaskRejectsMalformedPayload 验证 JSON 解析失败时返
+// error；这是 unmarshal 错（payload 数据本身坏），不该静默放过。
+func TestHandleExampleTaskRejectsMalformedPayload(t *testing.T) {
+	deps := &Deps{Example: &mockExampleProcessor{}}
+	err := deps.HandleExampleTask(context.Background(),
+		asynq.NewTask(task.TypeExampleTask, []byte("not-json")))
+	if err == nil {
+		t.Fatal("want unmarshal error, got nil")
+	}
+}
+
+// TestRegisterHandlersFillsNoopProcessor 验证 Deps.Example 为 nil 时
+// RegisterHandlers 回填 noopExampleProcessor，避免 HandleExampleTask
+// 走到 nil deref。这是模板态的可运行保险。
+func TestRegisterHandlersFillsNoopProcessor(t *testing.T) {
+	deps := &Deps{}
+	mux := asynq.NewServeMux()
+	RegisterHandlers(mux, deps)
+
+	if deps.Example == nil {
+		t.Fatal("Example should have been backfilled with noopExampleProcessor")
+	}
+	if _, ok := deps.Example.(noopExampleProcessor); !ok {
+		t.Fatalf("Example type = %T, want noopExampleProcessor", deps.Example)
+	}
+
+	// 真跑一遍兜底 processor，确保它不 panic 且不返 error（避免触发 asynq 重试）。
+	body := makeExampleTaskBytes(t, task.ExamplePayload{Name: "noop"})
+	if err := deps.HandleExampleTask(context.Background(),
+		asynq.NewTask(task.TypeExampleTask, body)); err != nil {
+		t.Fatalf("noop processor returned err = %v, want nil", err)
+	}
+}

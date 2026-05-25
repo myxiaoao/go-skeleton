@@ -7,6 +7,8 @@ import (
 	"github.com/hibiken/asynq"
 
 	"go-skeleton/internal/bootstrap"
+	"go-skeleton/internal/repository"
+	"go-skeleton/internal/service"
 	"go-skeleton/internal/worker"
 )
 
@@ -87,21 +89,20 @@ func validateWorkerRegistry(reg *bootstrap.Registry) error {
 	}
 }
 
-// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。当前骨架
-// 的 example handler 不需要 DB，所以只挂 Cache + Queue；真实业务参考代码
-// 内示意把 service 注入 Example 字段。
+// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。
+//
+// Example processor 走 typed contract：reg.DB 可用时注入真 ExampleService
+// （走 repository → gorm 落库），DB 不可用时让 RegisterHandlers 回填
+// noopExampleProcessor 兜底，便于无 DB 的 worker 部署形态（如只跑外部 API
+// 任务）也能起得来。worker 包本身不 import gorm，符合分层规则。
 func buildWorkerDeps(reg *bootstrap.Registry) *worker.Deps {
-	// 示意：业务任务需要 DB 时，在这里组装 service：
-	//
-	//   var exampleSvc worker.ExampleProcessor
-	//   if reg.DB != nil {
-	//       repo := repository.NewExampleRepository(reg.DB.DB())
-	//       exampleSvc = service.NewExampleService(repo, reg.Queue)
-	//   }
-	//
-	// 然后把 exampleSvc 挂到 Deps.Example。worker 包本身不 import gorm。
-	return &worker.Deps{
+	deps := &worker.Deps{
 		Cache: reg.Cache,
 		Queue: reg.Queue,
 	}
+	if reg.DB != nil {
+		repo := repository.NewExampleRepository(reg.DB.DB())
+		deps.Example = service.NewExampleService(repo, reg.Queue)
+	}
+	return deps
 }

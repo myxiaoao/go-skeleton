@@ -57,11 +57,10 @@ func main() {
 	}
 	defer func() { _ = applog.Sync() }()
 
-	// 生产环境无限流（RATE_LIMIT_PER_MINUTE=0）只 warn 不拦——它可能是有意的
-	// （内网服务靠上游 LB/WAF 限流），但裸暴露公网时大概率是漏配，留条日志线索。
-	if cfg.Env.IsProduction() && cfg.RateLimit.RequestsPerMinute == 0 {
-		applog.L().Warn("rate limiting disabled in production",
-			zap.String("hint", "set RATE_LIMIT_PER_MINUTE > 0 unless an upstream proxy enforces it"))
+	// production 下集中输出"非致命但大概率漏配"的提示（不限流、metrics 同端口、
+	// 无 trusted proxies 等）。硬拦项已经在 config.validate 阶段 fail-fast 拦掉。
+	for _, w := range config.ProductionWarnings(cfg) {
+		applog.L().Warn("production config warning", zap.String("hint", w))
 	}
 
 	registry, err := bootstrap.InitAPI(cfg)

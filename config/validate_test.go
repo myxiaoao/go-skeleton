@@ -190,6 +190,37 @@ func TestValidateTableDriven(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "production GIN_MODE=debug 被拒",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = strings.Repeat("a", minJWTSecretBytes)
+				c.Auth.JWTIssuer = "go-skeleton"
+				c.Server.GinMode = "debug"
+			},
+			wantErr:     true,
+			wantInclude: "GIN_MODE",
+		},
+		{
+			name: "production LOG_FORMAT=console 被拒",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.Auth.JWTSecret = strings.Repeat("a", minJWTSecretBytes)
+				c.Auth.JWTIssuer = "go-skeleton"
+				c.Log.Format = "console"
+			},
+			wantErr:     true,
+			wantInclude: "LOG_FORMAT",
+		},
+		{
+			name: "development 下 GIN_MODE=debug 放行（guard 仅生产）",
+			mutate: func(c *Config) {
+				c.Env = EnvDevelopment
+				c.Server.GinMode = "debug"
+				c.Log.Format = "console"
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -218,6 +249,9 @@ func defaultValidConfig() *Config {
 		Server: ServerConfig{
 			RequestTimeout: 30 * time.Second,
 			GracefulDrain:  10 * time.Second,
+			// 默认带 production 安全值，让 production case 不被新 guard 误伤；
+			// 各 case 想测某项漏配时单独 mutate 覆盖即可。
+			GinMode: "release",
 		},
 		Docs: DocsConfig{
 			Theme:  "system",
@@ -228,9 +262,127 @@ func defaultValidConfig() *Config {
 			MaxOpenConns: 30,
 			MaxIdleConns: 15,
 		},
+		Log: LogConfig{
+			Format: "json",
+		},
 		Worker: WorkerConfig{
 			Concurrency: 10,
 			Queues:      map[string]int{"default": 1},
 		},
+	}
+}
+
+// TestProductionWarnings 验证非致命漏配的 warn 列表：non-prod 永远空；
+// prod 下分别覆盖三项触发条件 + 一项"全配齐"的零 warn 路径。
+func TestProductionWarnings(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*Config)
+		wantCount   int
+		wantInclude string // 命中时 warn 列表里至少一条包含此关键词
+	}{
+		{
+			name: "non-production 直接返 nil",
+			mutate: func(c *Config) {
+				c.Env = EnvDevelopment
+				c.RateLimit.RequestsPerMinute = 0
+				c.Server.TrustedProxies = nil
+				c.Server.MetricsEnabled = true
+				c.Server.MetricsAddr = ""
+			},
+			wantCount: 0,
+		},
+		{
+			name: "production 全配齐：零 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsEnabled = true
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+			},
+			wantCount: 0,
+		},
+		{
+			name: "production RATE_LIMIT=0 触发 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 0
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+			},
+			wantCount:   1,
+			wantInclude: "RATE_LIMIT_PER_MINUTE",
+		},
+		{
+			name: "production TRUSTED_PROXIES 空触发 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = nil
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+			},
+			wantCount:   1,
+			wantInclude: "TRUSTED_PROXIES",
+		},
+		{
+			name: "production metrics 同端口触发 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsEnabled = true
+				c.Server.MetricsAddr = ""
+			},
+			wantCount:   1,
+			wantInclude: "METRICS_ADDR",
+		},
+		{
+			name: "production metrics 禁用时不 warn METRICS_ADDR",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsEnabled = false
+				c.Server.MetricsAddr = ""
+			},
+			wantCount: 0,
+		},
+		{
+			name: "nil 输入安全：返 nil",
+			mutate: func(*Config) { /* mutate 不用，直接传 nil 走特殊路径 */
+			},
+			wantCount: -1, // 哨兵：表示直接测 nil
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantCount == -1 {
+				if got := ProductionWarnings(nil); got != nil {
+					t.Fatalf("ProductionWarnings(nil) = %v, want nil", got)
+				}
+				return
+			}
+			cfg := defaultValidConfig()
+			tc.mutate(cfg)
+			warns := ProductionWarnings(cfg)
+			if len(warns) != tc.wantCount {
+				t.Fatalf("warn count = %d (%v), want %d", len(warns), warns, tc.wantCount)
+			}
+			if tc.wantInclude == "" {
+				return
+			}
+			ok := false
+			for _, w := range warns {
+				if strings.Contains(w, tc.wantInclude) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				t.Errorf("no warn contains %q, got %v", tc.wantInclude, warns)
+			}
+		})
 	}
 }

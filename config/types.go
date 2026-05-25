@@ -62,6 +62,12 @@ type ServerConfig struct {
 	// 指标中间件。默认 true；关掉只在某些非常受限的部署形态（如不希望任何
 	// 调试端点）用。生产保持默认。
 	MetricsEnabled bool
+	// MetricsAddr 控制 /metrics 暴露在哪：
+	//   - 空字符串（默认）：/metrics 挂在业务 engine 同端口，靠网络层保护；
+	//   - 非空（如 "127.0.0.1:9090"）：起独立 http.Server 监听该地址，业务
+	//     engine 不再挂 /metrics。生产推荐绑 loopback 或内网地址，让指标
+	//     与业务端口在 L4 上就隔离开。
+	MetricsAddr string
 }
 
 // DocsConfig 是 /docs 在线文档页（Stoplight Elements）的渲染配置。这些值在

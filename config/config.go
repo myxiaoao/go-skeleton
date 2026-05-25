@@ -79,6 +79,7 @@ func Load() (*Config, error) {
 	collect(err)
 	cfg.Server.MetricsEnabled, err = boolEnv("METRICS_ENABLED", true)
 	collect(err)
+	cfg.Server.MetricsAddr = strings.TrimSpace(os.Getenv("METRICS_ADDR"))
 
 	cfg.Docs.HideTryIt, err = boolEnv("DOCS_HIDE_TRY_IT", false)
 	collect(err)

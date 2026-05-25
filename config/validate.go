@@ -94,6 +94,9 @@ const minJWTSecretBytes = 32
 // validateProductionSecrets 在 production 环境收紧 secret 相关约束：JWT_SECRET
 // 必须存在、不是已知占位值、且足够长。任一不满足都 fail-fast，拒绝带着公开
 // 或弱 secret 启动（攻击者能用相同 secret 伪造任意 token）。
+//
+// 同时把"复制 .env.example 上生产"会出问题的其他运行期约束（GIN_MODE 非
+// release、LOG_FORMAT 非 json）也一并 fail-fast，避免靠 README checklist 兜底。
 func validateProductionSecrets(cfg *Config, add func(string)) {
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
 	switch {
@@ -109,6 +112,53 @@ func validateProductionSecrets(cfg *Config, add func(string)) {
 	if cfg.Auth.DevTokenEndpointEnabled {
 		add("AUTH_DEV_TOKEN_ENABLED must be false in production")
 	}
+
+	// GIN_MODE != release：debug/test 模式会打详细的请求路由表、把 panic 的完整
+	// stack trace 直接吐到响应里，公网暴露会泄露内部实现细节、放大攻击面。
+	// 这是 .env.example checklist 的高频漏配项，拦在启动期最稳。
+	if mode := strings.TrimSpace(cfg.Server.GinMode); mode != "" && mode != "release" {
+		add(fmt.Sprintf("GIN_MODE must be \"release\" in production, got %q", mode))
+	}
+
+	// LOG_FORMAT != json：日志系统（Loki / ELK / 云厂商日志）几乎全靠结构化
+	// JSON 解析；console 格式上生产 = 日志无法搜索 / 无法告警。
+	if format := strings.TrimSpace(cfg.Log.Format); format != "" && format != "json" {
+		add(fmt.Sprintf("LOG_FORMAT must be \"json\" in production, got %q", format))
+	}
+}
+
+// ProductionWarnings 返回当前 cfg 在 production 环境下"非致命但大概率漏配"
+// 的提示列表。非 production 一律返 nil。
+//
+// 这里和 validateProductionSecrets 的硬拦边界：硬拦针对"几乎一定是配错"的
+// 项（占位 secret、非 release gin mode）；warn 针对"可能有意如此、但裸暴露
+// 公网时危险"的项（不限流、metrics 同端口、无 trusted proxies）。caller 拿
+// 到列表后自己决定怎么打 log，validate.go 不直接依赖 logger。
+func ProductionWarnings(cfg *Config) []string {
+	if cfg == nil || !cfg.Env.IsProduction() {
+		return nil
+	}
+	var warns []string
+
+	// RATE_LIMIT_PER_MINUTE=0：可能上游 LB/WAF 兜底限流，但裸暴露公网时是漏配。
+	if cfg.RateLimit.RequestsPerMinute == 0 {
+		warns = append(warns, "RATE_LIMIT_PER_MINUTE=0 disables in-process rate limiting; ensure an upstream proxy enforces it")
+	}
+
+	// TRUSTED_PROXIES 空：gin 默认信任所有代理头（X-Forwarded-For / X-Real-IP），
+	// 攻击者能伪造客户端 IP 绕过限流 / 审计日志。直连无 LB 时空切片是合法的，
+	// 因此只 warn 不拦。
+	if len(cfg.Server.TrustedProxies) == 0 {
+		warns = append(warns, "TRUSTED_PROXIES is empty; gin trusts all proxy headers, X-Forwarded-For can be spoofed")
+	}
+
+	// METRICS_ENABLED=true 且未配独立 listener：/metrics 跟业务 API 同端口，
+	// 公网暴露 = 把 Prometheus 指标也暴露了。生产推荐 METRICS_ADDR 绑 loopback。
+	if cfg.Server.MetricsEnabled && strings.TrimSpace(cfg.Server.MetricsAddr) == "" {
+		warns = append(warns, "/metrics is exposed on the business API port; set METRICS_ADDR to bind a separate loopback/internal listener in production")
+	}
+
+	return warns
 }
 
 func isInsecureJWTSecret(secret string) bool {

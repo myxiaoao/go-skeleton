@@ -175,18 +175,23 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## API 契约：OpenAPI 3.1
 
-**真相源是 `api/openapi.yaml`**。改接口的标准流程：
+**真相源是 `api/openapi.yaml`**。新增 endpoint 走 yaml 驱动：
 
-1. 改 `api/openapi.yaml`。
+1. 改 `api/openapi.yaml`：加 path + schema。operationId 用驼峰命名（如 `listOrders / createOrder / getOrder`，与 oapi-codegen 生成的 `ServerInterface.<Method>` 对齐）。需要鉴权的 op 加 `security: [{ bearerAuth: [] }]`。动作名推不出来时加 yaml extension `x-handler-method: <Action>` 显式指定。
 2. `make oapi` 重新生成 `internal/oapi/oapi.gen.go`。
-3. 改 `internal/handler/*` 让代码满足生成的 `oapi.ServerInterface`。
-   编译期保险线是 `internal/handler/openapi.go` 里的：
-   ```go
-   var _ oapi.ServerInterface = (*APIServer)(nil)
-   ```
-   yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注释。
-4. 改 `internal/router/router.go` 注册新路由（或调整中间件）。
+3. `make new-endpoint NAME=<Name>` —— 脚本读 yaml 找 operationId 含 `<Name>` 的 operation，按它们生成 handler / service / repository / model / task 五层骨架 + 三个测试模板，并注入 `internal/server.go` 装配链、`internal/router/router.go` 路由（按 yaml `security` 推 `deps.AuthRequired` 子组）、`internal/handler/openapi.go::APIServer` 字段 + 转发方法。生成的 service / repository 方法返 `errcode.NotImplementedYet`（9005）—— **仓库立即可以 `make verify` 通过**，填业务时换 nil 或具体错误码。
+4. 填业务：handler 补 `c.ShouldBind...`、service 填业务规则换掉 NotImplementedYet、repository 写 SQL、model 补字段。
 5. `make verify` 通过——`oapi-verify` 会用 `git diff --quiet` 检查生成产物已 commit。
+
+**编译期保险线**在 `internal/handler/openapi.go` 里的：
+```go
+var _ oapi.ServerInterface = (*APIServer)(nil)
+```
+yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注释。
+
+**直接手改 `internal/server.go` / `router.go` / `handler/openapi.go` 的注入区是禁忌**——那些块由 `// NEH ...` 锚点界定，下次跑 `make new-endpoint` 会按锚点继续注入。改 yaml 重跑而不是手编辑那几个文件。
+
+**资源识别歧义**：`NAME=Order` 会命中 `listOrderPayments` 这种"前缀复合"resource。脚本不替你判断，命中歧义时用更精确的 `NAME=OrderPayment` 单独跑。
 
 ### 单一真相约定（重要）
 

@@ -54,15 +54,16 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 
 ## 三、加一个 HTTP endpoint（最高频路径）
 
-按这个顺序，少一步都过不了 `make verify`：
+yaml 是真相源。按这个顺序：
 
-1. **改契约**：在 [`api/openapi.yaml`](../api/openapi.yaml) 加 path + schema
-2. **生成代码**：`make oapi`（产物 `internal/oapi/oapi.gen.go` **入库**，不要手改）
-3. **拷模板**：`make new-endpoint NAME=<Name>`（如 `make new-endpoint NAME=Order`）
-   - ⚠️ 跑完**编译不过**，因为新 service 文件引用了还没生成的 oapi 类型
-4. **装配**：在 `internal/server.go::newHTTPHandlers` 把 `repository → service → handler` new 出来
-5. **注册路由**：在 `internal/router/router.go::Dependencies` + `register*Routes` 挂路径
-6. **写测试**：handler / service / repository 各加一个 `_test.go`（见 [§十 测试](#十测试))
+1. **改契约**：在 [`api/openapi.yaml`](../api/openapi.yaml) 加 path + schema。需要鉴权的 operation 加 `security: [{ bearerAuth: [] }]`。需要给某个 operation 显式指定 handler 方法名时，加 yaml extension `x-handler-method: <Action>`（默认按"operationId 去掉 NAME 后剩余 + 首字母大写"自动推）
+2. **生成 oapi 产物**：`make oapi`（产物 `internal/oapi/oapi.gen.go` **入库**，不要手改）
+3. **生成业务骨架**：`make new-endpoint NAME=<Name>`（如 `make new-endpoint NAME=Order`）
+   - 脚本读 yaml 找所有 operationId 含 `<Name>` 的 operation，按它们生成 handler/service/repository/model/task 五层文件 + 三个测试模板
+   - 同时注入 `internal/server.go` 装配链、`internal/router/router.go` 路由（带 yaml security 推出的 `deps.AuthRequired` 子组）、`internal/handler/openapi.go` 的 APIServer 转发方法
+   - 生成的 service / repository 方法返 `errcode.NotImplementedYet`（9005）——**仓库立即可以 `make verify` 通过**
+4. **填业务逻辑**：在 service 里换掉 NotImplementedYet 为真实业务规则；repository 实现 SQL；model 补字段；handler 补 `c.ShouldBind...` 把 req 传给 service
+5. **写测试**：参考生成的 `*_test.go` smoke 模板 + 现有 `example_test.go`（见 [§十 测试](#十测试)）
 
 详细分层规则：[CLAUDE.md::分层规则](../CLAUDE.md)。
 
@@ -70,6 +71,9 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 - handler 写业务规则 → 挪到 service
 - service 收 `*gin.Context` → 改成 `context.Context`
 - service / handler 直接 import `gorm.io/gorm` → 通过 service 包里的 repository 接口隔离
+- 手改 `make new-endpoint` 生成的注入区（`// NEH ...` 锚点）→ 改 yaml 重跑
+
+**生成骨架后跑哪里去？** 资源识别用"operationId 大小写不敏感包含 NAME"。如 `NAME=Order` 命中 `listOrders / createOrder / getOrder / enqueueOrderTask`；但同时也会误命中 `listOrderPayments`——歧义时让 NAME 更精确（如 `NAME=OrderPayment` 单独跑）。
 
 ---
 

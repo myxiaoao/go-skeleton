@@ -99,33 +99,38 @@ make drop-example   # 一次性脚本，需 clean checkout
 - 跑 `make oapi` 重新生成 `internal/oapi/oapi.gen.go`、`go mod tidy` 收敛依赖
 - 跑构建 + 测试 + 静态校验子集（fmt/vet/test/lint/architecture-verify/env-verify/tidy-verify/docs-verify）确认不破坏
 
-跑完手动 commit 后再跑一次 `make verify`，让 oapi-verify / docs-deploy-check / docs-errcodes-verify（这些比对工作树 vs HEAD）也变绿。然后 `make new-endpoint NAME=<Name>` 接真业务。
-
-> 注意：`make new-endpoint` 依赖 `internal/<layer>/example.go` 当模板。drop 跑过后模板就没了——再起新模块需从 git 历史 `git checkout <pre-drop-sha> -- internal/<layer>/example.go` 恢复模板，或干脆先 `git revert` drop-example 那条 commit。
+跑完手动 commit 后再跑一次 `make verify`，让 oapi-verify / docs-deploy-check / docs-errcodes-verify（这些比对工作树 vs HEAD）也变绿。然后 `make new-endpoint NAME=<Name>` 接真业务（脚本已改成 yaml 驱动，不依赖 Example 模板源文件——drop 后照常可用）。
 
 ## 新增一个 HTTP API endpoint
 
-```sh
-# 1. 一条命令生成 5 个分层文件 + 测试 stub + server.go / router.go 装配。
-#    脚本按 internal/server.go 和 internal/router/router.go 里的 // NEH
-#    锚点注释自动注入，不要手动改这些锚点行。
-make new-endpoint NAME=<Name>             # 如 make new-endpoint NAME=Order
+yaml 是真相源，脚本按 yaml 反向驱动：
 
-# 2. 按脚本最后打印的提示补两件人工活：
-#    a. api/openapi.yaml：加 paths + components.schemas（脚本给了 stub）
-#    b. internal/handler/openapi.go::APIServer：加字段 + ServerInterface
-#       方法骨架（脚本给了 stub）
-#    然后跑：
+```sh
+# 1. 改 api/openapi.yaml：加 paths + components.schemas
+#    operationId 命名约定：动词 + NAME（如 listOrders / createOrder / getOrder）；
+#    需要鉴权的 op 加 security: [{ bearerAuth: [] }]；
+#    动作名推不出来时加 yaml extension x-handler-method: <Action> 显式指定。
+
+# 2. 生成 oapi 产物（ServerInterface）
 make oapi
 
-# 3. 业务字段调整：脚本生成的 *.go 是 example 模板的复刻，要按真实业
-#    务改 model 字段、service 方法、repository SQL。
-#    测试 stub 是 placeholder（Skip），按 internal/<layer>/example_test.go
-#    的"标准库 testing + 手写 mock"风格补真实用例。
+# 3. 生成业务骨架 + 注入 server.go / router.go / handler/openapi.go
+make new-endpoint NAME=<Name>             # 如 make new-endpoint NAME=Order
+# 脚本按 // NEH 锚点注入字段 + 装配链 + 转发方法，不要手改锚点行。
+# 生成的 service / repository 方法返 errcode.NotImplementedYet（9005）——
+# 仓库立即 make verify 通过；填业务时换 nil 或具体错误码。
 
-# 4. 验证
+# 4. 填业务：service 业务规则、repository SQL、model 字段、handler 的
+#    c.ShouldBind 绑定。测试参考 internal/<layer>/example_test.go 的
+#    "标准库 testing + 手写 mock"风格补真实用例。
+
+# 5. 验证
 make verify
 ```
+
+资源识别：脚本扫所有 `operationId` 大小写不敏感包含 NAME 的 operation。例 `NAME=Order` 命中 `listOrders / createOrder / getOrder / enqueueOrderTask`；歧义时（如同时有 `listOrderPayments`）让 NAME 更精确。
+
+中间件注入：yaml 里某 operation 含 `security: [{ bearerAuth: [] }]` 时，生成的 register 函数把它放进 `deps.AuthRequired` 子组；公开 operation 直接挂在 `g` 上。整组在 `deps.AuthRequired == nil` 时跳过——保持开发环境不强依赖 JWT 配置。
 
 **编译期保险**：`internal/handler/openapi.go` 里有
 `var _ oapi.ServerInterface = (*APIServer)(nil)`，OpenAPI yaml 与 APIServer

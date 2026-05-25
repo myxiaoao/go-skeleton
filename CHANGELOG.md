@@ -14,6 +14,25 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`make new-endpoint` 改 yaml 反向驱动**:
+  原"复刻 Example 模板"换成读 `api/openapi.yaml` + `internal/oapi/oapi.gen.go`
+  反向生成。脚本扫 `operationId` 含 NAME 的 operation，按 yaml `path` / `verb`
+  推路由注册，按 `ServerInterface` 方法签名生成 `APIServer` 转发方法；
+  handler 按动作模板（List/Create/Get/Update/Delete/EnqueueTask + 兜底）
+  生成；service / repository 返 `errcode.NotImplementedYet` 占位让骨架直接
+  `make verify` 通过。yaml extension `x-handler-method: <Action>` 可显式
+  指定 handler 方法名（动作推不出来时）；yaml `security: [{ bearerAuth: [] }]`
+  自动把对应路由放进 `deps.AuthRequired` 子组。
+  新加 `errcode.NotImplementedYet`（9005）+ MessageFor；
+  `internal/handler/openapi.go` 加 `// NEH apiserver-fields` /
+  `apiserver-methods` 锚点。
+  `scripts_test.go` 改用 `buildNewEndpoint`（先 `go build` 出 binary 再在 tmp
+  workdir 跑）解决 kin-openapi 第三方依赖在 `t.TempDir()` 里没 go.mod 的问题；
+  覆盖：注入完整、yaml 缺资源 fail-fast、重名拒绝、小写 NAME 拒绝、
+  `x-handler-method` 覆盖、`bearerAuth` 路由分组。
+  `CLAUDE.md` / `AGENTS.md` §API 契约 / `docs/development.md` §三 /
+  `docs/runbook.md` §新增 endpoint 同步重写。
+
 - **Release 供应链增强（SBOM + cosign keyless 签名）**:
   `.github/workflows/release.yml` 在 tag push 流程里加：(1) `anchore/sbom-action`
   生成 `sbom.spdx.json`（SPDX 2.3，扫源码 + go.mod，满足 EU CRA / 合规

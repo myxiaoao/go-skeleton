@@ -17,6 +17,9 @@ on:
 permissions:
   # Required for creating the GitHub Release and uploading assets.
   contents: write
+  # cosign keyless 用 GitHub OIDC 拿短期证书，必须 write。Sigstore Fulcio
+  # 会把 workflow / repo / sha 等元数据签到证书 SAN 里，验证方据此判定来源。
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -27,6 +30,12 @@ jobs:
     name: Build cross-platform binaries and publish release
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # tag 名只来自 push refs/tags/v*（受信值），但还是收到 env 里——避免
+    # 未来有人改 on: 触发条件后忘了审。run: 步骤只引用 $TAG，不在脚本里
+    # 展开 ${{ github.* }} 表达式。
+    env:
+      TAG: ${{ github.ref_name }}
 
     steps:
       - uses: actions/checkout@v6
@@ -53,6 +62,57 @@ jobs:
         # so on a clean tag push this becomes the tag string.
         run: make release
 
+      # SBOM：用 anchore/syft 扫源码 + go.mod，输出 SPDX JSON。每个 tarball
+      # 都有源同一棵代码树，所以共用一份 SBOM（与 tarball 同目录上传）。
+      # SPDX 2.3 是 ISO 标准、被 GitHub / GitLab / EU CRA 普遍接受；要 CycloneDX
+      # 也可同时跑——按需扩展。
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/${{ env.TAG }}/sbom.spdx.json
+          # 不再上传到 release：下一步统一上传，否则会重复。
+          upload-release-assets: false
+          upload-artifact: false
+
+      # cosign keyless 签 tarball + SHA256SUMS + SBOM。私钥不落盘——证书走
+      # Fulcio + Rekor 透明日志。验证方用：
+      #   cosign verify-blob \
+      #     --certificate <file>.crt \
+      #     --signature <file>.sig \
+      #     --certificate-identity-regexp 'https://github.com/<org>/<repo>/.github/workflows/release.yml@.*' \
+      #     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+      #     <file>
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          # pin 版本，避免 latest 漂移影响验签。
+          cosign-release: v2.4.1
+
+      - name: Sign release artifacts (keyless)
+        env:
+          DIST: dist/${{ env.TAG }}
+        run: |
+          set -e
+          cd "$DIST"
+          for f in go-skeleton-*-linux-amd64.tar.gz \
+                   go-skeleton-*-linux-arm64.tar.gz \
+                   SHA256SUMS \
+                   sbom.spdx.json; do
+            [ -e "$f" ] || { echo "missing artifact: $f" >&2; exit 1; }
+            echo "=== signing $f ==="
+            # --yes 跳过交互确认；CI 环境必须。
+            cosign sign-blob \
+              --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.crt" \
+              "$f"
+          done
+          echo "=== signed artifacts ==="
+          # 加 -- 避免文件名中可能的 dash 被当成 ls 选项（shellcheck SC2035）。
+          ls -1 -- *.sig *.crt
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -61,3 +121,6 @@ jobs:
             dist/*/go-skeleton-*-linux-amd64.tar.gz
             dist/*/go-skeleton-*-linux-arm64.tar.gz
             dist/*/SHA256SUMS
+            dist/*/sbom.spdx.json
+            dist/*/*.sig
+            dist/*/*.crt

@@ -14,6 +14,33 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **Release 供应链增强（SBOM + cosign keyless 签名）**:
+  `.github/workflows/release.yml` 在 tag push 流程里加：(1) `anchore/sbom-action`
+  生成 `sbom.spdx.json`（SPDX 2.3，扫源码 + go.mod，满足 EU CRA / 合规
+  审计场景），(2) `sigstore/cosign-installer` 装 cosign v2.4.1，对 tarball
+  / `SHA256SUMS` / SBOM 都跑 `cosign sign-blob`（keyless，私钥不落盘——
+  走 GitHub OIDC + Fulcio + Rekor 透明日志），产物 `.sig` + `.crt` 与
+  原 tarball 一起挂到 Release。`permissions` 加 `id-token: write` 让
+  workflow 拿到 OIDC token。`docs/deploy.md` §1a 加 `cosign verify-blob`
+  + Fulcio identity 正则的验签示例，以及 SBOM 用 grype 扫漏洞的方法。
+- **CI 加 K8s manifest 校验**:
+  `.github/workflows/ci.yml` 新加 `validate-k8s-manifests` job（与
+  `validate-systemd-units` 平级）：先 `kubectl kustomize` 把 base +
+  `overlays/production` 都构出来（patch target / strategic merge 漂了
+  立即红），再用 kubeconform v0.6.7（pin 版本）`-strict` 做 schema
+  校验——字段拼写错误 / 类型不符 / required 缺失都会被抓；ServiceMonitor
+  这种 CRD 从 datreeio/CRDs-catalog 拉 schema，没找到时
+  `-ignore-missing-schemas` 不阻塞。本地负向测试确认 `replicas` 拼成
+  `replicass` 能被 kubeconform 捕获。
+- **`scripts/*.go` 黑盒回归**:
+  `scripts/scripts_test.go` 给 env-verify / architecture-verify /
+  new-endpoint 加最小回归。脚本本身是 `//go:build ignore` main，
+  没法直接 import；测试用 `t.TempDir` + `git init` 准备假仓库，
+  用 `go run /abs/path/scripts/X.go` 走真实 CLI 入口。覆盖：env-verify
+  happy path / 缺 .env.example 失败 / 注释字面量不误命中；architecture
+  规则 1（gin 入 service）与规则 2（gorm 入 handler，repository 不被
+  告警）；new-endpoint 注入完整、重名拒覆盖、小写 NAME 被拒。字段对齐
+  场景用 `containsTokens` 容忍 gofmt 多空格，避免脆性断言。
 - **K8s / Kustomize 部署模板**:
   `deploy/k8s/` 新增可直接 apply 的 Kustomize 基线：base/ 含 Namespace +
   ConfigMap（非敏感 env，与 .env.example 对齐）+ Secret 占位 schema

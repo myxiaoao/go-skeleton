@@ -24,11 +24,37 @@
 # 替换 VERSION 为目标版本（例如 v0.2.0），ARCH 为 amd64 或 arm64
 VERSION=v0.2.0
 ARCH=amd64
-curl -L -o go-skeleton.tar.gz \
-  https://github.com/myxiaoao/go-skeleton/releases/download/${VERSION}/go-skeleton-${VERSION}-linux-${ARCH}.tar.gz
-curl -L -o SHA256SUMS \
-  https://github.com/myxiaoao/go-skeleton/releases/download/${VERSION}/SHA256SUMS
+BASE=https://github.com/myxiaoao/go-skeleton/releases/download/${VERSION}
+curl -L -o go-skeleton.tar.gz       "$BASE/go-skeleton-${VERSION}-linux-${ARCH}.tar.gz"
+curl -L -o SHA256SUMS               "$BASE/SHA256SUMS"
 shasum -a 256 -c SHA256SUMS --ignore-missing
+```
+
+#### 验证签名（推荐，CI 用 cosign keyless 签了所有 release 产物）
+
+```sh
+# 装 cosign：https://docs.sigstore.dev/cosign/installation/
+curl -L -o go-skeleton.tar.gz.sig   "$BASE/go-skeleton-${VERSION}-linux-${ARCH}.tar.gz.sig"
+curl -L -o go-skeleton.tar.gz.crt   "$BASE/go-skeleton-${VERSION}-linux-${ARCH}.tar.gz.crt"
+
+cosign verify-blob \
+  --certificate go-skeleton.tar.gz.crt \
+  --signature   go-skeleton.tar.gz.sig \
+  --certificate-identity-regexp 'https://github.com/myxiaoao/go-skeleton/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer     'https://token.actions.githubusercontent.com' \
+  go-skeleton.tar.gz
+```
+
+> 验证通过即可确认该 tarball 由该仓库的 release workflow 在 tag push 时构建（Fulcio 把 workflow / repo / sha 写到证书 SAN 里）。同样的命令换文件名也能验 `SHA256SUMS` 与 `sbom.spdx.json`。
+
+#### SBOM（软件物料清单）
+
+每个 release 附 `sbom.spdx.json`（SPDX 2.3，由 syft 扫源码 + go.mod 生成）。供 EU CRA / 合规审计 / 漏洞扫描器（如 grype）消费：
+
+```sh
+curl -L -o sbom.spdx.json "$BASE/sbom.spdx.json"
+# 例：用 grype 扫 SBOM 查漏洞
+grype sbom:./sbom.spdx.json
 ```
 
 ### 1b. 自己构建

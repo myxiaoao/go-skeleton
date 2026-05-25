@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: go-skeleton
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/managed-by: kustomize

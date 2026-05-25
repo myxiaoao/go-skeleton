@@ -1,0 +1,36 @@
+# ServiceMonitor: 让 Prometheus Operator（kube-prometheus / Bitnami /
+# Grafana Cloud 自带 Operator）自动发现并 scrape /metrics 端点。
+#
+# 前提：集群已装 Prometheus Operator（kubectl get crd servicemonitors.monitoring.coreos.com）。
+# 没有的话注释掉本资源，自行用 Prometheus scrape config 配（见 docs/runbook.md
+# 「Prometheus metrics」段）。
+#
+# 注意 namespaceSelector：默认只在 go-skeleton namespace 找 Service；
+# Prometheus Operator 默认只看自己同 namespace 的 ServiceMonitor，多
+# namespace 部署时要配置 Prometheus CR 的 serviceMonitorNamespaceSelector。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: go-skeleton-api
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: api
+    # 这个 label 与 Prometheus CR 的 serviceMonitorSelector.matchLabels
+    # 对齐。kube-prometheus 默认要 release: prometheus，公司私有部署可能
+    # 不同——按集群实际改。
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: api
+  namespaceSelector:
+    matchNames:
+      - go-skeleton
+  endpoints:
+    - port: metrics             # 对应 api-deployment Service 的 metrics port
+      path: /metrics
+      interval: 30s             # 与 collector 内部 30s 周期对齐
+      scrapeTimeout: 10s
+      scheme: http
+      # 业务进程不要求 /metrics 鉴权（生产靠网络隔离 + Service 不暴露公网）

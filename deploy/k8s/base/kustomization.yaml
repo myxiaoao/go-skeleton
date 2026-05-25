@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 基线：声明 go-skeleton 全部资源。overlays 通过 images: / patches: 等
+# 字段差异化覆盖（dev / staging / production 各自一个 overlay）。
+#
+# Secret 故意**不在这里 resources** 引用 secret.example.yaml：那只是模板
+# 文档，真值由 overlay / 集群外工具创建（见 secret.example.yaml 顶部注释）。
+namespace: go-skeleton
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/part-of: go-skeleton
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - api-deployment.yaml
+  - worker-deployment.yaml
+  - migrate-job.yaml
+  - hpa.yaml
+  - servicemonitor.yaml
+
+# 镜像 tag 占位 REPLACE-TAG 给 overlay 覆盖；base 跑 `kustomize build` 之前
+# 必须有 overlay 指定真 tag，否则 K8s 拒收 :REPLACE-TAG 镜像。

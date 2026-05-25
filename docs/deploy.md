@@ -347,3 +347,55 @@ API / Worker 镜像由编排平台（compose / K8s Deployment）托管，systemd
   二进制路径里的"摘流量 → 换镜像 → 健康检查 → 加回流量"。
 
 README 的 Docker 章节讲本地 `make docker-build` / `make docker-run` 起步；这里讲生产编排。
+
+### K8s 部署模板（Kustomize）
+
+仓库自带可直接 apply 的 Kustomize 基线，避免每个项目从零写一遍：
+
+```
+deploy/k8s/
+├── base/                          # 与环境无关的资源
+│   ├── kustomization.yaml
+│   ├── namespace.yaml
+│   ├── configmap.yaml             # 非敏感 env（与 .env.example 对齐）
+│   ├── secret.example.yaml        # 敏感 env 占位（**不要**直接 apply）
+│   ├── api-deployment.yaml        # API Deployment + Service（含 metrics 端口）
+│   ├── worker-deployment.yaml
+│   ├── migrate-job.yaml
+│   ├── hpa.yaml                   # API CPU HPA
+│   └── servicemonitor.yaml        # Prometheus Operator scrape
+└── overlays/production/
+    └── kustomization.yaml         # 镜像 tag / 副本数 / HPA 边界 patch
+```
+
+最短上手路径（详见 [`deploy/k8s/README.md`](../deploy/k8s/README.md)）：
+
+```sh
+# 1. 建 namespace 和 Secret（不要 apply secret.example.yaml；那只是 schema 模板）
+kubectl create namespace go-skeleton
+kubectl -n go-skeleton create secret generic go-skeleton-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES="postgres://app:STRONG-PWD@pg-host:5432/app?sslmode=require" \
+  --from-literal=REDIS_ADDR="redis-host:6379" \
+  --from-literal=REDIS_PASSWORD="STRONG-REDIS-PWD"
+
+# 2. 在 overlay 改镜像 tag
+cd deploy/k8s/overlays/production
+kustomize edit set image go-skeleton-api=registry/your-org/go-skeleton-api:$VERSION
+kustomize edit set image go-skeleton-worker=registry/your-org/go-skeleton-worker:$VERSION
+kustomize edit set image go-skeleton-migrate=registry/your-org/go-skeleton-migrate:$VERSION
+
+# 3. 一把 apply
+kustomize build . | kubectl apply -f -
+
+# 4. 等迁移 Job 跑成功（CI/CD 推荐拆成 PreSync hook）
+kubectl -n go-skeleton wait --for=condition=complete --timeout=600s job/go-skeleton-migrate
+```
+
+可选依赖（缺哪个就注释掉对应 yaml）：
+
+- `hpa.yaml` → 集群要装 metrics-server
+- `servicemonitor.yaml` → 集群要装 Prometheus Operator
+- Deployment 的 `reloader.stakater.com/auto` annotation → 集群要装 [stakater/Reloader](https://github.com/stakater/Reloader)，否则改 ConfigMap 后要手动 `kubectl rollout restart`
+
+不引 Helm 是有意为之：一份 yaml 比 chart + values 易读、易 diff、易移植。各团队按需自行包 Helm chart。

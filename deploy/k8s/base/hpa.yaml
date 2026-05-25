@@ -1,0 +1,46 @@
+# HPA: API 按 CPU 横扩。Worker 用 KEDA 或自定义 metrics-based HPA（基于
+# asynq_queue_pending）更合适——这里不出 worker 的 HPA 模板。
+#
+# 默认 60% CPU 阈值是个保守起点；接好 metrics 之后按 P95 延迟回压调。
+# 如果集群没装 metrics-server，HPA 不工作（kubectl describe hpa 看
+# "FailedGetResourceMetric"）——可以先注释掉本资源。
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: go-skeleton-api
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: go-skeleton-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    # 缩容更保守，避免抖动：稳定 5 分钟才缩，且每次只减一半。
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      # 扩容快：突发流量来时立刻拉副本。
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+      selectPolicy: Max

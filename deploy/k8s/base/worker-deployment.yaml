@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-skeleton-worker
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: worker
+spec:
+  # Worker 不接外部流量，没有 readiness 摘流的概念，只看队列堆积。副本数
+  # 由 KEDA / 自定义 metrics-based HPA 调（基于 asynq_queue_pending）。
+  # 静态 1 副本起步，按业务量手工调或接 KEDA。
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: worker
+  strategy:
+    # 滚动升级：Asynq 两阶段停服（Stop + Shutdown）+ shutdown 期间不拉新任务、
+    # 现有任务跑完。maxSurge=0 是为了避免老 Worker 还在跑时新 Worker 多消费
+    # 抢任务——单副本场景没区别，多副本时这条更安全。
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: go-skeleton
+        app.kubernetes.io/component: worker
+      annotations:
+        reloader.stakater.com/auto: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: go-skeleton-worker:REPLACE-TAG
+          imagePullPolicy: IfNotPresent
+          args: []
+          # Worker 不开 HTTP server，没有 /livez / /health 可探。让 K8s 看
+          # 进程是否还活（exec/tcp 探针都不适用）走默认的 "进程退出 = 失败"
+          # 重启策略即可。若需更精细的健康判断，业务自行起 sidecar。
+          envFrom:
+            - configMapRef:
+                name: go-skeleton-env
+            - secretRef:
+                name: go-skeleton-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      # 给两阶段优雅停足够时间：Stop 等当前批拉的任务跑完。长任务业务调更长。
+      # 必须 >= max(Asynq Server.ShutdownTimeout, 业务任务最长执行时间) +
+      # 一点缓冲，否则 K8s 会 SIGKILL 截断正在跑的任务。
+      terminationGracePeriodSeconds: 60

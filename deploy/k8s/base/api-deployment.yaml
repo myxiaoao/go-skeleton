@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-skeleton-api
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: api
+spec:
+  # 副本数：HPA 接管后只取这里作为初始值（HPA 调到 max 后 spec.replicas 会被
+  # 改写）。无 HPA 时按业务流量调。
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: api
+  strategy:
+    # 滚动升级：每次最多多起 1 个、最多停 0 个——保证升级过程容量不降级。
+    # 配合 readinessProbe + service 摘流，对应 docs/deploy.md §4 二进制路径
+    # 的"摘流量 → 换镜像 → 健康检查 → 加回流量"。
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: go-skeleton
+        app.kubernetes.io/component: api
+      annotations:
+        # ConfigMap / Secret 变更时强制重启：把 hash 标在 annotation 上让
+        # kustomize 触发 rollout。原生写死时只能改这一行触发；生产建议接
+        # reloader.stakater.com/auto 或 GitOps 工具自动化。
+        reloader.stakater.com/auto: "true"
+    spec:
+      # 拒绝 root + 文件系统只读：与 systemd unit 的 ProtectSystem=strict /
+      # NoNewPrivileges=true 思路一致，最小权限运行。
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          # 镜像 tag 由 kustomize overlay 的 images: 字段统一覆盖（见
+          # overlays/production/kustomization.yaml）。base 里写一个明确的
+          # 占位值，避免误用 :latest 拉到漂移版本。
+          image: go-skeleton-api:REPLACE-TAG
+          imagePullPolicy: IfNotPresent
+          args: []
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: go-skeleton-env
+            - secretRef:
+                name: go-skeleton-secrets
+          # liveness 必须打 /livez（恒 200 直到进程死），不要打 /health——
+          # /health 是 readiness，DB 抖一下会返 503 把健康 Pod 杀掉。
+          # 详见 README "上线前检查清单" 与 docs/runbook.md。
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          # startup 比 liveness 宽松：让冷启动 + 迁移完成等慢路径有时间。
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12  # 60s 起步窗口
+          # K8s 默认资源 == 0，给 HPA / 调度器一个起算点。生产按 trace /
+          # profile 数据调。给的是中等 web 服务的合理初始值。
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # 只读 rootfs 时 /tmp 必须挂 emptyDir，pprof / 临时写盘走它。
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      # graceful shutdown：进程内有 in-flight 请求 drain；K8s 默认 30s 够用，
+      # 长连接 / 慢调用业务可调到 60s。docs/runbook.md §1 详述。
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-skeleton-api
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    # metrics 端口故意**不**在 LoadBalancer 上暴露——业务 Service 公网入口
+    # 不要顺带把 Prometheus 端口曝出去。ServiceMonitor 走 ClusterIP 直接
+    # scrape 这个 port，集群内访问足够。
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP

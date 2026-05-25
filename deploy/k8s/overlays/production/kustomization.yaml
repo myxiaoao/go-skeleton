@@ -1,0 +1,55 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 生产环境 overlay：把 base 的占位 REPLACE-TAG 替换成真镜像 tag，并按
+# 集群规模调副本数 / 资源 limit。
+#
+# CI/CD 用法（示例 GitHub Actions / Argo CD CMP）：
+#   1. 构建并 push 三个镜像，tag=$VERSION（如 v0.4.2）。
+#   2. 跑 `kustomize edit set image` 把 REPLACE-TAG 改成 $VERSION：
+#      cd deploy/k8s/overlays/production
+#      kustomize edit set image go-skeleton-api=registry/your-org/go-skeleton-api:$VERSION
+#      kustomize edit set image go-skeleton-worker=registry/your-org/go-skeleton-worker:$VERSION
+#      kustomize edit set image go-skeleton-migrate=registry/your-org/go-skeleton-migrate:$VERSION
+#   3. 先 apply migrate Job 等成功，再 apply 业务 Deployment（顺序见
+#      base/migrate-job.yaml 顶部注释 / docs/deploy.md §10）。
+#
+# Argo CD / Flux 自动化时可以把上面步骤包成 Application sync hook。
+
+namespace: go-skeleton
+
+resources:
+  - ../../base
+
+# 镜像替换：name 匹配 base 里 image: 字段开头，newName + newTag 覆盖。
+# 实际部署前用 `kustomize edit set image` 改 newTag，或手工改这里。
+images:
+  - name: go-skeleton-api
+    newName: registry/your-org/go-skeleton-api
+    newTag: REPLACE-TAG-WITH-VERSION
+  - name: go-skeleton-worker
+    newName: registry/your-org/go-skeleton-worker
+    newTag: REPLACE-TAG-WITH-VERSION
+  - name: go-skeleton-migrate
+    newName: registry/your-org/go-skeleton-migrate
+    newTag: REPLACE-TAG-WITH-VERSION
+
+# 生产副本数 / 资源 patch 示例。dev/staging overlay 也按这个模式做差异化。
+patches:
+  - target:
+      kind: Deployment
+      name: go-skeleton-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: go-skeleton-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 20

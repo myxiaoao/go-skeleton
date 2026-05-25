@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: go-skeleton-env
+  labels:
+    app.kubernetes.io/name: go-skeleton
+data:
+  # APP_ENV=production 启用 config/validate.go 的硬拦截：JWT_SECRET 非占位、
+  # GIN_MODE=release、LOG_FORMAT=json、AUTH_DEV_TOKEN_ENABLED=false 等
+  # 任一不满足进程直接 fail-fast 退出。开发集群可改成 development 放宽。
+  APP_ENV: "production"
+
+  SERVER_PORT: ":3000"
+  GIN_MODE: "release"
+
+  # 信任的反向代理 CIDR：填集群 Ingress 控制器所在的 Pod CIDR / Node IP，
+  # 让 gin 的 c.ClientIP() 解析真实客户端 IP。空值 = 不信任任何代理，
+  # 此时审计日志里 client_ip 是 Ingress 自己的 IP。
+  TRUSTED_PROXIES: ""
+
+  # 限流（每 IP / 每分钟），生产建议至少打开。0 = 关闭。
+  RATE_LIMIT_PER_MINUTE: "120"
+
+  # /metrics 独立 listener 端口：业务端口（3000）不要顺带暴露指标。配
+  # ServiceMonitor 抓 9090 端口（见 servicemonitor.yaml）。
+  METRICS_ENABLED: "true"
+  METRICS_ADDR: "0.0.0.0:9090"
+
+  # 请求体 / 超时 / CORS 等基础项；按集群入口的形态调。CORS_ALLOW_ORIGINS
+  # 留空意味着同源；公共 API 网关接出去时填白名单。
+  BODY_MAX_BYTES: "1048576"
+  CORS_ALLOW_ORIGINS: ""
+  CORS_ALLOW_CREDENTIALS: "false"
+
+  # JWT 颁发方标识（写日志 / 多服务联调时定位用）；密钥单独走 Secret。
+  JWT_ISSUER: "go-skeleton"
+  JWT_TTL: "24h"
+  # 生产强制关闭无密 dev token 端点，与 APP_ENV=production 配套。
+  AUTH_DEV_TOKEN_ENABLED: "false"
+
+  # 日志：JSON 走 stdout，K8s 节点的 fluentd/vector/promtail 等采集器抓 stdout。
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  LOG_STACKTRACE_LEVEL: "error"
+  AUDIT_LOG_ENABLED: "true"
+  AUDIT_LOG_EXCLUDE_PATHS: "/health,/livez,/metrics"
+
+  # Worker 并发 + 队列权重；按业务流量调，对应 .env.example 的同名变量。
+  WORKER_CONCURRENCY: "10"
+  WORKER_QUEUES: "critical:6,default:3,low:1"
+  WORKER_RETRY_BASE_DELAY: "5s"
+  WORKER_RETRY_MAX_DELAY: "1h"
+
+  # 在线 API 文档页 (/docs)。生产隐藏 TryIt 减少误操作面，schemas 仍展示。
+  DOCS_TITLE: "API"
+  DOCS_THEME: "system"
+  DOCS_LAYOUT: "sidebar"
+  DOCS_HIDE_TRY_IT: "true"
+  DOCS_HIDE_SCHEMAS: "false"
+
+  # PPROF 生产**默认关闭**。临时开 profile 时用 kubectl set env 临时打开
+  # 单个 Pod 的 PPROF_ENABLED=true，排障完务必关掉。详见 docs/runbook.md
+  # 「线上排障：开 pprof」。
+  PPROF_ENABLED: "false"
+  PPROF_ADDR: "127.0.0.1:6060"

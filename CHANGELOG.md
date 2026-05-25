@@ -14,6 +14,19 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **K8s / Kustomize 部署模板**:
+  `deploy/k8s/` 新增可直接 apply 的 Kustomize 基线：base/ 含 Namespace +
+  ConfigMap（非敏感 env，与 .env.example 对齐）+ Secret 占位 schema
+  （`secret.example.yaml`，不入库真值）+ API/Worker Deployment + Service
+  （含独立 9090 metrics 端口）+ migrate Job + API HPA + ServiceMonitor，
+  overlays/production/ 用 patches 覆盖镜像 tag / 副本数 / HPA 边界。
+  liveness 探针打 /livez、readiness 打 /health（与 README 上线前检查
+  清单对齐，避免 DB 抖动杀健康 Pod）；ServiceAccount 默认非 root、只读
+  rootfs、drop ALL capabilities，与 systemd unit 的硬化思路一致。
+  `kubectl kustomize deploy/k8s/overlays/production` 本地可构建（已测）。
+  `deploy/k8s/README.md` 给完整部署 / 回滚 / 与 systemd 对应步骤；
+  `docs/deploy.md` §10 接入指向。不引 Helm（一份 yaml 比 chart+values
+  易读易 diff，团队按需自行包装）。
 - **`make drop-example` 一键拔示例模块**:
   `scripts/drop-example.go`（//go:build ignore + go run，与
   `scripts/gen-errcodes.go` 同风格，不引第三方依赖）。删 12 个 Example

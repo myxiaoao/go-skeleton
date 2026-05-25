@@ -1,0 +1,61 @@
+# Migrate Job: 在 API / Worker rollout 之前跑一次。
+#
+# 用法：
+#   kubectl -n go-skeleton delete job go-skeleton-migrate --ignore-not-found
+#   kubectl -n go-skeleton apply -f migrate-job.yaml
+#   kubectl -n go-skeleton wait --for=condition=complete --timeout=300s \
+#     job/go-skeleton-migrate
+#   # Job 成功后再 kubectl apply deployment 滚业务
+#
+# 推荐做法是把上面四步包成 CI/CD 的"upgrade"阶段，或用 Argo CD / Flux
+# 的 PreSync hook 自动串。**不要**塞进 API Pod 的 initContainer——N 副本
+# = N 个 migrate 抢 advisory lock，浪费启动时间且日志噪音大（docs/deploy.md
+# §10 已有相关说明）。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: go-skeleton-migrate
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: migrate
+spec:
+  # advisory lock 兜底并发不竞态；失败重试 3 次让网络抖动不卡死 rollout。
+  backoffLimit: 3
+  # Job 完成后保留 1 小时方便看日志；过期后 K8s GC。
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: go-skeleton
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: go-skeleton-migrate:REPLACE-TAG
+          imagePullPolicy: IfNotPresent
+          args: ["-cmd", "up"]
+          envFrom:
+            - configMapRef:
+                name: go-skeleton-env
+            - secretRef:
+                name: go-skeleton-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

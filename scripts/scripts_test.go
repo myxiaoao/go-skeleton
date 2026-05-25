@@ -987,6 +987,295 @@ type ServerInterface interface {
 	}
 }
 
+// TestNewEndpoint_XResourceOperationLevel 验证 operation 级 x-resource：
+// /api/v1/orders/quote 的 quoteOrder 通过 x-resource: Pricing 归到 Pricing
+// 资源，NAME=Order 不应命中。
+func TestNewEndpoint_XResourceOperationLevel(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    post:
+      operationId: createOrder
+      responses:
+        '200': { description: OK }
+  /api/v1/orders/quote:
+    post:
+      operationId: quoteOrder
+      x-resource: Pricing
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	CreateOrder(c interface{})
+	QuoteOrder(c interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	if !strings.Contains(handler, "func (h *OrderHandler) Create(") {
+		t.Errorf("Order handler should contain Create, got:\n%s", handler)
+	}
+	// quoteOrder 显式标了 x-resource: Pricing，不应被 Order 命中——即使
+	// operationId 包含 Order 字样。
+	if strings.Contains(handler, "Quote(") {
+		t.Errorf("Order handler should NOT contain Quote (x-resource: Pricing excludes it)\n%s", handler)
+	}
+}
+
+// TestNewEndpoint_XResourcePathLevel 验证 path 级 x-resource：path 上声明
+// 一次，下面所有 verb 自动继承归属。常见用法：operationId 已经含 NAME，
+// path 级 x-resource 主要是为了让"operationId 不含 NAME 但仍属该资源"的
+// op 也能被识别（搭配 x-handler-method 解决动作名推不出来的问题）。
+func TestNewEndpoint_XResourcePathLevel(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	// path 级 x-resource: Order；operationId 标准命名（含 Order）继承默认。
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    x-resource: Order
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: createOrder
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+	CreateOrder(c interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	for _, want := range []string{
+		"func (h *OrderHandler) List(",
+		"func (h *OrderHandler) Create(",
+	} {
+		if !strings.Contains(handler, want) {
+			t.Errorf("Order handler missing %q (path x-resource should still match)\n%s", want, handler)
+		}
+	}
+}
+
+// TestNewEndpoint_XResourcePathLevelWithHandlerMethod 验证 path 级 x-resource
+// + operation 级 x-handler-method 组合：operationId 不含 NAME（甚至不含
+// 资源关键字）时，path x-resource 把 op 拉到 NAME，x-handler-method 提供
+// 动作名。这是 path 级 x-resource 的"重命名" use case。
+func TestNewEndpoint_XResourcePathLevelWithHandlerMethod(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/foo:
+    x-resource: Order
+    get:
+      operationId: listFoo
+      x-handler-method: List
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListFoo(c interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	if !strings.Contains(handler, "func (h *OrderHandler) List(") {
+		t.Errorf("expected OrderHandler.List from x-resource + x-handler-method combo\n%s", handler)
+	}
+}
+
+// TestNewEndpoint_XResourceOperationOverridesPath 验证 operation 级覆盖 path
+// 级：path 默认归 Order，但其中一个 op 单独标 x-resource: Other 跳出。
+func TestNewEndpoint_XResourceOperationOverridesPath(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    x-resource: Order
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: createOrders
+      x-resource: Other
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+	CreateOrders(c interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	if !strings.Contains(handler, "func (h *OrderHandler) List(") {
+		t.Errorf("Order handler should contain List (inherits path-level x-resource), got:\n%s", handler)
+	}
+	// createOrders 显式覆盖成 x-resource: Other，不应进 Order。
+	if strings.Contains(handler, "func (h *OrderHandler) Create(") {
+		t.Errorf("Order handler should NOT contain Create (overridden to x-resource: Other)\n%s", handler)
+	}
+}
+
+// TestNewEndpoint_XResourceFallback 验证没声明 x-resource 时 fallback 到
+// operationId 包含 NAME 的老逻辑——保持向后兼容。
+func TestNewEndpoint_XResourceFallback(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+  /api/v1/order-payments:
+    get:
+      operationId: listOrderPayments
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+	ListOrderPayments(c interface{})
+}
+`)
+
+	// NAME=Order 在 fallback 模式下会命中 listOrderPayments（这是审计指出
+	// 的歧义场景）——本测试**纪念**这个已知边界，并验证文档建议（用
+	// x-resource 显式声明）能解决。这里不断言"不应命中"，因为 fallback
+	// 行为就是会命中；只验证 fallback 路径仍可用。
+	code, out := runBinary(t, dir, bin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+	handlerBytes, err := os.ReadFile(filepath.Join(dir, "internal", "handler", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerBytes)
+	// fallback 把两个都收进来：本身就是已知的兼容代价。
+	listCount := strings.Count(handler, "func (h *OrderHandler) List")
+	if listCount < 1 {
+		t.Errorf("expected fallback to include at least listOrders, handler:\n%s", handler)
+	}
+}
+
+// TestNewEndpoint_DryRun 验证 --dry-run：解析跑通、计划打印、但不写盘也不
+// patch 既有文件。
+func TestNewEndpoint_DryRun(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := newEndpointFixture(t)
+
+	// 跑 dry-run；要走 --dry-run flag（DRY_RUN env 由 runBinary 透传宿主环境，
+	// 但宿主 env 一般没设，这里走 flag 更稳）。
+	code, out := runBinary(t, dir, bin, "Order", "--dry-run")
+	if code != 0 {
+		t.Fatalf("dry-run exit=%d, expected 0\n%s", code, out)
+	}
+
+	// 计划输出要点：
+	for _, want := range []string{
+		"[DRY-RUN]",
+		"Matched 3 operation(s)",
+		"GET    /api/v1/orders",
+		"POST   /api/v1/orders",
+		"GET    /api/v1/orders/{id}",
+		"public",
+		"OrderHandler.List",
+		"+ internal/handler/order.go",
+		"+ internal/service/order_test.go",
+		"~ internal/server.go",
+		"~ internal/router/router.go",
+		"~ internal/handler/openapi.go",
+		"Re-run without --dry-run",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+
+	// 反例：dry-run 不应该真的创建任何文件。
+	if _, err := os.Stat(filepath.Join(dir, "internal", "handler", "order.go")); err == nil {
+		t.Errorf("dry-run should not create internal/handler/order.go but it exists")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "service", "order.go")); err == nil {
+		t.Errorf("dry-run should not create internal/service/order.go but it exists")
+	}
+
+	// 反例：dry-run 不应该 patch server.go—文件应保持 fixture 原始状态。
+	serverBytes, err := os.ReadFile(filepath.Join(dir, "internal", "server.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(serverBytes), "Order") {
+		t.Errorf("dry-run should not patch server.go but Order field appeared")
+	}
+}
+
 // TestNewEndpoint_RejectsMultiPathParam 验证 path 含 >1 个 path 参数（如
 // /users/{uid}/orders/{oid}）时 fail-fast——脚本只覆盖 0/1 个参数的模板。
 func TestNewEndpoint_RejectsMultiPathParam(t *testing.T) {

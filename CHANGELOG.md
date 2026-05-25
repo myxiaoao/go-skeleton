@@ -12,6 +12,25 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Fixed
+
+- **new-endpoint 修审计发现的三个 hard stop**:
+  上一版"yaml 反向驱动"承诺生成后立即 `make verify` 绿，实测发现三个漏点：
+  (1) `internal/router/router_test.go::buildEngine` 的 deps fixture 不会被
+  注入，新 spec 路径走 `TestRouterCoversAllSpecOperations` 时 404；
+  (2) `registerXxxRoutes` 用写死的 `/<lower>s`，导致 `/api/v1/order-items`
+  注册成 `/orderitemss`，违背"yaml 真相源"；
+  (3) `Get`/`Update`/`Delete` 模板写死 `c.Param("id")` 与 service 参数
+  名 `id`，yaml 用 `{order_id}` 时 gin 路径变 `/:order_id` 但 handler 取
+  空字符串。
+  本轮：`router_test.go::buildEngine` 加 `// NEH test-deps` 锚点；脚本注入
+  zero-value handler；`collectOperations` 返回 yaml 真实 resourcePrefix
+  做 `r.Group` 路径；`operation` 新增 `PathParamNames []string` 从 yaml
+  path 正则提取，handler / service 模板用真实参数名；≥2 个 path 参数
+  fail-fast 提示用 `x-handler-method` 覆盖手写。
+  `scripts/scripts_test.go` 新增 5 个回归覆盖：路径来源、参数名、
+  router_test 注入、router_test 缺失场景、多参数 fail-fast。
+
 ### Added
 
 - **`make new-endpoint` 改 yaml 反向驱动**:

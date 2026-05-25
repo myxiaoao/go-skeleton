@@ -66,6 +66,14 @@ Commit prefixes follow the convention in `CLAUDE.md`
   Previously only the cache (go-redis) client honored it; the queue
   connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
   stays cache-only (asynq does not expose it).
+- **`.env.example` 同步校验接入 `make verify`**：新增 `make env-verify` +
+  `scripts/env-verify.sh`，提取 `config/` 里 `os.Getenv` / `getEnvOrDefault`
+  / `boolEnv` / `intEnv` / `int64Env` / `durationEnv` / `environmentEnv` /
+  `queueWeightsEnv` 这些 helper 第一参数的 env key 字面量，与 `.env.example`
+  里 `KEY=...` 行做双向 diff——读了但模板没列 / 列了但代码不读都会 fail。
+  失败时输出 key + 文件:行号，便于编辑器跳转。本次接入暴露了 `TRUSTED_PROXIES`
+  在代码里被读但 `.env.example` 模板缺失的真实漏洞（注释里提了但没有
+  `TRUSTED_PROXIES=` 行），已补回。
 - **架构静态校验接入 `make verify`**：新增 `make architecture-verify`
   + `scripts/architecture-verify.sh`，把以前只写在 CLAUDE.md / AGENTS.md
   里的 import 边界从"靠 AI / 人记住"变成"机器拦截"。失败时输出违规文

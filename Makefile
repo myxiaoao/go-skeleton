@@ -224,7 +224,7 @@ oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
 
 .PHONY: architecture-verify
 architecture-verify: ## 校验分层 import 边界（gin / gorm 包外溢、pkg→internal 反向依赖、service/handler 误用 context.Background）
-	@bash scripts/architecture-verify.sh
+	$(GO) run scripts/architecture-verify.go
 
 .PHONY: env-verify
 env-verify: ## 校验 config/ 读取的 env key 与 .env.example 模板同步

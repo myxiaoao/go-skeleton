@@ -256,7 +256,7 @@ docs-errcodes-verify: docs-errcodes ## 校验 docs/errcodes.md 与代码同步
 
 .PHONY: oapi-breaking
 oapi-breaking: ## 用 oasdiff 检测 OpenAPI 破坏性变更（对比 OAPI_BREAKING_BASE_REF，默认 origin/master）
-	@bash scripts/oapi-breaking.sh
+	$(GO) run scripts/oapi-breaking.go
 
 # drop-example 是一次性收尾脚本：把骨架自带的 Example 示例模块从代码 /
 # 路由 / openapi.yaml / 迁移里整体拔掉，留出干净的脚手架接真业务。

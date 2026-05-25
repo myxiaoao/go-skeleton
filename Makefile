@@ -195,7 +195,7 @@ dev-deps-check: ## 探活本机 Postgres + Redis（不用 docker 装完依赖后
 # ---------- Scaffolding ----------
 
 .PHONY: new-endpoint
-new-endpoint: ## 生成分层骨架 + 测试模板，注入 server/router（NAME=Order）
+new-endpoint: ## 按 api/openapi.yaml 反向生成分层骨架（先改 yaml + make oapi）；NAME=Order
 	@if [ -z "$(NAME)" ]; then \
 		echo "usage: make new-endpoint NAME=Order"; \
 		exit 1; \

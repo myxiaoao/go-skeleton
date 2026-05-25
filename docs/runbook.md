@@ -163,6 +163,20 @@ make oapi
 git add internal/oapi/oapi.gen.go
 ```
 
+## OpenAPI 破坏性变更检查（PR 前 / 发版前）
+
+`make oapi-verify` 只检"yaml 和生成产物对齐"，不判"yaml 改动是不是破坏兼容"。后者走 `oapi-breaking`：
+
+```sh
+make oapi-breaking                              # 默认对比 origin/master
+OAPI_BREAKING_BASE_REF=v0.1.0 make oapi-breaking # 对比某个 tag
+OAPI_ALLOW_BREAKING=1 make oapi-breaking         # 故意 expand-contract 时跳过
+```
+
+底层用 [oasdiff](https://github.com/oasdiff/oasdiff)，`--fail-on ERR` 只有确凿 breaking（删 endpoint、改返回 schema 字段类型等）才退出非零。CI 在 PR 上跑同样命令；故意做 breaking 时在 PR 描述里写明缘由并在该 step env 设 `OAPI_ALLOW_BREAKING=1`，或本地 commit 时同时回写约定。
+
+> `make verify` **不**包含 `oapi-breaking`：本地不一定有 fresh `origin/master`，且 expand-contract 阶段会故意 breaking。它定位是"PR / 发版前"门禁。
+
 ## 本地起完整三进程
 
 **推荐**（一条命令搞定，前台跟随两路日志，Ctrl-C 优雅停）：

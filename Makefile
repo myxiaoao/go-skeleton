@@ -254,6 +254,10 @@ docs-errcodes-verify: docs-errcodes ## 校验 docs/errcodes.md 与代码同步
 	fi
 	@echo "docs-errcodes-verify: docs/errcodes.md is in sync."
 
+.PHONY: oapi-breaking
+oapi-breaking: ## 用 oasdiff 检测 OpenAPI 破坏性变更（对比 OAPI_BREAKING_BASE_REF，默认 origin/master）
+	@bash scripts/oapi-breaking.sh
+
 .PHONY: oapi-verify
 oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
 	@if ! git diff --quiet -- $(OAPI_OUTPUT); then \

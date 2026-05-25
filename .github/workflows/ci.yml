@@ -90,6 +90,40 @@ jobs:
       - name: Run integration tests
         run: make test-integration
 
+  # OpenAPI breaking change 检测：只在 PR 上跑（push 到 master 已经是合并后，
+  # 检测意义不大）。需要 fetch-depth: 0 让 oasdiff 能 git show base ref。
+  #
+  # base ref 用环境变量传：scripts/oapi-breaking.sh 从 env 读 OAPI_BREAKING_BASE_REF，
+  # 不在 run: 里展开 ${{ github.* }} 表达式——避免 GitHub Actions expression
+  # injection（base_ref 来自外部 PR 元数据，理论可控）。
+  oapi-breaking:
+    name: oapi-breaking
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run oapi-breaking
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # BASE_REF 通过 env 传入再拼前缀，run: 里不直接展开表达式。
+          # 多重防御：basename 形态再校验一次，拒非常规分支名。
+          case "$BASE_REF" in
+            *[!A-Za-z0-9._/-]*) echo "unsafe base ref: $BASE_REF" >&2; exit 1 ;;
+          esac
+          export OAPI_BREAKING_BASE_REF="origin/$BASE_REF"
+          make oapi-breaking
+
   validate-systemd-units:
     name: validate-systemd-units
     runs-on: ubuntu-latest

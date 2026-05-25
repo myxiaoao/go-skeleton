@@ -151,3 +151,54 @@ jobs:
             echo "=== $unit ==="
             sudo systemd-analyze verify "$unit"
           done
+
+  # K8s manifest 校验：与 systemd 同等级，确保 deploy/k8s 模板不会因为字段
+  # rename / kind 改名腐烂。两步：
+  #   1) kustomize build：base 与 production overlay 都得能构出来——overlay
+  #      要在 base 上叠 image tag / replica / HPA patch，build 失败说明 patch
+  #      target / strategic merge 漂了。
+  #   2) kubeconform：把上一步 build 出来的 yaml 喂给 kubeconform 做 schema
+  #      校验（apiVersion / kind / required 字段 / value 类型）。
+  #      -strict 让"未声明字段"也红，避免拼错字段名静默通过；
+  #      -ignore-missing-schemas 放过 ServiceMonitor 这种 CRD（kubeconform
+  #      自带的 schema repo 不含第三方 Operator CRD，否则会假阳性红）。
+  validate-k8s-manifests:
+    name: validate-k8s-manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install kubeconform
+        run: |
+          set -e
+          # pin 版本：CI 不能跟随 latest 漂。
+          KUBECONFORM_VERSION=v0.6.7
+          curl -fsSL -o kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+
+      - name: kustomize build (base + overlays/production)
+        run: |
+          set -e
+          for target in deploy/k8s/base deploy/k8s/overlays/production; do
+            echo "=== kustomize build $target ==="
+            # kubectl 自带 kustomize 子命令；不引入额外二进制。
+            kubectl kustomize "$target" >/dev/null
+          done
+
+      - name: kubeconform (schema validate built manifests)
+        run: |
+          set -e
+          for target in deploy/k8s/base deploy/k8s/overlays/production; do
+            echo "=== kubeconform $target ==="
+            kubectl kustomize "$target" | \
+              kubeconform \
+                -strict \
+                -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                -summary -
+          done

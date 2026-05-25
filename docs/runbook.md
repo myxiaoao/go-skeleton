@@ -109,26 +109,36 @@ yaml 是真相源，脚本按 yaml 反向驱动：
 # 1. 改 api/openapi.yaml：加 paths + components.schemas
 #    operationId 命名约定：动词 + NAME（如 listOrders / createOrder / getOrder）；
 #    需要鉴权的 op 加 security: [{ bearerAuth: [] }]；
+#    资源归属推荐 x-resource: <Name>（path 级默认 / operation 级覆盖）显式声明，
+#      不写时 fallback 到 "operationId 包含 NAME"；
 #    动作名推不出来时加 yaml extension x-handler-method: <Action> 显式指定。
 
 # 2. 生成 oapi 产物（ServerInterface）
 make oapi
 
-# 3. 生成业务骨架 + 注入 server.go / router.go / handler/openapi.go
+# 3. 预览生成计划（推荐 review 时先跑，不写盘）
+make new-endpoint NAME=<Name> DRY_RUN=1   # 也接受 --dry-run / -n
+# 打印：匹配到的 ops 表、router 表（verb / path / auth 分组）、文件清单。
+
+# 4. 真正生成业务骨架 + 注入 server.go / router.go / handler/openapi.go
 make new-endpoint NAME=<Name>             # 如 make new-endpoint NAME=Order
 # 脚本按 // NEH 锚点注入字段 + 装配链 + 转发方法，不要手改锚点行。
 # 生成的 service / repository 方法返 errcode.NotImplementedYet（9005）——
 # 仓库立即 make verify 通过；填业务时换 nil 或具体错误码。
 
-# 4. 填业务：service 业务规则、repository SQL、model 字段、handler 的
+# 5. 填业务：service 业务规则、repository SQL、model 字段、handler 的
 #    c.ShouldBind 绑定。测试参考 internal/<layer>/example_test.go 的
 #    "标准库 testing + 手写 mock"风格补真实用例。
 
-# 5. 验证
+# 6. 验证
 make verify
 ```
 
-资源识别：脚本扫所有 `operationId` 大小写不敏感包含 NAME 的 operation。例 `NAME=Order` 命中 `listOrders / createOrder / getOrder / enqueueOrderTask`；歧义时（如同时有 `listOrderPayments`）让 NAME 更精确。
+资源识别：优先看 yaml 的 `x-resource`（operation 级 > path 级），未声明时 fallback 到 "operationId 大小写不敏感包含 NAME"。`NAME=Order` 走 fallback 时会命中 `listOrders / createOrder / getOrder / enqueueOrderTask`，但同时误命中 `listOrderPayments`——歧义场景直接在 yaml 写 `x-resource: Order` / `x-resource: OrderPayment` 显式归属。
+
+支持边界 / 不支持形态见 CLAUDE.md / AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run vs ≥2 path 参数 / 同资源跨多根路径）。
+
+调试单跑：`make scaffold-verify` 跑 `scripts/` 黑盒回归（支持 `RUN=TestXxx V=1`），快于 `make verify`。
 
 中间件注入：yaml 里某 operation 含 `security: [{ bearerAuth: [] }]` 时，生成的 register 函数把它放进 `deps.AuthRequired` 子组；公开 operation 直接挂在 `g` 上。整组在 `deps.AuthRequired == nil` 时跳过——保持开发环境不强依赖 JWT 配置。
 

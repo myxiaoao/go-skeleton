@@ -56,10 +56,10 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 
 yaml 是真相源。按这个顺序：
 
-1. **改契约**：在 [`api/openapi.yaml`](../api/openapi.yaml) 加 path + schema。需要鉴权的 operation 加 `security: [{ bearerAuth: [] }]`。需要给某个 operation 显式指定 handler 方法名时，加 yaml extension `x-handler-method: <Action>`（默认按"operationId 去掉 NAME 后剩余 + 首字母大写"自动推）
+1. **改契约**：在 [`api/openapi.yaml`](../api/openapi.yaml) 加 path + schema。需要鉴权的 operation 加 `security: [{ bearerAuth: [] }]`。资源归属推荐显式声明 `x-resource: <Name>`——path 级写一次下面所有 verb 继承，operation 级可覆盖（不声明时 fallback 到"operationId 包含 NAME"老逻辑）。需要给某个 operation 显式指定 handler 方法名时，加 yaml extension `x-handler-method: <Action>`（默认按"operationId 去掉 NAME 后剩余 + 首字母大写"自动推）
 2. **生成 oapi 产物**：`make oapi`（产物 `internal/oapi/oapi.gen.go` **入库**，不要手改）
-3. **生成业务骨架**：`make new-endpoint NAME=<Name>`（如 `make new-endpoint NAME=Order`）
-   - 脚本读 yaml 找所有 operationId 含 `<Name>` 的 operation，按它们生成 handler/service/repository/model/task 五层文件 + 三个测试模板
+3. **生成业务骨架**：`make new-endpoint NAME=<Name>`（如 `make new-endpoint NAME=Order`）。**review 时先 `make new-endpoint NAME=<Name> DRY_RUN=1` 只打印 plan 不写盘**（也接受 `--dry-run`）：能预览匹配到哪些 op、router 表（verb / path / auth 分组）、将创建 / 修改的文件清单
+   - 脚本按 yaml 资源归属（`x-resource` 优先，未声明走 operationId 包含 NAME）收集 op，生成 handler/service/repository/model/task 五层文件 + 三个测试模板
    - 同时注入 `internal/server.go` 装配链、`internal/router/router.go` 路由（带 yaml security 推出的 `deps.AuthRequired` 子组）、`internal/handler/openapi.go` 的 APIServer 转发方法
    - 生成的 service / repository 方法返 `errcode.NotImplementedYet`（9005）——**仓库立即可以 `make verify` 通过**
 4. **填业务逻辑**：在 service 里换掉 NotImplementedYet 为真实业务规则；repository 实现 SQL；model 补字段；handler 补 `c.ShouldBind...` 把 req 传给 service
@@ -73,7 +73,9 @@ yaml 是真相源。按这个顺序：
 - service / handler 直接 import `gorm.io/gorm` → 通过 service 包里的 repository 接口隔离
 - 手改 `make new-endpoint` 生成的注入区（`// NEH ...` 锚点）→ 改 yaml 重跑
 
-**生成骨架后跑哪里去？** 资源识别用"operationId 大小写不敏感包含 NAME"。如 `NAME=Order` 命中 `listOrders / createOrder / getOrder / enqueueOrderTask`；但同时也会误命中 `listOrderPayments`——歧义时让 NAME 更精确（如 `NAME=OrderPayment` 单独跑）。
+**资源识别**：优先看 yaml 的 `x-resource`（operation 级 > path 级），未声明时 fallback 到"operationId 大小写不敏感包含 NAME"。`NAME=Order` 走 fallback 时会命中 `listOrders / createOrder / getOrder / enqueueOrderTask`，但同时误命中 `listOrderPayments`——歧义场景请直接在 yaml 写 `x-resource: Order` / `x-resource: OrderPayment` 显式归属。
+
+**支持边界与不支持形态**：see CLAUDE.md / AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节——列清了脚本能跑（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run）和需手写（≥2 个 path 参数 / 同资源跨多根路径）的形态。
 
 ---
 

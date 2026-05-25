@@ -96,7 +96,7 @@ sudo $EDITOR /etc/go-skeleton/.env
 
 下面这些项是 `config.ProductionWarnings` 输出的 **warn**（启动时打一条日志，不阻止启动，但裸暴露公网时大概率是漏配）：
 
-- `TRUSTED_PROXIES` 配置成实际 LB 网段（裸直连无 LB 时可空）
+- `TRUSTED_PROXIES` 配置成实际 LB 网段；否则 `c.ClientIP()` 会退回 `RemoteAddr`，LB 后面会把所有客户端识别成代理 IP（裸直连无 LB 时可空）
 - `RATE_LIMIT_PER_MINUTE` 非 0（上游 LB/WAF 限流时可保 0）
 - `METRICS_ADDR` 设独立地址（如 `127.0.0.1:9090`），让 `/metrics` 与业务端口在 L4 层隔离
 

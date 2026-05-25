@@ -214,13 +214,15 @@ make oapi-verify   # fail if generated code is out of sync (used by make verify)
 
 Tick these off before pointing real traffic at this service:
 
-- [ ] Replace `JWT_SECRET` with a high-entropy value (≥ 32 bytes, e.g. `openssl rand -base64 48`).
-- [ ] Set `AUTH_DEV_TOKEN_ENABLED=false` (the route stays registered and returns `SERVICE_DISABLED`).
-- [ ] Set `GIN_MODE=release` so Gin omits debug-mode warnings.
-- [ ] Set `LOG_FORMAT=json` (the console format is human-friendly but unparseable by log shippers).
+- [ ] Set `APP_ENV=production`. This enables startup guards: items marked **block** fail fast when misconfigured; items marked **warn** are logged by `config.ProductionWarnings` but do not stop startup.
+- [ ] **block** Replace `JWT_SECRET` with a high-entropy value (≥ 32 bytes, e.g. `openssl rand -base64 48`).
+- [ ] **block** Set `AUTH_DEV_TOKEN_ENABLED=false` (the route stays registered and returns `SERVICE_DISABLED`).
+- [ ] **block** Set `GIN_MODE=release`; non-release modes are rejected in production.
+- [ ] **block** Set `LOG_FORMAT=json`; non-json formats are rejected in production.
 - [ ] Make `CORS_ALLOW_ORIGINS` an explicit allow-list; never leave it on `*` or as a wide pattern.
-- [ ] Configure `TRUSTED_PROXIES` to match your load balancer; otherwise `c.ClientIP()` returns the wrong address and rate limits / audit logs lose accuracy.
-- [ ] Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget.
+- [ ] **warn** Configure `TRUSTED_PROXIES` to match your load balancer; otherwise `c.ClientIP()` uses the proxy IP and rate limits / audit logs lose real-client accuracy. Direct, no-LB deployments may leave it empty.
+- [ ] **warn** Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget; keep 0 only when an upstream LB/WAF enforces limits.
+- [ ] **warn** Set `METRICS_ADDR` to a separate address such as `127.0.0.1:9090`, so `/metrics` is isolated from the business API at L4. Empty means `/metrics` is served on the business port.
 - [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do not point liveness at `/health` — a DB blip would restart healthy pods.
 - [ ] Size `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections` budget. The defaults (30 / 15 / 30m) are tuned for development, not production.
 - [ ] Run `go run ./cmd/migrate` (goose up, applies pending `migrations/`) before the API process starts.

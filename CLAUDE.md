@@ -104,7 +104,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 - 任务类型常量和 payload 定义放 `internal/task/`，API 和 Worker 共享。
 - **所有 payload struct 必须头部匿名嵌入 `task.Header`**（带 `Version` + `TraceID`），通过 `task.NewHeader(traceID)` 构造。worker handler 反序列化后第一时间调 `task.CheckHeader(p.Header, task.CurrentSupported)`——schema 不兼容时返 error 走 retry，**不要静默吞**（吞了等于丢消息）。改 payload 字段语义 / 删字段必须升 `task.PayloadSchemaVersion` 并同步更新 `CurrentSupported`；新增字段 + omitempty 不用升版本。
 - **新建 task 走 `task.DefaultOptions()`**（含 MaxRetry=5、Timeout=30s）而不是各工厂自己写一份 `asynq.MaxRetry(...)`。业务有长任务 / 特殊重试需求时显式 `append` 覆盖。
-- **业务键稳定的 task 用 `asynq.TaskID(task.BuildTaskID("ns", keys...))`** 做永久全局去重（订单状态机推进、用户操作日志）；**短窗口防抖**用 `asynq.Unique(ttl)`（用户点按钮、定时拉取）。两套语义不同，不要混用——TaskID 冲突返 `ErrTaskIDConflict`、Unique 重复返 `ErrDuplicateTask`，业务上对幂等的预期差很多。
+- **业务键稳定的 task 用 `asynq.TaskID(task.BuildTaskID("ns", keys...))`** 做永久全局去重（订单状态机推进、用户操作日志）。`BuildTaskID` 对超长 ID 会保留可读前缀并追加 SHA-256 后缀，避免简单截断导致不同长业务键误去重；命中 1KB 上限通常说明 caller 把过大的业务对象当 key，应回头收敛 key。**短窗口防抖**用 `asynq.Unique(ttl)`（用户点按钮、定时拉取）。两套语义不同，不要混用——TaskID 冲突返 `ErrTaskIDConflict`、Unique 重复返 `ErrDuplicateTask`，业务上对幂等的预期差很多。
 - service 通过 `ExampleQueue` 接口依赖 `taskqueue.Queue`，不直接拿 `*asynq.Client`。
 - Worker 消费端 handler 在 `internal/worker/handler.go` 注册，业务流程委托给 service。
 - Worker 停服走两阶段：`srv.Stop()` 停止接新任务、`srv.Shutdown()` 等当前任务完成（已在 `internal/worker.go` 实现，扩展时不要破坏顺序）。

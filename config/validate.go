@@ -145,11 +145,11 @@ func ProductionWarnings(cfg *Config) []string {
 		warns = append(warns, "RATE_LIMIT_PER_MINUTE=0 disables in-process rate limiting; ensure an upstream proxy enforces it")
 	}
 
-	// TRUSTED_PROXIES 空：gin 默认信任所有代理头（X-Forwarded-For / X-Real-IP），
-	// 攻击者能伪造客户端 IP 绕过限流 / 审计日志。直连无 LB 时空切片是合法的，
-	// 因此只 warn 不拦。
+	// TRUSTED_PROXIES 空：Gin 会忽略 X-Forwarded-For / X-Real-IP，只用
+	// RemoteAddr。直连无 LB 时这是合法配置；但在 LB 后面会把所有客户端都
+	// 识别成 LB IP，导致限流和审计日志失真，因此只 warn 不拦。
 	if len(cfg.Server.TrustedProxies) == 0 {
-		warns = append(warns, "TRUSTED_PROXIES is empty; gin trusts all proxy headers, X-Forwarded-For can be spoofed")
+		warns = append(warns, "TRUSTED_PROXIES is empty; c.ClientIP() will use RemoteAddr, so deployments behind a load balancer will rate-limit and audit the proxy IP instead of the real client IP")
 	}
 
 	// METRICS_ENABLED=true 且未配独立 listener：/metrics 跟业务 API 同端口，

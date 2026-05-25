@@ -97,8 +97,9 @@ func TestCurrentSupportedAcceptsCurrentVersion(t *testing.T) {
 	}
 }
 
-// TestBuildTaskID 验证拼接形态、空 keys、截断三档。截断不是"err return"
-// 而是"silent truncate"——它是个最后兜底，正常 caller 不该撞上。
+// TestBuildTaskID 验证拼接形态、空 keys、超长 ID 三档。超长 ID 不是"err
+// return"，而是"可读前缀 + hash 后缀"——它是个最后兜底，正常 caller
+// 不该撞上。
 func TestBuildTaskID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -119,11 +120,26 @@ func TestBuildTaskID(t *testing.T) {
 		})
 	}
 
-	t.Run("超长被截断到 MaxTaskIDLength", func(t *testing.T) {
-		huge := strings.Repeat("x", MaxTaskIDLength*2)
+	t.Run("超长保留 MaxTaskIDLength 且带 hash 后缀", func(t *testing.T) {
+		huge := "same-prefix:" + strings.Repeat("x", MaxTaskIDLength*2)
 		got := BuildTaskID("ns", huge)
 		if len(got) != MaxTaskIDLength {
-			t.Fatalf("len = %d, want %d (truncated)", len(got), MaxTaskIDLength)
+			t.Fatalf("len = %d, want %d", len(got), MaxTaskIDLength)
+		}
+		if !strings.Contains(got, ":sha256:") {
+			t.Fatalf("BuildTaskID should append hash suffix for long ids, got %q", got)
+		}
+		if !strings.HasPrefix(got, "ns:same-prefix:") {
+			t.Fatalf("BuildTaskID should keep readable prefix, got %q", got)
+		}
+	})
+
+	t.Run("超长不同尾部不会因截断误碰撞", func(t *testing.T) {
+		prefix := strings.Repeat("x", MaxTaskIDLength*2)
+		gotA := BuildTaskID("ns", prefix+"a")
+		gotB := BuildTaskID("ns", prefix+"b")
+		if gotA == gotB {
+			t.Fatalf("long task IDs with different suffixes collided: %q", gotA)
 		}
 	})
 }

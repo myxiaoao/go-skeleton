@@ -30,7 +30,7 @@ func WithTx(ctx context.Context, tx *gorm.DB) context.Context {
 // 用法：service 层用 InTx 包多个 repository 调用形成逻辑事务；repository
 // 本身不调 InTx，只通过 dbFromContext 取当前事务句柄。
 //
-// 需要更强的 isolation（REPEATABLE READL / SERIALIZABLE）或只读事务，
+// 需要更强的 isolation（REPEATABLE READ / SERIALIZABLE）或只读事务，
 // 用 InTxWithOptions。
 func InTx(ctx context.Context, db *gorm.DB, fn func(context.Context) error) error {
 	return InTxWithOptions(ctx, db, nil, fn)

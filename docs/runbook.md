@@ -131,6 +131,8 @@ make verify
 #    业务键稳定的任务用 asynq.TaskID(task.BuildTaskID("ns", keys...)) 永
 #    久去重（订单状态推进等）；短窗口防抖用 asynq.Unique(ttl)（用户点击
 #    防抖、定时拉取去重）。两种语义不同，不要混用。
+#    BuildTaskID 超长时会用"可读前缀 + SHA-256 后缀"控制在 1KB 内，不会
+#    简单截断；如果经常命中上限，说明业务 key 设计太大，需要收敛。
 make verify
 ```
 
@@ -408,7 +410,7 @@ asynq task run --queue=default --state=archived --all
 
 1. **选对去重机制**（两种语义不同，不要混用）：
    - 业务键稳定 + 永久全局唯一 → `asynq.TaskID(task.BuildTaskID("order", "shipped", orderID))`，
-     同 ID 已入队会返 `asynq.ErrTaskIDConflict`。订单状态推进、用户操作日志走这条。
+     同 ID 已入队会返 `asynq.ErrTaskIDConflict`。`BuildTaskID` 超长时保留可读前缀并追加 SHA-256 后缀，避免简单截断误碰撞；订单状态推进、用户操作日志走这条。
    - 短窗口防抖 → `asynq.Unique(5 * time.Minute)`，asynq 自动按 payload 哈希
      在 TTL 内去重，超过 TTL 同 payload 可再次入队。用户点按钮、定时拉取走这条。
 2. **消费端再做一次幂等检查**（双保险）：handler 第一步先用业务键查

@@ -18,6 +18,7 @@ package task
 //     MaxRetry / Timeout。变更默认值在一处生效，业务有特殊需求时显式覆盖。
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -44,8 +45,8 @@ const DefaultMaxRetry = 5
 const DefaultTimeout = 30 * time.Second
 
 // MaxTaskIDLength 是 BuildTaskID 返回值的硬上限。Asynq 在 Redis 里把
-// task ID 作为 key 的一部分；过长会撑爆 Redis 内存或被截断。1KB 对正常
-// 业务键远远够用，命中上限通常意味着 caller 把整段 JSON 当业务键传了。
+// task ID 作为 key 的一部分；过长会撑爆 Redis 内存。1KB 对正常业务键远远
+// 够用，命中上限通常意味着 caller 把整段 JSON 当业务键传了。
 const MaxTaskIDLength = 1024
 
 // Header 嵌入所有 task payload 顶部，给 worker 提供 trace_id / version 的
@@ -158,17 +159,27 @@ func DefaultOptions() []asynq.Option {
 //   - 不做 sanitize；caller 负责保证 keys 里不含让日志难读的字符（如 ":"
 //     会让 grep 时分段错位，但 Asynq 自己不要求可解析）。
 //   - 空 keys 直接被拼成空段，不报错——caller 自己负责传有意义的值。
-//   - 结果超过 MaxTaskIDLength 会被截断，避免单个 ID 撑爆 Redis 内存
-//     （命中截断通常是 caller 把巨型 JSON 当业务键的 bug，应当尽快修复）。
+//   - 结果超过 MaxTaskIDLength 会保留可读前缀并追加 SHA-256 后缀，避免单个
+//     ID 撑爆 Redis 内存，同时不让不同长 key 因简单截断而误去重。
 func BuildTaskID(namespace string, keys ...string) string {
 	parts := make([]string, 0, len(keys)+1)
 	parts = append(parts, namespace)
 	parts = append(parts, keys...)
 	id := strings.Join(parts, ":")
 	if len(id) > MaxTaskIDLength {
-		id = id[:MaxTaskIDLength]
+		id = truncateTaskID(id)
 	}
 	return id
+}
+
+func truncateTaskID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	suffix := fmt.Sprintf(":sha256:%x", sum)
+	prefixLen := MaxTaskIDLength - len(suffix)
+	if prefixLen <= 0 {
+		return suffix[len(suffix)-MaxTaskIDLength:]
+	}
+	return id[:prefixLen] + suffix
 }
 
 // MarshalPayload 是给 NewXxxTask 工厂用的薄包装：JSON 序列化 payload，

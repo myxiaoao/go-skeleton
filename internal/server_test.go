@@ -4,8 +4,100 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+
+	"go-skeleton/config"
+	"go-skeleton/internal/bootstrap"
+	"go-skeleton/pkg/database"
 )
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+func testRegistryForServer(t *testing.T, metricsAddr string) *bootstrap.Registry {
+	t.Helper()
+
+	db, err := gorm.Open(postgres.Open("postgres://u:p@127.0.0.1:5432/db?sslmode=disable"), &gorm.Config{
+		DryRun:                 true,
+		DisableAutomaticPing:   true,
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open dry run: %v", err)
+	}
+
+	return &bootstrap.Registry{
+		Cfg: &config.Config{
+			Env: config.EnvDevelopment,
+			Server: config.ServerConfig{
+				Port:           "127.0.0.1:0",
+				RequestTimeout: 30 * time.Second,
+				MetricsEnabled: true,
+				MetricsAddr:    metricsAddr,
+			},
+			Docs: config.DocsConfig{
+				Title:  "API Docs",
+				Theme:  "system",
+				Layout: "sidebar",
+			},
+			Log: config.LogConfig{
+				AuditEnabled: false,
+			},
+		},
+		DB:       database.NewTestManager(db),
+		Draining: &atomic.Bool{},
+	}
+}
+
+// TestNewServerSplitsMetricsWhenMetricsAddrConfigured 验证 NewServer 的装配级
+// 行为：METRICS_ADDR 非空时业务 engine 不再挂 /metrics，指标只由独立
+// MetricsHTTP server 暴露。只测 newMetricsServer 不足以覆盖这条分流规则。
+func TestNewServerSplitsMetricsWhenMetricsAddrConfigured(t *testing.T) {
+	srv, err := NewServer(testRegistryForServer(t, "127.0.0.1:9090"))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	if srv.MetricsHTTP == nil {
+		t.Fatal("MetricsHTTP = nil, want separate metrics server")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.Engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("business /metrics code=%d, want 404 when METRICS_ADDR is set", rec.Code)
+	}
+
+	metricsRec := httptest.NewRecorder()
+	srv.MetricsHTTP.Handler.ServeHTTP(metricsRec, req)
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("separate /metrics code=%d, want 200", metricsRec.Code)
+	}
+}
+
+func TestNewServerMountsMetricsOnBusinessPortByDefault(t *testing.T) {
+	srv, err := NewServer(testRegistryForServer(t, ""))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	if srv.MetricsHTTP != nil {
+		t.Fatalf("MetricsHTTP = %#v, want nil when METRICS_ADDR is empty", srv.MetricsHTTP)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.Engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("business /metrics code=%d, want 200 by default", rec.Code)
+	}
+}
 
 // TestNewMetricsServerOnlyServesMetrics 验证独立 metrics server 的 mux：
 // /metrics 路由能命中、能拿到 Prometheus 格式响应；其他路径（包括根路径）

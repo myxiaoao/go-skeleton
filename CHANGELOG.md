@@ -80,7 +80,8 @@ Commit prefixes follow the convention in `CLAUDE.md`
   - `task.DefaultOptions()` 返回 `MaxRetry=5 + Timeout=30s` 的 Option 切
     片；业务有长任务 / 特殊重试需求 append 覆盖。
   - `task.BuildTaskID(namespace, keys...)` 拼接稳定业务键给 `asynq.TaskID`
-    用做永久全局去重；带 `MaxTaskIDLength=1KB` 截断保护避免 Redis 撑爆。
+    用做永久全局去重；带 `MaxTaskIDLength=1KB` 的可读前缀 + SHA-256 后缀
+    保护，避免 Redis key 过长，也避免简单截断造成误去重。
     短窗口防抖仍用 `asynq.Unique(ttl)`——两种语义不同的去重并存，让 caller
     显式选，不强行合一。
   - `task.MarshalPayload(taskType, payload)` 薄包装让序列化 error 自动带

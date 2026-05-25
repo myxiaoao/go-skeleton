@@ -42,6 +42,10 @@ var (
 	ErrMissingSecret = errors.New("jwt secret is required")
 	// ErrMissingSubject 在 token subject 为空时返回（签发 / 校验都会触发）。
 	ErrMissingSubject = errors.New("jwt subject is required")
+	// ErrMissingTTL 在 manager.ttl<=0 调用 GenerateToken 时返回。骨架的
+	// ParseToken 强制 exp 必填，TTL<=0 会签出无 exp token，自己验不过、也
+	// 违反 Layer 1 的 exp 校验约束。
+	ErrMissingTTL = errors.New("jwt ttl must be positive")
 )
 
 // NewJWTManager 用 cfg 构造 JWTManager。Secret 为空时直接拒绝，避免运行期才
@@ -58,12 +62,16 @@ func NewJWTManager(cfg JWTConfig) (*JWTManager, error) {
 	}, nil
 }
 
-// GenerateToken 给 subject 签一个 token，自动填 iat / nbf；ttl > 0 时
-// 顺带填 exp，让 token 过期失效。
+// GenerateToken 给 subject 签一个 token，自动填 iat / nbf / exp。ttl<=0
+// 会被拒绝（ErrMissingTTL）——ParseToken 强制 exp 必填，签一个无 exp 的
+// token 自己也验不过。
 func (m *JWTManager) GenerateToken(subject string) (string, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
 		return "", ErrMissingSubject
+	}
+	if m.ttl <= 0 {
+		return "", ErrMissingTTL
 	}
 
 	now := m.now().UTC()
@@ -73,20 +81,22 @@ func (m *JWTManager) GenerateToken(subject string) (string, error) {
 			Issuer:    m.issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
 		},
-	}
-	if m.ttl > 0 {
-		claims.ExpiresAt = jwt.NewNumericDate(now.Add(m.ttl))
 	}
 
 	return m.GenerateTokenWithClaims(claims)
 }
 
 // GenerateTokenWithClaims 用 caller 提供的完整 claims 签 token，便于把业务
-// 自定义字段塞进去。Issuer 为空时回填 manager 默认 issuer。
+// 自定义字段塞进去。Issuer 为空时回填 manager 默认 issuer。claims.ExpiresAt
+// 必填——ParseToken 强制 exp，缺了 caller 自己也验不过，提前 fail-fast。
 func (m *JWTManager) GenerateTokenWithClaims(claims Claims) (string, error) {
 	if strings.TrimSpace(claims.Subject) == "" {
 		return "", ErrMissingSubject
+	}
+	if claims.ExpiresAt == nil {
+		return "", ErrMissingTTL
 	}
 	if claims.Issuer == "" {
 		claims.Issuer = m.issuer
@@ -100,8 +110,14 @@ func (m *JWTManager) GenerateTokenWithClaims(claims Claims) (string, error) {
 }
 
 // ParseToken 校验 Bearer 或裸 HS256 JWT token。校验项：签名算法只允许
-// HS256（防 alg=none 攻击）、exp / nbf（基于 manager.now 注入的时钟）、
-// 配置了 Issuer 时校验 iss。subject 为空也算 invalid。
+// HS256（防 alg=none 攻击）、exp **必须存在**且未过期、nbf（基于
+// manager.now 注入的时钟）、配置了 Issuer 时校验 iss。subject 为空也算
+// invalid。
+//
+// 安全提示：jwt/v5 默认 exp 是 optional，没有它也能通过校验。本骨架显式
+// 启用 WithExpirationRequired()，让"永不过期 token"无法绕过——这是骨架
+// JWT Layer 1 的核心约束之一。GenerateToken 也对应拒绝 ttl<=0 的情况，
+// 避免自己签出来的 token 自己验不过。
 func (m *JWTManager) ParseToken(tokenString string) (*Claims, error) {
 	tokenString = normalizeBearerToken(tokenString)
 	if tokenString == "" {
@@ -110,6 +126,7 @@ func (m *JWTManager) ParseToken(tokenString string) (*Claims, error) {
 
 	options := []jwt.ParserOption{
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
 		jwt.WithTimeFunc(func() time.Time {
 			return m.now().UTC()
 		}),

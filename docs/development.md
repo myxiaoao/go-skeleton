@@ -114,7 +114,7 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 1. 在 [`config/types.go`](../config/types.go) 对应 sub-config 加字段
 2. 在 [`config/config.go::Load`](../config/config.go) 用 `intEnv` / `boolEnv` / `durationEnv` / `int64Env` 等 helper 读 env
 3. 必要时在 [`config/validate.go`](../config/validate.go) 加约束
-4. 同步更新 [`.env.example`](../.env.example)——`make verify` 不强校验，但漏改新人会踩坑
+4. 同步更新 [`.env.example`](../.env.example)——`make verify` 链里的 `env-verify` 会用 `go/ast` 扫 `config/*.go` 里的 `Getenv` / `intEnv` / `boolEnv` 等 helper 调用，与 `.env.example` 双向校验，漏改会硬红
 
 ---
 
@@ -134,7 +134,7 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 ## 九、提交前必跑
 
 ```sh
-make verify              # 9 步全绿：fmt + vet + test + lint + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+make verify              # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅）
 ```
 
 红了看最后一个 `=== STEP FAILED: xxx ===` 横幅指向的步骤；详细排错见 [runbook §排错 cheat sheet](./runbook.md#排错-cheat-sheet)。

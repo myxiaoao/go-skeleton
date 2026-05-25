@@ -195,7 +195,7 @@ dev-deps-check: ## 探活本机 Postgres + Redis（不用 docker 装完依赖后
 # ---------- Scaffolding ----------
 
 .PHONY: new-endpoint
-new-endpoint: ## 拷贝 5 文件骨架（handler/service/repo/model/task）；NAME=Order
+new-endpoint: ## 生成分层骨架 + 测试模板，注入 server/router（NAME=Order）
 	@if [ -z "$(NAME)" ]; then \
 		echo "usage: make new-endpoint NAME=Order"; \
 		exit 1; \
@@ -261,7 +261,9 @@ oapi-breaking: ## 用 oasdiff 检测 OpenAPI 破坏性变更（对比 OAPI_BREAK
 # drop-example 是一次性收尾脚本：把骨架自带的 Example 示例模块从代码 /
 # 路由 / openapi.yaml / 迁移里整体拔掉，留出干净的脚手架接真业务。
 # 工作区必须干净（脚本会拒绝 dirty checkout）；跑完调 make oapi + verify
-# 自检。如果对结果不满意，git reset --hard 回退。
+# 自检。要回退就按文件级走：先 git status / git diff 审查改动，需要丢
+# 弃指定文件用 git restore --source=HEAD --staged --worktree -- <path>。
+# 不建议直接 git reset --hard——那会一并清掉同时段任何未提交的工作。
 .PHONY: drop-example
 drop-example: ## 拔掉骨架自带的 Example 示例模块（一次性；需 clean checkout）
 	$(GO) run scripts/drop-example.go

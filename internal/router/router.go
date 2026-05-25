@@ -6,13 +6,16 @@ import (
 	"go-skeleton/internal/handler"
 )
 
-// Dependencies 收拢路由注册阶段需要的 handler 实例和中间件。新增模块时
-// 在这里加字段、在 internal/server.go::newHTTPHandlers 里把对应 handler
-// 实例传进来。
+// Dependencies 收拢路由注册阶段需要的 handler 实例和中间件。
+//
+// 新增模块时不要手改这里，跑 scripts/new-endpoint.sh <Name>——脚本按文
+// 件里以 NEH 前缀打头的锚点行（如 "NEH deps-fields"）注入字段和注册调用。
+// 锚点行的格式与位置都不要乱动，否则下次再跑脚本注入会失败。
 type Dependencies struct {
 	Auth         *handler.AuthHandler
 	AuthRequired gin.HandlerFunc
 	Example      *handler.ExampleHandler
+	// NEH deps-fields
 }
 
 // RegisterRoutes 把所有 API 路由注册到 r 这个 RouterGroup 下。返回 error
@@ -20,6 +23,7 @@ type Dependencies struct {
 func RegisterRoutes(r *gin.RouterGroup, deps Dependencies) error {
 	registerAuthRoutes(r, deps)
 	registerExampleRoutes(r, deps)
+	// NEH routes-register
 	return nil
 }
 

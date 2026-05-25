@@ -66,6 +66,32 @@ Commit prefixes follow the convention in `CLAUDE.md`
   Previously only the cache (go-redis) client honored it; the queue
   connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
   stays cache-only (asynq does not expose it).
+- **`scripts/new-endpoint.sh` 增强**：以前只复制 5 个分层文件 + 让人手动
+  改 OpenAPI / server.go / router.go——3 步漏 1 步仓库就编译不过、AI 经常
+  漏。现在增强成：
+  - 复制 handler / service / repository / model / task 5 层 example.go
+    并 sed 替换 Example→<Name>（不变）
+  - 生成 handler / service / repository 三层最小测试 stub（init() 静音日
+    志 + 占位 TestPlaceholder），让 `go test ./...` 不报 "no test files"，
+    新开发者按 example_test.go 风格手补真实用例（不直接复制 example_test
+    是因为同包 helper 重名 + 跨包类型引用都会让纯 sed 失败）
+  - 改 `internal/server.go`：在 4 个 `// NEH ...` 锚点注释处自动注入
+    repo / service / handler 装配链 + HTTPHandlers 字段 / return literal
+  - 改 `internal/router/router.go`：注入 Dependencies 字段 + RegisterRoutes
+    调用，文件尾追加 `register<Name>Routes` 函数（默认列表 / 创建 /
+    EnqueueTask 三条路由）
+  - 注入用 awk + 全行匹配 `^[[:space:]]*// NEH <marker>$`（不是子串），
+    避免 godoc 里提到锚点名时被误命中；BSD/GNU sed 的 `i\` 多行处理差
+    异也回避掉
+  - 注入完成跑 `gofmt` 兜底缩进；脚本结尾再次断言所有锚点仍在
+  - 生成完不自动跑 `go build`：剩余 yaml + APIServer 接口实现仍要人工
+    （业务字段不可知），脚本结尾打印 yaml stub + APIServer 字段 / 方法
+    骨架给你贴。模板复制完后业务路由层**可以直接编译运行**（example.go
+    们不引用 oapi 类型），APIServer 那条 oapi 契约链补完即 `make verify`
+    全绿
+  对应在 `internal/server.go::HTTPHandlers` / `newHTTPHandlers` 和
+  `internal/router/router.go::Dependencies` / `RegisterRoutes` 加了 6 个
+  `// NEH <name>` 锚点行；hand-edit 时不要动锚点。
 - **`.env.example` 同步校验接入 `make verify`**：新增 `make env-verify` +
   `scripts/env-verify.sh`，提取 `config/` 里 `os.Getenv` / `getEnvOrDefault`
   / `boolEnv` / `intEnv` / `int64Env` / `durationEnv` / `environmentEnv` /

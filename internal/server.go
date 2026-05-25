@@ -35,10 +35,15 @@ var (
 // HTTPHandlers 把所有 handler 实例打包一处，方便 NewServer 一次性装配后
 // 还能被路由 / 测试拿去单独使用。API 字段是 oapi 契约检查用，绑死编译期
 // 保险线，让 api/openapi.yaml 与 handler 漂移时 build 直接失败。
+//
+// 新增模块时不要手改这里，跑 scripts/new-endpoint.sh <Name>——脚本按
+// 文件里以 NEH 前缀打头的锚点行（如 "NEH handlers-fields"）注入字段。
+// 锚点行的格式与位置都不要乱动，否则下次再跑脚本注入会失败。
 type HTTPHandlers struct {
 	Auth    *handler.AuthHandler
 	Health  *handler.HealthHandler
 	Example *handler.ExampleHandler
+	// NEH handlers-fields
 	OpenAPI *handler.OpenAPIHandler
 	// API 在编译期满足 oapi.ServerInterface，保证 api/openapi.yaml 与我们
 	// 暴露的 handler 始终对齐。
@@ -252,16 +257,19 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	db := reg.DB.DB()
 	exampleRepository := repository.NewExampleRepository(db)
 	exampleService := service.NewExampleService(exampleRepository, reg.Queue)
+	// NEH handlers-deps
 
 	authH := handler.NewAuthHandler(reg.Auth, reg.Cfg.Auth.DevTokenEndpointEnabled)
 	healthH := handler.NewHealthHandler(reg.DB, reg.Cache, reg.Draining)
 	exampleH := handler.NewExampleHandler(exampleService)
+	// NEH handlers-construct
 	openapiH := handler.NewOpenAPIHandler(reg.Cfg.Docs)
 
 	return &HTTPHandlers{
 		Auth:    authH,
 		Health:  healthH,
 		Example: exampleH,
+		// NEH handlers-return
 		OpenAPI: openapiH,
 		API: &handler.APIServer{
 			Auth:    authH,

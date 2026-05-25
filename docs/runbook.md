@@ -85,25 +85,30 @@ make verify        # fmt + vet + test + lint + architecture-verify + env-verify 
 ## 新增一个 HTTP API endpoint
 
 ```sh
-# 1. 改契约
-$EDITOR api/openapi.yaml
+# 1. 一条命令生成 5 个分层文件 + 测试 stub + server.go / router.go 装配。
+#    脚本按 internal/server.go 和 internal/router/router.go 里的 // NEH
+#    锚点注释自动注入，不要手动改这些锚点行。
+./scripts/new-endpoint.sh <Name>          # 如 ./scripts/new-endpoint.sh Order
 
-# 2. 生成代码（产物入库）
+# 2. 按脚本最后打印的提示补两件人工活：
+#    a. api/openapi.yaml：加 paths + components.schemas（脚本给了 stub）
+#    b. internal/handler/openapi.go::APIServer：加字段 + ServerInterface
+#       方法骨架（脚本给了 stub）
+#    然后跑：
 make oapi
 
-# 3. 加分层文件（按 example 模板）
-# - internal/handler/<name>.go
-# - internal/service/<name>.go
-# - internal/repository/<name>.go
-# - internal/model/<name>.go
+# 3. 业务字段调整：脚本生成的 *.go 是 example 模板的复刻，要按真实业
+#    务改 model 字段、service 方法、repository SQL。
+#    测试 stub 是 placeholder（Skip），按 internal/<layer>/example_test.go
+#    的"标准库 testing + 手写 mock"风格补真实用例。
 
-# 4. 在 internal/server.go::newHTTPHandlers 装配
-# 5. 在 internal/router/router.go::Dependencies + registerXxxRoutes 注册
-# 6. 编译期合约保险线会自动检查（var _ oapi.ServerInterface = (*APIServer)(nil)）
-
-# 7. 加测试，然后
+# 4. 验证
 make verify
 ```
+
+**编译期保险**：`internal/handler/openapi.go` 里有
+`var _ oapi.ServerInterface = (*APIServer)(nil)`，OpenAPI yaml 与 APIServer
+方法集漂移时 `go build` 直接失败，不依赖人 review。
 
 ## 新增一个 Asynq 异步任务
 

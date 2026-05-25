@@ -70,7 +70,7 @@ func computeRetryDelay(n int, base, max time.Duration) time.Duration {
 	if n >= 30 {
 		return max
 	}
-	delay := time.Duration(1<<uint(n)) * base
+	delay := time.Duration(1<<n) * base
 	if delay <= 0 || delay > max {
 		return max
 	}

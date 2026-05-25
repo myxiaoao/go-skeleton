@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"gorm.io/gorm"
@@ -22,12 +23,32 @@ func WithTx(ctx context.Context, tx *gorm.DB) context.Context {
 	return context.WithValue(normalizeContext(ctx), txKey{}, tx)
 }
 
-// InTx 在事务里执行 fn。如果 ctx 已经携带活跃事务（嵌套调用），直接复用
+// InTx 在事务里执行 fn，用 GORM 默认 isolation（Postgres 下是
+// READ COMMITTED）。如果 ctx 已经携带活跃事务（嵌套调用），直接复用
 // 不再开新事务——避免内嵌 SAVEPOINT 让回滚语义变复杂。
 //
 // 用法：service 层用 InTx 包多个 repository 调用形成逻辑事务；repository
 // 本身不调 InTx，只通过 dbFromContext 取当前事务句柄。
+//
+// 需要更强的 isolation（REPEATABLE READL / SERIALIZABLE）或只读事务，
+// 用 InTxWithOptions。
 func InTx(ctx context.Context, db *gorm.DB, fn func(context.Context) error) error {
+	return InTxWithOptions(ctx, db, nil, fn)
+}
+
+// InTxWithOptions 在事务里执行 fn，opts 透传给 *sql.DB.BeginTx——支持
+// 自定义 isolation（如 sql.LevelRepeatableRead / sql.LevelSerializable）
+// 和 ReadOnly。opts 为 nil 时等价于 InTx。
+//
+// 嵌套行为：如果 ctx 已经携带活跃事务，**忽略 opts** 直接复用——子事务
+// 改 isolation/readonly 在 SQL 里不是合法操作（要在 BEGIN 时定），让父
+// 事务的设定生效是唯一正确语义。调用方决定隔离级别时必须在最外层 InTx
+// 调用点决定，不要指望嵌套调用能"加强"或"放松"isolation。
+//
+// ReadOnly=true 时 fn 内不允许写——驱动会在 commit 前报错。把只读查询
+// 包进 ReadOnly 事务能让 Postgres 跳过 WAL 写、避免 snapshot 不一致，
+// 是分页 / 聚合统计的常用做法。
+func InTxWithOptions(ctx context.Context, db *gorm.DB, opts *sql.TxOptions, fn func(context.Context) error) error {
 	if fn == nil {
 		return errNilTxFn
 	}
@@ -39,9 +60,13 @@ func InTx(ctx context.Context, db *gorm.DB, fn func(context.Context) error) erro
 	}
 
 	baseCtx := normalizeContext(ctx)
-	return db.WithContext(baseCtx).Transaction(func(tx *gorm.DB) error {
+	wrapped := func(tx *gorm.DB) error {
 		return fn(WithTx(baseCtx, tx))
-	})
+	}
+	if opts == nil {
+		return db.WithContext(baseCtx).Transaction(wrapped)
+	}
+	return db.WithContext(baseCtx).Transaction(wrapped, opts)
 }
 
 // dbFromContext 返回当前应该用的 *gorm.DB 实例：ctx 里有事务就用事务句柄，

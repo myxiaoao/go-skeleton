@@ -66,6 +66,14 @@ Commit prefixes follow the convention in `CLAUDE.md`
   Previously only the cache (go-redis) client honored it; the queue
   connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
   stays cache-only (asynq does not expose it).
+- **`repository.InTxWithOptions(ctx, db, *sql.TxOptions, fn)`**: 新增事务
+  helper，允许调用方指定 isolation level（如 `sql.LevelRepeatableRead`、
+  `sql.LevelSerializable`）和 `ReadOnly`。`InTx` 现在是 `InTxWithOptions(nil)`
+  的薄包装，行为不变。典型用例：`repository.List` 想要 `total` 与分页
+  rows 走同一快照，可用 `InTxWithOptions(ctx, db, &sql.TxOptions{
+  Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn)` 包住。嵌套
+  调用（ctx 已携带活跃事务）opts 会被忽略——isolation 只能在最外层
+  `BeginTx` 定，子事务改不动。
 - **`/metrics` 支持独立 listener（`METRICS_ADDR`）**：新增环境变量
   `METRICS_ADDR`，空字符串（默认）维持现状（`/metrics` 挂在业务 engine
   同端口）；非空（如 `127.0.0.1:9090`）时业务 engine 不再注册 `/metrics`，

@@ -56,7 +56,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 ### repository
 - **唯一允许写 GORM 或原生 SQL 的层**。其他层禁止 import `gorm.io/gorm`。
 - 所有查询都用 `db.WithContext(ctx)`，禁止 `context.Background()` 替换。
-- 走事务时用 `repository.InTx(ctx, db, fn)` + `dbFromContext(ctx, r.db)`，让上层组合事务。
+- 走事务时用 `repository.InTx(ctx, db, fn)` + `dbFromContext(ctx, r.db)`，让上层组合事务。需要自定义隔离级别 / 只读事务用 `repository.InTxWithOptions(ctx, db, *sql.TxOptions, fn)`（如分页强一致 total 走 `sql.LevelRepeatableRead` + `ReadOnly`）；嵌套调用 opts 会被忽略，isolation 必须在最外层定。
 
 ### model
 - 纯 GORM 数据结构，不挂带业务规则的方法。复杂行为放 service。
@@ -391,7 +391,7 @@ go-example/
 │   │
 │   ├── repository/             数据访问层（唯一允许写 GORM）
 │   │   ├── example.go
-│   │   └── tx.go               WithTx / InTx / dbFromContext
+│   │   └── tx.go               WithTx / InTx / InTxWithOptions / dbFromContext
 │   │
 │   ├── model/                  GORM 数据结构
 │   │   └── example.go

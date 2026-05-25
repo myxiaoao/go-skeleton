@@ -33,6 +33,25 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`make new-endpoint` 二轮增强（x-resource / dry-run / route diff / 边界文档）**:
+  收齐四项改进让脚手架更稳更可 review。
+  (1) `x-resource: <Name>` 显式资源归属——path 级声明一次下面所有 verb 继承，
+  operation 级可覆盖；老 yaml 不加时 fallback 到"operationId 包含 NAME"。
+  解决之前 `NAME=Order` 误命中 `listOrderPayments` 这类"前缀复合"歧义。
+  (2) `--dry-run` / `DRY_RUN=1` 模式：跑完解析 + 校验后只打印 plan
+  （ops 表、生成 / 修改文件清单、`r.Group` 路径），不写盘。回归到真正写
+  之前先 review 一遍。Makefile help 文案同步加上。
+  (3) `renderNextSteps` 输出改成 router 表：按 yaml 实际 `verb path` 列出
+  每条路由 + `public` / `bearerAuth` 分组标注，比"方法集"更贴近 gin 真实
+  注册行为。同步加 `renderDryRunPlan` 共用 router 表格式。
+  (4) `CLAUDE.md` / `AGENTS.md` §API 契约 新增 "`make new-endpoint` 支持
+  边界" 子节，列清楚支持形态（资源归属 / 动作名 / path 参数 0-1 个 /
+  bearerAuth / dry-run）和不支持形态（≥2 path 参数 / 同资源多根路径），
+  AI 助手按文档即可判断该走脚本还是手写。
+  `scripts/scripts_test.go` 新增 6 个回归：x-resource operation 级 /
+  path 级 / path 级 + x-handler-method / operation 覆盖 path / fallback
+  到 operationId / dry-run 不写盘且打印 plan。
+
 - **`make new-endpoint` 改 yaml 反向驱动**:
   原"复刻 Example 模板"换成读 `api/openapi.yaml` + `internal/oapi/oapi.gen.go`
   反向生成。脚本扫 `operationId` 含 NAME 的 operation，按 yaml `path` / `verb`

@@ -168,9 +168,9 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 **真相源是 `api/openapi.yaml`**。新增 endpoint 走 yaml 驱动：
 
-1. 改 `api/openapi.yaml`：加 path + schema。operationId 用驼峰命名（如 `listOrders / createOrder / getOrder`，与 oapi-codegen 生成的 `ServerInterface.<Method>` 对齐）。需要鉴权的 op 加 `security: [{ bearerAuth: [] }]`。动作名推不出来时加 yaml extension `x-handler-method: <Action>` 显式指定。
+1. 改 `api/openapi.yaml`：加 path + schema。operationId 用驼峰命名（如 `listOrders / createOrder / getOrder`，与 oapi-codegen 生成的 `ServerInterface.<Method>` 对齐）。需要鉴权的 op 加 `security: [{ bearerAuth: [] }]`。资源归属用 `x-resource: <Name>`（推荐）—— path 级声明一次下面所有 verb 继承，operation 级可覆盖；不加 `x-resource` 时 fallback 到"operationId 大小写不敏感包含 NAME"老逻辑。动作名推不出来时加 yaml extension `x-handler-method: <Action>` 显式指定。
 2. `make oapi` 重新生成 `internal/oapi/oapi.gen.go`。
-3. `make new-endpoint NAME=<Name>` —— 脚本读 yaml 找 operationId 含 `<Name>` 的 operation，按它们生成 handler / service / repository / model / task 五层骨架 + 三个测试模板，并注入 `internal/server.go` 装配链、`internal/router/router.go` 路由（按 yaml `security` 推 `deps.AuthRequired` 子组）、`internal/handler/openapi.go::APIServer` 字段 + 转发方法。生成的 service / repository 方法返 `errcode.NotImplementedYet`（9005）—— **仓库立即可以 `make verify` 通过**，填业务时换 nil 或具体错误码。
+3. `make new-endpoint NAME=<Name>` —— 脚本按 yaml 资源归属生成 handler / service / repository / model / task 五层骨架 + 三个测试模板，并注入 `internal/server.go` 装配链、`internal/router/router.go` 路由（按 yaml `security` 推 `deps.AuthRequired` 子组）、`internal/handler/openapi.go::APIServer` 字段 + 转发方法。生成的 service / repository 方法返 `errcode.NotImplementedYet`（9005）—— **仓库立即可以 `make verify` 通过**，填业务时换 nil 或具体错误码。**review 用 `--dry-run` / `DRY_RUN=1` 只打印计划不写盘**。
 4. 填业务：handler 补 `c.ShouldBind...`、service 填业务规则换掉 NotImplementedYet、repository 写 SQL、model 补字段。
 5. `make verify` 通过——`oapi-verify` 会用 `git diff --quiet` 检查生成产物已 commit。
 
@@ -182,7 +182,20 @@ yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注
 
 **直接手改 `internal/server.go` / `router.go` / `handler/openapi.go` 的注入区是禁忌**——那些块由 `// NEH ...` 锚点界定，下次跑 `make new-endpoint` 会按锚点继续注入。改 yaml 重跑而不是手编辑那几个文件。
 
-**资源识别歧义**：`NAME=Order` 会命中 `listOrderPayments` 这种"前缀复合"resource。脚本不替你判断，命中歧义时用更精确的 `NAME=OrderPayment` 单独跑。
+### `make new-endpoint` 支持边界
+
+支持的形态：
+
+- **资源归属**：`x-resource: <Name>`（推荐 path 级，operation 级可覆盖）。没声明时 fallback 到 operationId 包含 NAME——歧义场景（如 `NAME=Order` 命中 `listOrderPayments`）请改用 `x-resource` 显式声明。
+- **handler 动作名**：默认 operationId 去掉 NAME 后剩余 + 首字母大写；推不出（剩余为空 / 非法）时报错，加 `x-handler-method: <Action>` 显式指定。
+- **path 参数**：0 或 1 个 `{var}`。参数名按 yaml 实际取（`{order_id}` → `c.Param("order_id")` + service `(ctx, order_id string)`）。
+- **鉴权**：yaml `security: [{ bearerAuth: [] }]` 自动放进 `deps.AuthRequired` 子组；非 bearerAuth 的 scheme（API key / OAuth2 / ...）当前忽略。
+- **dry-run**：`--dry-run` / `DRY_RUN=1` 跑解析 / 校验但不写盘——review 计划用。
+
+不支持，需要手写的形态：
+
+- **≥2 个 path 参数**（如 `/users/{uid}/orders/{oid}`）：脚本 fail-fast。加 `x-handler-method` 拿到方法名后手写 handler / router。
+- **同一资源跨多个根路径**：脚本按 `x-resource` 拉到一起没问题；但 `r.Group` 路径取 ops 的最长公共前缀，多根路径时只能用最长公共部分，子路径走 `g.GET("/sub/...", ...)`——少见，能跑但不优雅。
 
 ### 单一真相约定（重要）
 

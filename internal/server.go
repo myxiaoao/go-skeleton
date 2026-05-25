@@ -36,7 +36,7 @@ var (
 // 还能被路由 / 测试拿去单独使用。API 字段是 oapi 契约检查用，绑死编译期
 // 保险线，让 api/openapi.yaml 与 handler 漂移时 build 直接失败。
 //
-// 新增模块时不要手改这里，跑 scripts/new-endpoint.sh <Name>——脚本按
+// 新增模块时不要手改这里，跑 `make new-endpoint NAME=<Name>`——脚本按
 // 文件里以 NEH 前缀打头的锚点行（如 "NEH handlers-fields"）注入字段。
 // 锚点行的格式与位置都不要乱动，否则下次再跑脚本注入会失败。
 type HTTPHandlers struct {

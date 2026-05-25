@@ -58,7 +58,7 @@ go run ./cmd/worker      # 另一终端跑 Asynq 消费
 
 1. **改契约**：在 [`api/openapi.yaml`](../api/openapi.yaml) 加 path + schema
 2. **生成代码**：`make oapi`（产物 `internal/oapi/oapi.gen.go` **入库**，不要手改）
-3. **拷模板**：`./scripts/new-endpoint.sh <Name>`（如 `Order`）
+3. **拷模板**：`make new-endpoint NAME=<Name>`（如 `make new-endpoint NAME=Order`）
    - ⚠️ 跑完**编译不过**，因为新 service 文件引用了还没生成的 oapi 类型
 4. **装配**：在 `internal/server.go::newHTTPHandlers` 把 `repository → service → handler` new 出来
 5. **注册路由**：在 `internal/router/router.go::Dependencies` + `register*Routes` 挂路径

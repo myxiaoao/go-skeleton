@@ -10,7 +10,7 @@
 // 跑完后仓库里**不再有** Example 业务模块（handler / service / repository /
 // model / task / 装配 / 路由 / openapi 契约 / 数据库迁移），但骨架机制
 // （bootstrap / oapi-codegen / 锚点 / verify 链）全保留——可以直接
-// `./scripts/new-endpoint.sh <Name>` 起真业务（注意 new-endpoint 模板依赖
+// `make new-endpoint NAME=<Name>` 起真业务（注意 new-endpoint 模板依赖
 // example.go，drop 后要先 git checkout 历史版本恢复模板，或先 git revert）。
 //
 // 实现要点：
@@ -100,7 +100,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, `
 drop-example: make %s 失败。最常见的剩余清理：
   - 还有 _test.go 引用了已删的 Example 类型（grep -rn ExampleHandler internal/）
-  - new-endpoint.sh 模板依赖已删 example.go——要新增模块需从 git 历史恢复模板
+  - new-endpoint 模板依赖已删 example.go——要新增模块需从 git 历史恢复模板
     或先 git revert drop-example。
 `, t)
 			os.Exit(1)
@@ -115,7 +115,7 @@ drop-example: make %s 失败。最常见的剩余清理：
    3. git add -A && git commit
    4. commit 后再跑一次 make verify：oapi-verify / docs-deploy-check /
       docs-errcodes-verify 比对工作树和 HEAD，要等本次改动入库后才会绿。
-   5. 起真业务：./scripts/new-endpoint.sh <Name>
+   5. 起真业务：make new-endpoint NAME=<Name>
       （drop-example 跑过后 new-endpoint 模板依赖的 example.go 已不存在，
       需从 git 历史 checkout 模板，或先 git revert 本次提交。）`)
 }
@@ -313,7 +313,7 @@ func patchServerGo() error {
 		{
 			// `db := reg.DB.DB()` 在 newHTTPHandlers 里——示例装配是它的
 			// 唯一用户。删完 Example 后变成 "declared and not used"。改成
-			// 留 `db := ...` + `_ = db` 占位，让 new-endpoint.sh 注入的
+			// 留 `db := ...` + `_ = db` 占位，让 new-endpoint 注入的
 			// repository.New<Name>Repository(db) 仍能拿到 db 句柄，无须
 			// 改脚手架脚本；新增模块后开发者可手动删 `_ = db`。
 			"silence unused db var after Example removal",
@@ -321,7 +321,7 @@ func patchServerGo() error {
 				"\tdb := reg.DB.DB()\n" +
 				"\t// NEH handlers-deps",
 			"func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {\n" +
-				"\t// db 保留给 new-endpoint.sh 注入的 repository.New<Name>Repository(db)；\n" +
+				"\t// db 保留给 new-endpoint 注入的 repository.New<Name>Repository(db)；\n" +
 				"\t// 当前没有业务模块时用 _ = db 静音 \"declared and not used\"。\n" +
 				"\t// 新增模块后删掉下一行。\n" +
 				"\tdb := reg.DB.DB()\n" +
@@ -506,7 +506,7 @@ func (s *APIServer) EnqueueExampleTask(c *gin.Context) {
 
 // ---------------------------------------------------------------------------
 // internal/repository/tx.go — dbFromContext / txFromContext 在删完 Example
-// repository 后暂时无 caller，linter 会报 unused。它们是给 new-endpoint.sh
+// repository 后暂时无 caller，linter 会报 unused。它们是给 new-endpoint
 // 生成的 repository.New<Name>Repository 用的，留着等真业务接入。在文件
 // 末尾加一个静音哨兵 `var _ = dbFromContext`——比 //nolint:unused 注释
 // 跨多个 linter 都通用。
@@ -521,7 +521,7 @@ func patchTxHelpers() error {
 		log.Printf("  · skip %s (tx helpers already silenced)", path)
 		return nil
 	}
-	const sentinel = "\n// dbFromContext / txFromContext 是 repository 工具，给 new-endpoint.sh\n" +
+	const sentinel = "\n// dbFromContext / txFromContext 是 repository 工具，给 new-endpoint\n" +
 		"// 生成的真业务 repository 用。drop-example 跑过后暂时无 caller，下面的\n" +
 		"// 静音哨兵让 linter 闭嘴。接入第一个真 repository 后删除本块。\n" +
 		"var (\n" +

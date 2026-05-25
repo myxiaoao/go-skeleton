@@ -8,7 +8,7 @@ import (
 
 // Dependencies 收拢路由注册阶段需要的 handler 实例和中间件。
 //
-// 新增模块时不要手改这里，跑 scripts/new-endpoint.sh <Name>——脚本按文
+// 新增模块时不要手改这里，跑 `make new-endpoint NAME=<Name>`——脚本按文
 // 件里以 NEH 前缀打头的锚点行（如 "NEH deps-fields"）注入字段和注册调用。
 // 锚点行的格式与位置都不要乱动，否则下次再跑脚本注入会失败。
 type Dependencies struct {

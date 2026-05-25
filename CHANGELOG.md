@@ -224,6 +224,25 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Changed
 
+- **scripts/ 6 个 bash 脚本改 Go**: `architecture-verify.sh` /
+  `env-verify.sh` / `new-endpoint.sh` / `docs-verify.sh` /
+  `oapi-breaking.sh` / `mod-upgrade.sh` → 同名 `.go`，统一
+  `//go:build ignore + go run` 约定（与 `scripts/gen-errcodes.go`、
+  `scripts/drop-example.go` 同栈）。收益：
+  - `architecture-verify` / `env-verify` 走 `go/ast`，不会把字符串字面量 /
+    注释 / godoc 里的 `"gorm.io/gorm"` / env key 误命中（旧 grep 版偶尔会）
+  - `docs-verify` 维护 ``` / ~~~ 代码块状态，代码块内 `## x` 不当 heading
+  - `mod-upgrade` 去掉 jq 依赖，stdlib `encoding/json` 流式解析 NDJSON
+  - `new-endpoint` 与 `drop-example` 形成"加 / 减"工具对，跨平台一致
+    （不再依赖 BSD/GNU sed 与 awk 方言差异），注入后 `parser.ParseFile`
+    校验语法
+  - `oapi-breaking` 走 `*exec.ExitError.ExitCode()` 透传 oasdiff 退出码
+  保留为 bash 的 3 个：`dev-all.sh`（trap 信号 + 子进程编排，shell
+  表达力更强）、`deploy-doc-verify.sh`（70 行纯 grep）、`rename.sh`
+  （一次性脚本跑完即删）。配套：内部代码注释从
+  `./scripts/new-endpoint.sh <Name>` 改成 `make new-endpoint NAME=<Name>`
+  （`internal/server.go` / `internal/router/router.go` / `docs/development.md`），
+  `.github/workflows/ci.yml` 注释中 `oapi-breaking.sh` 改 `.go`。
 - **数据库迁移从 GORM AutoMigrate 切到 goose 版本化 SQL**: 真相源从 Go struct
   改为仓库根 `migrations/*.sql`（goose 格式，经 `//go:embed` 打进二进制）。
   `cmd/migrate` 用 goose 的 **Provider API**（不是全局函数）跑迁移，支持

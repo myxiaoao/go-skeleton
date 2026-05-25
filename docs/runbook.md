@@ -210,7 +210,7 @@ CMD_TARGET=migrate make docker-build  # 同一份 Dockerfile 打 migrate
 | `make run-api` 提示端口占用 | `make stop-api` 释放，或 `API_PORT=3001 make run-api` |
 | 测试里日志刷屏 | 测试 `init()` 漏了 `applog.SetLogger(zap.NewNop())` |
 | handler 测试 binding 报错文案为空 | 测试 `init()` 漏了 `validator.InitValidator()` |
-| `c.ClientIP()` 取错 | 没配 `TRUSTED_PROXIES`；上线检查清单第 6 项 |
+| `c.ClientIP()` 取错 | 没配 `TRUSTED_PROXIES`；见 README "上线前检查清单" |
 | `/api/v1/auth/token` 返 `SERVICE_DISABLED` | 设计如此（`AUTH_DEV_TOKEN_ENABLED=false` 或 JWT 没配）|
 
 ## 验收新模块的最小自检
@@ -323,6 +323,8 @@ journalctl -u go-skeleton-api -o cat | jq 'select(.msg=="panic recovered")'
 ## Prometheus metrics
 
 API 进程默认在 `/metrics` 暴露 Prometheus 抓取端点（关闭走 `METRICS_ENABLED=false`）。**不**走 BearerAuth；生产靠网络层 + LB allowlist 保护，不要暴露公网。
+
+**推荐生产配 `METRICS_ADDR`**（如 `127.0.0.1:9090` 或内网 IP）：非空时业务 engine 不再挂 `/metrics`，由独立 `http.Server` 监听独立端口——业务端口公网暴露不会顺带泄露指标，与业务在 L4 层就隔离。空值（默认）维持把 `/metrics` 挂在业务 engine 同端口，`APP_ENV=production` 下会触发启动期 warn。Prometheus scrape config 抓 `METRICS_ADDR` 的端口即可。
 
 主要指标（namespace `go_skeleton_api_*`）：
 

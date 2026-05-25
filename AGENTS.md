@@ -131,7 +131,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
   ```
   本地想给某个进程开"差异化覆盖"时，自行手写 `cmd/<proc>/.env`——它不入库，被 `.gitignore` 兜底。
 - 所有 `.env*`（除 `.env.example`）都在 `.gitignore`，禁止把真实凭证落到仓库。
-- `APP_ENV`（development / production，默认 development）控制启动期安全 guard 的严格度，**不等同于 `GIN_MODE`**。设 `production` 时 `config/validate.go` 会硬拦截不安全配置：`JWT_SECRET` 为占位值 / 空 / 短于 32 字节，或 `AUTH_DEV_TOKEN_ENABLED=true`，进程直接 fail-fast 退出；`RATE_LIMIT_PER_MINUTE=0`（无限流）只在 `cmd/api/main.go` 打 warn 不拦截。新增"生产必须安全"的配置约束加到 `validateProductionSecrets`，不要散到各层。
+- `APP_ENV`（development / production，默认 development）控制启动期安全 guard 的严格度，**不等同于 `GIN_MODE`**。设 `production` 时 `config/validate.go` 会硬拦截不安全配置：`JWT_SECRET` 为占位值 / 空 / 短于 32 字节、`AUTH_DEV_TOKEN_ENABLED=true`、`GIN_MODE != release`、`LOG_FORMAT != json`，任一不满足进程直接 fail-fast 退出。"非致命但大概率漏配"的项走 `config.ProductionWarnings(cfg)` 集中输出 warn（由 `cmd/api/main.go` 启动时打）：`RATE_LIMIT_PER_MINUTE=0`、`TRUSTED_PROXIES` 空、`/metrics` 与业务同端口（建议设 `METRICS_ADDR` 拆独立 listener）。新增"生产必须硬拦"的项加到 `validateProductionSecrets`，"非致命漏配 warn"加到 `ProductionWarnings`，不要散到各层。
 
 ## 审计日志
 

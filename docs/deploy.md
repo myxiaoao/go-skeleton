@@ -87,14 +87,22 @@ sudo install -m 0640 -o root -g go-skeleton .env.example /etc/go-skeleton/.env
 sudo $EDITOR /etc/go-skeleton/.env
 ```
 
-`/etc/go-skeleton/.env` **必须**在生产前替换：
+`/etc/go-skeleton/.env` **必须**在生产前替换。下面这些项在 `APP_ENV=production` 下由 `config/validate.go` **硬拦**——不合规进程直接 fail-fast 退出：
 
-- `JWT_SECRET`（至少 32 字节随机值：`openssl rand -base64 48`）
-- `AUTH_DEV_TOKEN_ENABLED=false`
-- `GIN_MODE=release`
-- `LOG_FORMAT=json`
-- `CORS_ALLOW_ORIGINS` 显式枚举
-- `TRUSTED_PROXIES` 配置成实际 LB 网段
+- `JWT_SECRET`（至少 32 字节随机值：`openssl rand -base64 48`，占位 / 空 / <32 字节会被拦）
+- `AUTH_DEV_TOKEN_ENABLED=false`（true 会被拦）
+- `GIN_MODE=release`（非 release 会被拦）
+- `LOG_FORMAT=json`（非 json 会被拦）
+
+下面这些项是 `config.ProductionWarnings` 输出的 **warn**（启动时打一条日志，不阻止启动，但裸暴露公网时大概率是漏配）：
+
+- `TRUSTED_PROXIES` 配置成实际 LB 网段（裸直连无 LB 时可空）
+- `RATE_LIMIT_PER_MINUTE` 非 0（上游 LB/WAF 限流时可保 0）
+- `METRICS_ADDR` 设独立地址（如 `127.0.0.1:9090`），让 `/metrics` 与业务端口在 L4 层隔离
+
+其他必改但不拦的：
+
+- `CORS_ALLOW_ORIGINS` 显式枚举，不要留空、不要 `*`
 - `POSTGRES` / `REDIS_ADDR` 指向真实实例
 
 完整清单见 [README "Production Checklist"](../README.md#production-checklist)。

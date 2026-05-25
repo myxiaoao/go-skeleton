@@ -66,6 +66,15 @@ Commit prefixes follow the convention in `CLAUDE.md`
   Previously only the cache (go-redis) client honored it; the queue
   connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
   stays cache-only (asynq does not expose it).
+- **`/metrics` 支持独立 listener（`METRICS_ADDR`）**：新增环境变量
+  `METRICS_ADDR`，空字符串（默认）维持现状（`/metrics` 挂在业务 engine
+  同端口）；非空（如 `127.0.0.1:9090`）时业务 engine 不再注册 `/metrics`，
+  由独立 `http.Server` 监听该地址。`Server.Run` 先绑 metrics 端口、绑不上
+  直接 fail-fast（比业务跑半截才发现要省事）；`Shutdown` / `Close` 一并停。
+  独立 server mux 只挂 `/metrics`，其他路径一律 404，避免被误当业务端口。
+  生产推荐绑 loopback 或内网地址，让业务端口公网暴露不会顺带泄露 Prometheus
+  指标——与业务在 L4 层就隔离。`config.ProductionWarnings` 在 production 下
+  `METRICS_ADDR` 为空时打 warn 提醒。
 
 ### Changed
 
@@ -142,6 +151,23 @@ Commit prefixes follow the convention in `CLAUDE.md`
   `ExampleProcessor` interface in the worker package illustrates the
   correct path (worker → service → repository → gorm); `Deps.DB` is
   removed and `worker/handler.go` no longer imports `gorm.io/gorm`.
+- **`worker.ExampleProcessor` 收紧成 typed contract**: 接口从空 `interface{}`
+  改成有方法的 `ProcessExample(ctx, payload task.ExamplePayload) error`，
+  worker handler 显式调"有名有姓"的方法，接错 service 时编译期就能发现。
+  `HandleExampleTask` 删掉旧的"打日志兜底"弱类型路径，processor 报 error
+  透传让 asynq 走 `MaxRetry`，避免静默吞任务。`internal/worker.go::buildWorkerDeps`
+  在 `reg.DB` 可用时实际注入 `service.NewExampleService(...)`（之前只是示
+  意注释）；`RegisterHandlers` 在 `Deps.Example` 为 nil 时回填新增的
+  `noopExampleProcessor` 兜底（保留模板可运行性 + 打 warn 提醒接业务）。
+  `ExampleService` 加 `ProcessExample` 方法实现接口。`docs/runbook.md`
+  "新增 Asynq 异步任务"小节扩成 5 步清单，明确 typed processor 接口形态。
+- **`APP_ENV=production` 安全 guard 扩充**: `config/validate.go` 在
+  production 下新增硬拦 `GIN_MODE != release` / `LOG_FORMAT != json`
+  ——这两项漏配会泄露 panic stack / 日志采集器解析不了，是 `.env.example`
+  checklist 的高频漏项，拦在启动期最稳。同时抽出 `config.ProductionWarnings`
+  集中输出"非致命但大概率漏配"提示（`RATE_LIMIT_PER_MINUTE=0` /
+  `TRUSTED_PROXIES` 空 / `METRICS_ADDR` 空）。`cmd/api/main.go` 启动期一次
+  性 iterate warnings 打 log，不再散落多处。
 
 ### Docs
 
@@ -197,6 +223,16 @@ Commit prefixes follow the convention in `CLAUDE.md`
   `n=30,100`; invariant test `delay ∈ [0, max]` over `n ∈ [-5, 100]`;
   `taskLogContext` trace-source resolution (payload vs synthesised);
   `traceMiddleware` does not swallow handler errors.
+
+### Security
+
+- **JWT 强制要求 `exp` claim，闭环永不过期 token**: `pkg/auth.JWTManager.ParseToken`
+  显式启用 `jwt.WithExpirationRequired()`——jwt/v5 默认 `exp` 是 optional，
+  没有它即使拿到 secret 也能签出永不过期 token，与文档声明的 Layer 1
+  "exp 校验" 约束不符。同时 `GenerateToken` 在 `manager.ttl <= 0` 时返
+  回新增 `ErrMissingTTL`，避免自家签出无 exp token 自己验不过；
+  `GenerateTokenWithClaims` 同步要求 `claims.ExpiresAt != nil`，堵住自定
+  义 claims 旁路。
 
 ### Added
 

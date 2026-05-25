@@ -66,6 +66,29 @@ Commit prefixes follow the convention in `CLAUDE.md`
   Previously only the cache (go-redis) client honored it; the queue
   connections were stuck on the library default. `REDIS_MIN_IDLE_CONNS`
   stays cache-only (asynq does not expose it).
+- **Asynq 幂等约定固化成 helper**：`internal/task/header.go` 提供一套统一
+  约定，取代以前每个 NewXxxTask 工厂自己 hard-code MaxRetry / 单独写
+  payload 字段的散乱写法。
+  - `task.Header{Version, TraceID}` 嵌入所有 payload struct 顶部，JSON
+    序列化字段被提升到顶层（兼容已有的 `TraceIDFromPayload` 顶层解析）。
+    `task.NewHeader(traceID)` 构造时自动填 `PayloadSchemaVersion=1`。
+  - `task.CheckHeader(h, supported)` 让 worker handler 反序列化后第一时间
+    校验 schema version；超界返 `ErrUnsupportedPayloadVersion` 走 retry，
+    不静默吞——吞了等于丢消息，走 retry 至少能从 archived 队列告警看见。
+    `CurrentSupported = {Min: 1, Max: 1}` 配合 `PayloadSchemaVersion` 单
+    测防漂移（升版本忘改 CurrentSupported 会立刻 fail）。
+  - `task.DefaultOptions()` 返回 `MaxRetry=5 + Timeout=30s` 的 Option 切
+    片；业务有长任务 / 特殊重试需求 append 覆盖。
+  - `task.BuildTaskID(namespace, keys...)` 拼接稳定业务键给 `asynq.TaskID`
+    用做永久全局去重；带 `MaxTaskIDLength=1KB` 截断保护避免 Redis 撑爆。
+    短窗口防抖仍用 `asynq.Unique(ttl)`——两种语义不同的去重并存，让 caller
+    显式选，不强行合一。
+  - `task.MarshalPayload(taskType, payload)` 薄包装让序列化 error 自动带
+    task type 上下文，便于线上日志定位。
+  - `internal/task/example.go` 改造为新约定的参考实现：`ExamplePayload`
+    嵌入 `Header`、`NewExampleTask` 用 `DefaultOptions()`；`internal/worker/handler.go::HandleExampleTask`
+    加 `CheckHeader` 校验。CLAUDE.md / AGENTS.md "异步队列" shared 段
+    + docs/runbook.md "新增任务" 与 "幂等约定" 段同步更新。
 - **`repository.InTxWithOptions(ctx, db, *sql.TxOptions, fn)`**: 新增事务
   helper，允许调用方指定 isolation level（如 `sql.LevelRepeatableRead`、
   `sql.LevelSerializable`）和 `ReadOnly`。`InTx` 现在是 `InTxWithOptions(nil)`

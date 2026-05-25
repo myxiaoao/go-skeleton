@@ -74,6 +74,16 @@ func (d *Deps) HandleExampleTask(ctx context.Context, t *asynq.Task) error {
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
 		return fmt.Errorf("unmarshal example payload: %w", err)
 	}
+	// 反序列化后第一时间校验 payload schema version：超界返 error 让 asynq
+	// 重试，赌后续 worker 升级会消化；不要静默吞——吞了等于真的丢消息，
+	// 走 retry 至少能从 archived 队列告警里看见。
+	if err := task.CheckHeader(p.Header, task.CurrentSupported); err != nil {
+		applog.FromContext(ctx).Error("example task rejected: unsupported payload version",
+			zap.Int("got_version", p.Version),
+			zap.Error(err),
+		)
+		return err
+	}
 	if err := d.Example.ProcessExample(ctx, p); err != nil {
 		applog.FromContext(ctx).Error("example task processing failed",
 			zap.String("name", p.Name),

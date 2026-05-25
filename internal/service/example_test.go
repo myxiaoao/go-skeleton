@@ -15,9 +15,14 @@ import (
 )
 
 // taskExamplePayload 构造测试用的 example task payload，避免在每个用例里
-// 写一遍 struct literal 噪音。
+// 写一遍 struct literal 噪音。Header 填默认值让 payload 形态贴近真实入队
+// 产出（worker handler 校验 Header；service.ProcessExample 不校验，但风
+// 格统一便于将来 service 真要读 Header 时不用改测试）。
 func taskExamplePayload(name string) task.ExamplePayload {
-	return task.ExamplePayload{Name: name}
+	return task.ExamplePayload{
+		Header: task.NewHeader(""),
+		Name:   name,
+	}
 }
 
 type mockExampleRepo struct {

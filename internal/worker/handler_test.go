@@ -42,7 +42,10 @@ func makeExampleTaskBytes(t *testing.T, p task.ExamplePayload) []byte {
 func TestHandleExampleTaskDispatchesToProcessor(t *testing.T) {
 	proc := &mockExampleProcessor{}
 	deps := &Deps{Example: proc}
-	body := makeExampleTaskBytes(t, task.ExamplePayload{Name: "hello", TraceID: "trace-1"})
+	body := makeExampleTaskBytes(t, task.ExamplePayload{
+		Header: task.NewHeader("trace-1"),
+		Name:   "hello",
+	})
 
 	if err := deps.HandleExampleTask(context.Background(),
 		asynq.NewTask(task.TypeExampleTask, body)); err != nil {
@@ -63,12 +66,54 @@ func TestHandleExampleTaskPropagatesProcessorError(t *testing.T) {
 	deps := &Deps{Example: &mockExampleProcessor{
 		processFunc: func(context.Context, task.ExamplePayload) error { return wantErr },
 	}}
-	body := makeExampleTaskBytes(t, task.ExamplePayload{Name: "fail"})
+	body := makeExampleTaskBytes(t, task.ExamplePayload{
+		Header: task.NewHeader(""),
+		Name:   "fail",
+	})
 
 	err := deps.HandleExampleTask(context.Background(),
 		asynq.NewTask(task.TypeExampleTask, body))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want %v", err, wantErr)
+	}
+}
+
+// TestHandleExampleTaskRejectsUnsupportedVersion 验证 payload schema 版本
+// 校验：缺 Header（version=0）被拒、超界 version 被拒，processor 不会被
+// 调到——避免老 worker 不知不觉跑了新格式 payload。
+func TestHandleExampleTaskRejectsUnsupportedVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload task.ExamplePayload
+	}{
+		{
+			name:    "缺 Header 默认 version=0 被拒",
+			payload: task.ExamplePayload{Name: "no-header"},
+		},
+		{
+			name: "version 超出 CurrentSupported.Max 被拒",
+			payload: task.ExamplePayload{
+				Header: task.Header{Version: task.CurrentSupported.Max + 1},
+				Name:   "future",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proc := &mockExampleProcessor{}
+			deps := &Deps{Example: proc}
+			body := makeExampleTaskBytes(t, tc.payload)
+
+			err := deps.HandleExampleTask(context.Background(),
+				asynq.NewTask(task.TypeExampleTask, body))
+			var verErr task.ErrUnsupportedPayloadVersion
+			if !errors.As(err, &verErr) {
+				t.Fatalf("err = %v, want ErrUnsupportedPayloadVersion", err)
+			}
+			if proc.called != 0 {
+				t.Fatalf("processor.called = %d, want 0 (must reject before dispatch)", proc.called)
+			}
+		})
 	}
 }
 
@@ -99,7 +144,10 @@ func TestRegisterHandlersFillsNoopProcessor(t *testing.T) {
 	}
 
 	// 真跑一遍兜底 processor，确保它不 panic 且不返 error（避免触发 asynq 重试）。
-	body := makeExampleTaskBytes(t, task.ExamplePayload{Name: "noop"})
+	body := makeExampleTaskBytes(t, task.ExamplePayload{
+		Header: task.NewHeader(""),
+		Name:   "noop",
+	})
 	if err := deps.HandleExampleTask(context.Background(),
 		asynq.NewTask(task.TypeExampleTask, body)); err != nil {
 		t.Fatalf("noop processor returned err = %v, want nil", err)

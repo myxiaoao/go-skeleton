@@ -108,17 +108,29 @@ make verify
 ## 新增一个 Asynq 异步任务
 
 ```sh
-# 1. internal/task/<name>.go：定义任务类型常量 + payload struct
+# 1. internal/task/<name>.go：定义任务类型常量 + payload struct + 工厂
+#    a. payload 头部匿名嵌入 task.Header（提供 Version + TraceID），通过
+#       task.NewHeader(traceID) 构造；新增字段加 omitempty 向后兼容，改
+#       字段语义 / 删字段必须升 task.PayloadSchemaVersion + 同步
+#       CurrentSupported.Max。
+#    b. NewXxxTask 工厂用 task.DefaultOptions() 带默认 MaxRetry/Timeout，
+#       业务有特殊需求时 append asynq.MaxRetry(N) / asynq.Timeout(d) 覆盖；
+#       序列化走 task.MarshalPayload(TypeXxx, p) 让 error 自动带 task type。
 # 2. internal/worker/handler.go：
 #    a. 定义 typed processor 接口（如 XxxProcessor.ProcessXxx(ctx, payload) error），
 #       不要回退到 interface{} —— 让 worker handler 调"有名有姓"的方法，
 #       接错 service 时编译期就能发现。
 #    b. 在 Deps 上加一个 Xxx 字段，类型用上一步的接口。
 #    c. RegisterHandlers 里 mux.HandleFunc(task.TypeXxx, deps.HandleXxxTask)。
-#    d. 写一个 HandleXxxTask：解 payload → 调 deps.Xxx.ProcessXxx(ctx, p)。
+#    d. 写一个 HandleXxxTask：解 payload → task.CheckHeader 校验 schema
+#       version（超界返 error 让 asynq 重试，不要静默吞）→ 调
+#       deps.Xxx.ProcessXxx(ctx, p)。
 # 3. service：给对应 Service 加一个方法实现该接口（落库 / 调外部系统）。
 # 4. internal/worker.go::buildWorkerDeps：把 service 实例注入 Deps.Xxx。
 # 5. service 一侧通过 ExampleQueue 接口发布任务（不要直接拿 *asynq.Client）。
+#    业务键稳定的任务用 asynq.TaskID(task.BuildTaskID("ns", keys...)) 永
+#    久去重（订单状态推进等）；短窗口防抖用 asynq.Unique(ttl)（用户点击
+#    防抖、定时拉取去重）。两种语义不同，不要混用。
 make verify
 ```
 
@@ -392,10 +404,19 @@ asynq task run --queue=default --state=archived --all
 
 ### 业务侧：写新任务时的幂等约定
 
-死信常常源于**重投同一任务产生副作用**（重复扣款、重复发邮件）。新增任务类型时强烈建议在 `internal/task/<name>.go` 里：
+死信常常源于**重投同一任务产生副作用**（重复扣款、重复发邮件）。新增任务类型时强烈建议：
 
-1. 用 `asynq.TaskID(...)` 选项配业务唯一键（如订单 ID + 操作类型），让 Asynq 自动去重。
-2. 消费端 handler 第一步先用业务唯一键查"是否已处理"，已处理直接 return nil（不算失败）。
-3. payload 字段加 `idempotency_key` 不要依赖 Asynq 内部 ID。
+1. **选对去重机制**（两种语义不同，不要混用）：
+   - 业务键稳定 + 永久全局唯一 → `asynq.TaskID(task.BuildTaskID("order", "shipped", orderID))`，
+     同 ID 已入队会返 `asynq.ErrTaskIDConflict`。订单状态推进、用户操作日志走这条。
+   - 短窗口防抖 → `asynq.Unique(5 * time.Minute)`，asynq 自动按 payload 哈希
+     在 TTL 内去重，超过 TTL 同 payload 可再次入队。用户点按钮、定时拉取走这条。
+2. **消费端再做一次幂等检查**（双保险）：handler 第一步先用业务键查
+   "是否已处理"，已处理直接 return nil（不算失败，避免 archived 队列堆数据）。
+   Asynq 的去重只能挡住"重复入队"，挡不住"任务跑到一半 crash 后被重试"。
+3. **payload 嵌入 `task.Header`**（包含 Version + TraceID），版本不兼容
+   直接拒绝任务而不是凭空猜字段，避免新老 worker 同时跑期间的 schema 漂移。
+4. 业务自己的幂等 key 放 payload 字段，不要依赖 Asynq 分配的内部 task ID
+   （那个跟业务无关、不便日志追踪）。
 
 参考骨架 `internal/task/example.go` 的 `MaxRetry(5)` 约定；超过 5 次仍失败的会进 archived，记得跟踪 alert。

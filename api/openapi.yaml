@@ -6,9 +6,15 @@ info:
     Internal API contract for the go-skeleton service.
 
     Convention:
-    - Business endpoints always return HTTP 200; success/failure is encoded in
-      the JSON body `code` field (0 = success).
-    - Infrastructure endpoints like `/health` use real HTTP status codes.
+    - Responses use a uniform envelope: `{code, message, reason?, data?, metadata?}`.
+      `code = 0` means success; non-zero codes are stable business error codes
+      defined in `pkg/errcode` (1xxx client errors, 9xxx server errors).
+    - HTTP status mirrors the body code per `pkg/errcode.Error.HTTPStatus()`:
+      success → 200; 1xxx → 400/401/403/404/408/429/503; 9xxx → 500/501/503.
+      Clients should make precise decisions on `body.code`; HTTP status is a
+      coarse signal for monitoring / LB / transparent proxies.
+    - Infrastructure endpoints `/livez` and `/health` do **not** use the envelope:
+      they return 200/503 directly to drive Kubernetes probes.
   contact:
     name: go-skeleton
 
@@ -113,6 +119,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreateTokenEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/auth/me:
     get:
@@ -128,6 +140,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MeEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/examples:
     get:
@@ -155,6 +171,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListExamplesEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [example]
       operationId: createExample
@@ -172,6 +192,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExampleEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/examples/tasks:
     post:
@@ -194,6 +218,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnqueueExampleTaskEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
 components:
   securitySchemes:
@@ -201,6 +231,71 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
+  # 可复用错误响应。每个业务 endpoint 通过 $ref 引用，避免在每条 op 上重复
+  # 写 4xx/5xx 信封结构。新增 errcode 段位时同步加对应 response。
+  responses:
+    BadRequest:
+      description: |
+        Client error (1xxx). Examples: INVALID_PARAMS (1001). The body envelope
+        carries the exact reason / code so the client can branch precisely.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: |
+        Authentication required or invalid (token missing / expired / signature
+        invalid). reason=UNAUTHORIZED (code 1002).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: |
+        Authenticated but lacks permission. reason=PERMISSION_DENIED (code 1003).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RequestTimeout:
+      description: |
+        Request exceeded configured timeout. reason=REQUEST_TIMEOUT (code 1005).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TooManyRequests:
+      description: |
+        Rate limited. reason=TOO_MANY_REQUESTS (code 1004).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    InternalError:
+      description: |
+        Generic server-side failure (9xxx). Catch-all for INTERNAL_ERROR (9001),
+        DATABASE_ERROR (9002), QUEUE_ERROR (9004), etc.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotImplemented:
+      description: |
+        Endpoint is scaffolded but business logic isn't filled in yet.
+        reason=NOT_IMPLEMENTED_YET (code 9005).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServiceUnavailable:
+      description: |
+        Downstream dependency unavailable or endpoint disabled by configuration.
+        Examples: QUEUE_UNAVAILABLE (9003), SERVICE_DISABLED (1006).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
 
   schemas:
     # ---------- Health ----------
@@ -266,6 +361,16 @@ components:
           properties:
             trace_id:
               type: string
+
+    # ErrorEnvelope 是 Envelope 用于错误响应的别名：所有非 2xx 状态码都使用
+    # 同一信封结构（code/reason/message/metadata），但 data 永远为空。专门
+    # 起个名让 4xx/5xx 的 responses 段写起来更清晰。
+    ErrorEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      description: |
+        Error response envelope. Same shape as Envelope but never carries data.
+        See pkg/errcode for the full code/reason catalog.
 
     # ---------- Auth ----------
     CreateTokenReq:

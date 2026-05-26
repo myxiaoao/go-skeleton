@@ -246,6 +246,23 @@ docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
 docs-deploy-check: ## 校验 docs/deploy.md 与 deploy/systemd/*.service 一致
 	@bash scripts/deploy-doc-verify.sh
 
+.PHONY: shell-verify
+shell-verify: ## 校验 scripts/*.sh 语法 + 静态规则（bash -n 必跑，shellcheck 装了才跑）
+	@set -e; \
+	files=$$(find scripts -maxdepth 1 -name '*.sh' -type f | sort); \
+	if [ -z "$$files" ]; then \
+		echo "shell-verify: no scripts/*.sh found"; exit 0; \
+	fi; \
+	for f in $$files; do \
+		bash -n "$$f" || { echo "shell-verify: bash -n failed on $$f" >&2; exit 1; }; \
+	done; \
+	if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck -x -s bash $$files || { echo "shell-verify: shellcheck failed" >&2; exit 1; }; \
+		echo "shell-verify: bash -n + shellcheck clean ($$(echo $$files | wc -w | tr -d ' ') files)"; \
+	else \
+		echo "shell-verify: bash -n clean ($$(echo $$files | wc -w | tr -d ' ') files); shellcheck not installed, skipping static rules"; \
+	fi
+
 .PHONY: docs-errcodes
 docs-errcodes: ## 重新生成 docs/errcodes.md（源：pkg/errcode + pkg/response.MessageFor）
 	$(GO) run scripts/gen-errcodes.go
@@ -590,7 +607,7 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify）
+verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
 	@$(MAKE) --no-print-directory _verify-step STEP=fmt
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
@@ -602,6 +619,7 @@ verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-ver
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-deploy-check
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-errcodes-verify
+	@$(MAKE) --no-print-directory _verify-step STEP=shell-verify
 	@printf '\033[32m=== verify OK ===\033[0m\n'
 
 # Prints a banner before each step so AI assistants and humans can spot

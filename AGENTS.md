@@ -99,6 +99,39 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 新增错误码：(1) 去 `pkg/errcode/common.go` 加 `newError(code, "REASON")` 常量；(2) 在 `pkg/response/response.go::MessageFor` 补默认英文文案；(3) 如果新 reason 应映射到 HTTP 段位之外的特定 status，去 `pkg/errcode/type.go::HTTPStatus` 的 switch 加 case + 配套单测；(4) 跑 `make docs-errcodes` 重新生成 `docs/errcodes.md`。
 
+## 列表 / 分页协议
+
+参考实现：`internal/service/example.go` 的 `ListExamplesReq` / `ListExamplesRes`。新模块写列表查询照这套来，不要每个模块各发明一套字段。
+
+**请求侧**（service DTO，handler 用 `c.ShouldBindQuery(&req)`）：
+- 小数据集（< 10w 条总量，UI 跳页）走 `limit` + `offset`：
+  ```go
+  type ListXxxReq struct {
+      Limit  int `form:"limit"  binding:"omitempty,min=1,max=100"`
+      Offset int `form:"offset" binding:"omitempty,min=0"`
+  }
+  ```
+  `limit` **必须** 设上限（默认 100，与 `examples` 表对齐），防单次返回过大；`limit=0` 在 service 层回退到默认（一般 20），不当成"返 0 条"——前端少传一个字段不应该返空。`offset` 不设上限——`offset` 是小数据约定，大数据应换 cursor。
+- 大数据集 / 流式翻页（≥ 10w 条 / 时间线 / 排行榜）走 `limit` + `cursor`：
+  ```go
+  type ListXxxReq struct {
+      Limit  int    `form:"limit"  binding:"omitempty,min=1,max=100"`
+      Cursor string `form:"cursor" binding:"omitempty"`
+  }
+  ```
+  `cursor` 通常是上一页末条的 `id` 或 `(created_at, id)` 复合编码（base64 url-safe），**禁止**裸传 SQL 表达式。
+
+不要同时收 `offset` + `cursor`——一个 endpoint 选一种,选定后不要互转。需要混合的极少数场景写 issue 单独讨论。
+
+**响应侧**（service Res，handler `response.WriteSuccess(c, res)`）：
+- offset 分页：`{items, total}`。`total` 走 `RepeatableRead + ReadOnly` 事务保证和 `items` 同快照——见 `repository.InTxWithOptions` + `sql.LevelRepeatableRead`，否则并发写会让 `total` 与 `len(items)` 对不上、前端算总页数翻车。
+- cursor 分页：`{items, next_cursor}`。`next_cursor=""` 表示已到末页；**不**返 `total`（大数据集精确 count 代价太高，估算值会误导）。
+- 字段名固定用 `items` / `total` / `next_cursor`，**不**用 `list`/`count`/`cursor` 这类近义词散开。OpenAPI 里同步声明这三个字段。（example 模块沿用历史命名 `examples` + `total`，新模块走 `items`；不要因为 example 长那样就在新模块复制资源名复数。）
+
+**SQL 侧**（repository）：
+- offset 分页用 `ORDER BY id DESC LIMIT ? OFFSET ?`，配 `LevelRepeatableRead` ReadOnly tx 跟 `Count` 同事务。
+- cursor 分页用 `WHERE id < ? ORDER BY id DESC LIMIT ?`（`?` = 上次 next_cursor 解出来的 id）。复合 cursor 用 `(created_at, id) < (?, ?)`，保证 created_at 撞值时仍有稳定顺序。
+
 ## i18n
 
 **当前未实现**。如果未来加，按下面这套约定来，不要散落到各层：

@@ -72,3 +72,46 @@ func TestRegistry_NotFoundLabeled(t *testing.T) {
 		t.Errorf("expected route=\"not_found\" label, got body:\n%s", w.Body.String())
 	}
 }
+
+// TestRegistry_BusinessCodeLabel 验证 code label：handler 通过 c.Set 写过
+// "response_code" 时 metric 应带对应业务码（如 1001 失败、0 成功）；没写过
+// 时（健康检查这类不走 pkg/response 的路径）兜底 "0"。
+func TestRegistry_BusinessCodeLabel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := New("test")
+
+	engine := gin.New()
+	engine.Use(r.HTTPMiddleware())
+	engine.GET("/ok", func(c *gin.Context) {
+		c.Set("response_code", 0)
+		c.JSON(http.StatusOK, gin.H{})
+	})
+	engine.GET("/biz-err", func(c *gin.Context) {
+		c.Set("response_code", 1001)
+		c.JSON(http.StatusBadRequest, gin.H{})
+	})
+	engine.GET("/no-code", func(c *gin.Context) {
+		// 模拟 /health 那种不走 pkg/response 的端点。
+		c.JSON(http.StatusOK, gin.H{})
+	})
+	engine.GET("/metrics", gin.WrapH(r.Handler()))
+
+	for _, path := range []string{"/ok", "/biz-err", "/no-code"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	body := w.Body.String()
+	for _, want := range []string{
+		`code="0"`,    // /ok + /no-code 共用
+		`code="1001"`, // /biz-err
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics output missing label %q\nbody:\n%s", want, body)
+		}
+	}
+}

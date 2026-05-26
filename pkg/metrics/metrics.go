@@ -49,8 +49,8 @@ func New(subsystem string) *Registry {
 		Namespace: "go_skeleton",
 		Subsystem: subsystem,
 		Name:      "http_requests_total",
-		Help:      "Total HTTP requests partitioned by method, route, and status code.",
-	}, []string{"method", "route", "status"})
+		Help:      "Total HTTP requests partitioned by method, route, HTTP status, and business code.",
+	}, []string{"method", "route", "status", "code"})
 
 	// Histogram buckets 选 5ms / 10ms / 25ms / 50ms / 100ms / 250ms / 500ms /
 	// 1s / 2.5s / 5s / 10s。覆盖从内网快返到外部依赖慢响应的常见区间；
@@ -61,7 +61,7 @@ func New(subsystem string) *Registry {
 		Name:      "http_request_duration_seconds",
 		Help:      "HTTP request latency in seconds.",
 		Buckets:   []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
-	}, []string{"method", "route", "status"})
+	}, []string{"method", "route", "status", "code"})
 
 	inflight := prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "go_skeleton",
@@ -99,6 +99,12 @@ func (r *Registry) Handler() http.Handler {
 // HTTPMiddleware 给 gin engine 套上指标观测。c.FullPath() 返回路由模板
 // （例如 /api/v1/examples/:id），不是裸 URL，避免 path 高基数把内存撑爆。
 // 路由未命中（404）时 FullPath 为空，标记成 "not_found" 兜底。
+//
+// code label 取自 gin.Context 的 "response_code" key（由 pkg/response 的
+// WriteSuccess / WriteError / WriteValidationError 提前 Set 过）。这避免
+// 了 wrap response writer 抓 body 解 JSON 的开销，也避免 metrics 反向
+// import response 形成循环依赖。没拿到值（如健康检查路径、未走 response
+// 包的 handler、或路由 404）兜底 "0"——表示"没有业务 code 信息"。
 func (r *Registry) HTTPMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		r.inflight.Inc()
@@ -114,8 +120,32 @@ func (r *Registry) HTTPMiddleware() gin.HandlerFunc {
 		}
 		status := strconv.Itoa(c.Writer.Status())
 		method := c.Request.Method
+		code := businessCodeLabel(c)
 
-		r.requests.WithLabelValues(method, route, status).Inc()
-		r.duration.WithLabelValues(method, route, status).Observe(time.Since(start).Seconds())
+		r.requests.WithLabelValues(method, route, status, code).Inc()
+		r.duration.WithLabelValues(method, route, status, code).Observe(time.Since(start).Seconds())
+	}
+}
+
+// businessCodeLabel 从 gin.Context 取业务 code 写成 Prometheus label 字符串。
+// 走过 pkg/response 的请求会有值；没走（如 /health 直接 c.JSON、404 路由）
+// 返 "0" 表示"没有业务码信息"，让 label 始终非空、避免 cardinality 抖动。
+func businessCodeLabel(c *gin.Context) string {
+	v, ok := c.Get("response_code")
+	if !ok {
+		return "0"
+	}
+	switch code := v.(type) {
+	case int:
+		return strconv.Itoa(code)
+	case int64:
+		return strconv.FormatInt(code, 10)
+	case string:
+		if code == "" {
+			return "0"
+		}
+		return code
+	default:
+		return "0"
 	}
 }

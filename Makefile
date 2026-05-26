@@ -247,7 +247,7 @@ docs-deploy-check: ## 校验 docs/deploy.md 与 deploy/systemd/*.service 一致
 	@bash scripts/deploy-doc-verify.sh
 
 .PHONY: shell-verify
-shell-verify: ## 校验 scripts/*.sh 语法 + 静态规则（bash -n 必跑，shellcheck 装了才跑）
+shell-verify: ## 校验 scripts/*.sh 语法 + 静态规则（bash -n 必跑，shellcheck 装了才跑；CI=true 时必跑）
 	@set -e; \
 	files=$$(find scripts -maxdepth 1 -name '*.sh' -type f | sort); \
 	if [ -z "$$files" ]; then \
@@ -259,6 +259,9 @@ shell-verify: ## 校验 scripts/*.sh 语法 + 静态规则（bash -n 必跑，sh
 	if command -v shellcheck >/dev/null 2>&1; then \
 		shellcheck -x -s bash $$files || { echo "shell-verify: shellcheck failed" >&2; exit 1; }; \
 		echo "shell-verify: bash -n + shellcheck clean ($$(echo $$files | wc -w | tr -d ' ') files)"; \
+	elif [ "$$CI" = "true" ]; then \
+		echo "shell-verify: CI=true 但 shellcheck 未安装；workflow 必须显式 apt-get install shellcheck（见 .github/workflows/ci.yml）" >&2; \
+		exit 1; \
 	else \
 		echo "shell-verify: bash -n clean ($$(echo $$files | wc -w | tr -d ' ') files); shellcheck not installed, skipping static rules"; \
 	fi

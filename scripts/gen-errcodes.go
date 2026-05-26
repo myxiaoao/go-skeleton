@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 
+	"go-skeleton/pkg/errcode"
 	"go-skeleton/pkg/response"
 )
 
@@ -56,12 +57,14 @@ func main() {
 	b.WriteString("# Error Codes\n\n")
 	b.WriteString("> 自动生成，不要手改。源：`pkg/errcode/common.go` + `pkg/response.MessageFor`。\n")
 	b.WriteString("> 重新生成：`make docs-errcodes`。CI 用 `make docs-errcodes-verify` 校验同步。\n\n")
-	b.WriteString("API 业务错误统一走 HTTP 200，错误信息靠下表的 `code` / `reason` 区分。\n\n")
-	b.WriteString("| Code | Reason | Default Message | Go Symbol |\n")
-	b.WriteString("|------|--------|-----------------|-----------|\n")
+	b.WriteString("API 响应走统一信封 `{code, message, reason?, data?, metadata?}`；")
+	b.WriteString("HTTP 状态码按下表映射，body `code` / `reason` 提供精确的业务分支信号。\n\n")
+	b.WriteString("| Code | Reason | HTTP | Default Message | Go Symbol |\n")
+	b.WriteString("|------|--------|------|-----------------|-----------|\n")
 	for _, e := range entries {
-		fmt.Fprintf(&b, "| %d | `%s` | %s | `errcode.%s` |\n",
-			e.Code, e.Reason, response.MessageFor(e.Reason), e.Name)
+		fmt.Fprintf(&b, "| %d | `%s` | %d | %s | `errcode.%s` |\n",
+			e.Code, e.Reason, errcode.HTTPStatusFor(e.Code, e.Reason),
+			response.MessageFor(e.Reason), e.Name)
 	}
 
 	if err := os.WriteFile("docs/errcodes.md", []byte(b.String()), 0o644); err != nil {

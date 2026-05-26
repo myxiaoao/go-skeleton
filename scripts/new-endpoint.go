@@ -74,17 +74,44 @@ type operation struct {
 	IfaceSig       serverIfaceSig
 	PathParamNames []string // path 里 {var} 按出现顺序的名字；空切片表示无 path 参数
 	RequiresAuth   bool     // yaml security 含 bearerAuth：路由注册时塞 deps.AuthRequired
+
+	// DTO 模式专属（dtoMode=true 时 collectOperations 填充；false 时全为 nil）。
+	// 命中形态简单走 ReqBodyDTO / QueryDTO 字段；命中复杂形态时 dto.Reason
+	// 非空说明降级——生成空 struct + // TODO 占位让作者手写。
+	ReqBodyDTO *dto // POST/PUT 的 requestBody.content.application/json.schema
+	QueryDTO   *dto // GET 的 parameters[in=query] 合成
+}
+
+// dto 描述 service 包里要生成的一个请求 DTO struct。Reason 非空时表示 schema
+// 不支持，Fields 留空——模板会生成空 struct + 一条 // TODO 注释说明原因。
+type dto struct {
+	Name      string     // 如 "CreateOrderReq"
+	Fields    []dtoField // 解析成功时填；降级时空
+	Reason    string     // 降级原因，如 "allOf" / "anyOf" / "nested object"
+	fromQuery bool       // true: 用 form:tag（ShouldBindQuery）；false: json:tag（ShouldBindJSON）
+}
+
+// dtoField 是 DTO struct 的一个字段。
+type dtoField struct {
+	GoName     string // 如 "Name"
+	GoType     string // "string" / "int" / "int64" / "bool"
+	JSONName   string // yaml 原字段名，如 "name"
+	BindingTag string // 如 "required,min=1,max=255"
 }
 
 func main() {
-	// 解析 args：第一个非 flag 是 NAME；--dry-run / -n 切到只 plan 不写盘。
-	// 也接受环境变量 DRY_RUN=1（make new-endpoint NAME=Order DRY_RUN=1）。
+	// 解析 args：第一个非 flag 是 NAME；--dry-run / -n 切到只 plan 不写盘；
+	// --dto 开启从 yaml schema 反推 service DTO struct + handler ShouldBind 绑定。
+	// 也接受环境变量 DRY_RUN=1 / DTO=1（make new-endpoint NAME=Order DTO=1）。
 	var name string
 	dryRun := os.Getenv("DRY_RUN") == "1"
+	dtoMode := os.Getenv("DTO") == "1"
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--dry-run", "-n":
 			dryRun = true
+		case "--dto":
+			dtoMode = true
 		case "":
 			// skip
 		default:
@@ -94,9 +121,11 @@ func main() {
 		}
 	}
 	if name == "" {
-		fatal(fmt.Errorf(`usage: new-endpoint <Name> [--dry-run]
+		fatal(fmt.Errorf(`usage: new-endpoint <Name> [--dry-run] [--dto]
   Name 必须 CamelCase 首字母大写，不含空格/特殊字符（如 Order、UserGroup）
-  --dry-run / DRY_RUN=1：只打印将生成 / 注入的内容，不写盘`))
+  --dry-run / DRY_RUN=1：只打印将生成 / 注入的内容，不写盘
+  --dto / DTO=1：从 yaml schema 反推 service DTO + handler ShouldBind 绑定
+    （仅支持简单 object schema；复杂形态降级 TODO 占位）`))
 	}
 	if !camelCaseRe.MatchString(name) {
 		fatal(fmt.Errorf("NAME=%q 必须 CamelCase 首字母大写，仅字母数字（如 Order、UserGroup）", name))
@@ -112,7 +141,7 @@ func main() {
 	}
 
 	// ---- 1. 解析 yaml + oapi.gen.go ----
-	ops, groupPath, err := collectOperations(name)
+	ops, groupPath, err := collectOperations(name, dtoMode)
 	if err != nil {
 		fatal(err)
 	}
@@ -231,7 +260,7 @@ func main() {
 //     （resourcePrefix 去掉 /api/v1 前缀；router.go 顶层 RegisterRoutes 已经
 //     被挂在 /api/v1 group 下了）。例 /api/v1/orders → "/orders"；
 //     /api/v1/order-items → "/order-items"。
-func collectOperations(name string) ([]operation, string, error) {
+func collectOperations(name string, dtoMode bool) ([]operation, string, error) {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = false
 	doc, err := loader.LoadFromFile("api/openapi.yaml")
@@ -264,7 +293,7 @@ func collectOperations(name string) ([]operation, string, error) {
 			if err != nil {
 				return nil, "", fmt.Errorf("%s %s: %w", verb, path, err)
 			}
-			ops = append(ops, operation{
+			built := operation{
 				OperationID:    op.OperationID,
 				HandlerMethod:  handlerMethod,
 				HTTPVerb:       verb,
@@ -272,7 +301,14 @@ func collectOperations(name string) ([]operation, string, error) {
 				IfaceMethod:    ifaceMethod,
 				PathParamNames: pathParams,
 				RequiresAuth:   requiresBearerAuth(op, doc),
-			})
+			}
+			if dtoMode {
+				// DTO 提取允许部分失败：复杂 schema 走降级（dto.Reason 非空），
+				// 不会让整个 op 收集失败——下游模板会生成 // TODO 占位。
+				built.ReqBodyDTO = extractRequestBodyDTO(op, name, handlerMethod)
+				built.QueryDTO = extractQueryDTO(op, name, handlerMethod)
+			}
+			ops = append(ops, built)
 		}
 	}
 
@@ -472,6 +508,208 @@ func requiresBearerAuth(op *openapi3.Operation, doc *openapi3.T) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// DTO 提取（--dto / DTO=1 模式专属）
+// ---------------------------------------------------------------------------
+
+// extractRequestBodyDTO 从 op.RequestBody 反推 service 包里的请求 DTO struct。
+// 没 requestBody（GET / DELETE 等）返 nil；有但 schema 不是 application/json
+// 也返 nil；schema 是 supported subset 时返 *dto 带 Fields；遇到 allOf /
+// oneOf / anyOf / nested object / $ref / array enum 等不支持形态时返 *dto
+// 但 Fields 空 + Reason 非空——下游模板会生成空 struct + // TODO 注释。
+//
+// DTO 命名：HandlerMethod + Name + "Req"，如 "CreateOrderReq" / "UpdateOrderReq"。
+func extractRequestBodyDTO(op *openapi3.Operation, name, handlerMethod string) *dto {
+	if op.RequestBody == nil || op.RequestBody.Value == nil {
+		return nil
+	}
+	content := op.RequestBody.Value.Content
+	if content == nil {
+		return nil
+	}
+	mt, ok := content["application/json"]
+	if !ok || mt == nil || mt.Schema == nil {
+		return nil
+	}
+	dtoName := handlerMethod + name + "Req"
+	return extractDTOFromSchema(mt.Schema, dtoName)
+}
+
+// extractQueryDTO 把 op.Parameters 里 in=query 的几个简单参数合成一个 DTO。
+// 没 query 参数返 nil。每个 query param 的 schema 都按 extractScalarField
+// 处理；任何一个 param 用了 array/object/$ref 等复杂 schema 就走降级——
+// 整个 DTO 留空 + Reason。
+//
+// DTO 命名：HandlerMethod + Name + "Req"。**与 ReqBodyDTO 同名**——一个 op
+// 同时有 body 和 query 的形态很罕见（GET 不带 body / POST 不靠 query），
+// 不在本脚本初版处理；冲突时 ReqBody 优先（service 层一个签名只能拿一个）。
+func extractQueryDTO(op *openapi3.Operation, name, handlerMethod string) *dto {
+	var queryParams []*openapi3.Parameter
+	for _, p := range op.Parameters {
+		if p == nil || p.Value == nil {
+			continue
+		}
+		if p.Value.In == "query" {
+			queryParams = append(queryParams, p.Value)
+		}
+	}
+	if len(queryParams) == 0 {
+		return nil
+	}
+	dtoName := handlerMethod + name + "Req"
+	out := &dto{Name: dtoName, fromQuery: true}
+	for _, qp := range queryParams {
+		field, reason := extractScalarField(qp.Name, qp.Schema, qp.Required)
+		if reason != "" {
+			out.Fields = nil
+			out.Reason = reason
+			return out
+		}
+		out.Fields = append(out.Fields, field)
+	}
+	return out
+}
+
+// extractDTOFromSchema 把 root schema（来自 requestBody）拍成扁平 DTO struct。
+// 仅支持 schema.Type == "object" + properties 全是 scalar。其它形态全降级。
+func extractDTOFromSchema(ref *openapi3.SchemaRef, dtoName string) *dto {
+	out := &dto{Name: dtoName}
+	if ref == nil || ref.Value == nil {
+		out.Reason = "schema 缺失"
+		return out
+	}
+	s := ref.Value
+
+	// allOf / oneOf / anyOf：组合 schema，初版不展开。
+	if len(s.AllOf) > 0 {
+		out.Reason = "allOf 组合 schema"
+		return out
+	}
+	if len(s.OneOf) > 0 {
+		out.Reason = "oneOf 组合 schema"
+		return out
+	}
+	if len(s.AnyOf) > 0 {
+		out.Reason = "anyOf 组合 schema"
+		return out
+	}
+	// $ref 引用：上游 kin-openapi 已 deref（ref.Value 不为 nil），但保留检测。
+	if ref.Ref != "" && len(s.Properties) == 0 && !hasType(s, "object") {
+		out.Reason = "$ref 指向非内联 schema"
+		return out
+	}
+	if !hasType(s, "object") {
+		out.Reason = fmt.Sprintf("顶层 schema type=%q，不是 object", schemaTypes(s))
+		return out
+	}
+
+	required := make(map[string]bool, len(s.Required))
+	for _, r := range s.Required {
+		required[r] = true
+	}
+	// properties map 顺序不定——按 key 排序，让生成 diff 稳定。
+	keys := make([]string, 0, len(s.Properties))
+	for k := range s.Properties {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		field, reason := extractScalarField(k, s.Properties[k], required[k])
+		if reason != "" {
+			out.Fields = nil
+			out.Reason = reason
+			return out
+		}
+		out.Fields = append(out.Fields, field)
+	}
+	return out
+}
+
+// extractScalarField 把单个属性 schema 转成 dtoField。支持 string / integer /
+// boolean + 约束 (minLength/maxLength/min/max/pattern)；遇到 array / nested
+// object / $ref / enum 都返 reason 非空让上层降级。
+func extractScalarField(propName string, ref *openapi3.SchemaRef, isRequired bool) (dtoField, string) {
+	if ref == nil || ref.Value == nil {
+		return dtoField{}, fmt.Sprintf("属性 %q schema 缺失", propName)
+	}
+	s := ref.Value
+	if len(s.AllOf)+len(s.OneOf)+len(s.AnyOf) > 0 {
+		return dtoField{}, fmt.Sprintf("属性 %q 用了 allOf/oneOf/anyOf", propName)
+	}
+	if len(s.Enum) > 0 {
+		return dtoField{}, fmt.Sprintf("属性 %q 含 enum（初版不支持）", propName)
+	}
+
+	var goType string
+	switch {
+	case hasType(s, "string"):
+		goType = "string"
+	case hasType(s, "integer"):
+		if s.Format == "int64" {
+			goType = "int64"
+		} else {
+			goType = "int"
+		}
+	case hasType(s, "boolean"):
+		goType = "bool"
+	case hasType(s, "array"):
+		return dtoField{}, fmt.Sprintf("属性 %q 是 array（初版只支持 scalar）", propName)
+	case hasType(s, "object"):
+		return dtoField{}, fmt.Sprintf("属性 %q 是嵌套 object（初版只支持顶层 scalar）", propName)
+	default:
+		return dtoField{}, fmt.Sprintf("属性 %q 类型 %q 不支持", propName, schemaTypes(s))
+	}
+
+	// binding tag：required + 类型相关约束。binding 包语义对齐 go-playground/validator。
+	var tags []string
+	if isRequired {
+		tags = append(tags, "required")
+	}
+	if goType == "string" {
+		if s.MinLength > 0 {
+			tags = append(tags, fmt.Sprintf("min=%d", s.MinLength))
+		}
+		if s.MaxLength != nil {
+			tags = append(tags, fmt.Sprintf("max=%d", *s.MaxLength))
+		}
+	} else if goType == "int" || goType == "int64" {
+		if s.Min != nil {
+			tags = append(tags, fmt.Sprintf("min=%d", int64(*s.Min)))
+		}
+		if s.Max != nil {
+			tags = append(tags, fmt.Sprintf("max=%d", int64(*s.Max)))
+		}
+	}
+	// pattern 在 go-playground/validator 里得用 regexp tag——但语义不完全一致；
+	// 初版不映射，让作者自补。
+
+	return dtoField{
+		GoName:     pascalize(propName),
+		GoType:     goType,
+		JSONName:   propName,
+		BindingTag: strings.Join(tags, ","),
+	}, ""
+}
+
+// hasType 检查 OpenAPI 3.1 的 schema.Type（kin-openapi 用 *openapi3.Types
+// 表示，可能是单值或多值数组）是否包含 want。3.0 风格 type: string 和 3.1
+// 风格 type: [string, null] 都能匹配。
+func hasType(s *openapi3.Schema, want string) bool {
+	if s == nil || s.Type == nil {
+		return false
+	}
+	return s.Type.Is(want)
+}
+
+// schemaTypes 把 schema.Type 拍平成展示用字符串（如 "[string]" / "[string null]"）。
+// 仅用于降级 reason 输出。
+func schemaTypes(s *openapi3.Schema) string {
+	if s == nil || s.Type == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%v", *s.Type)
 }
 
 // pascalize 把 "createExample" 转成 "CreateExample"——oapi-codegen 生成
@@ -736,8 +974,26 @@ func renderHandlerMethod(name, lower string, op operation) string {
 		pathVar = op.PathParamNames[0]
 		pathArg = ", " + pathVar
 	}
+	d := activeDTO(op)
 	switch op.HandlerMethod {
 	case "List":
+		if op.QueryDTO != nil && op.QueryDTO.Reason == "" {
+			return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
+func (h *%[1]sHandler) %[3]s(c *gin.Context) {
+	var req service.%[6]s
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.WriteValidationError(c, err)
+		return
+	}
+	res, err := h.svc.%[3]s(c.Request.Context(), &req)
+	if err != nil {
+		response.WriteError(c, err)
+		return
+	}
+	response.WriteSuccess(c, res)
+}
+`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, op.QueryDTO.Name)
+		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context())
@@ -749,6 +1005,23 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 }
 `, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb)
 	case "Create":
+		if d != nil && d.Reason == "" {
+			return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
+func (h *%[1]sHandler) %[3]s(c *gin.Context) {
+	var req service.%[6]s
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.WriteValidationError(c, err)
+		return
+	}
+	res, err := h.svc.%[3]s(c.Request.Context(), &req)
+	if err != nil {
+		response.WriteError(c, err)
+		return
+	}
+	response.WriteSuccess(c, res)
+}
+`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, d.Name)
+		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context())
@@ -772,6 +1045,24 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 }
 `, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg, pathVar, pathVar)
 	case "Update":
+		if d != nil && d.Reason == "" {
+			return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
+func (h *%[1]sHandler) %[3]s(c *gin.Context) {
+	%[7]s := c.Param(%[8]q)
+	var req service.%[9]s
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.WriteValidationError(c, err)
+		return
+	}
+	res, err := h.svc.%[3]s(c.Request.Context()%[6]s, &req)
+	if err != nil {
+		response.WriteError(c, err)
+		return
+	}
+	response.WriteSuccess(c, res)
+}
+`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg, pathVar, pathVar, d.Name)
+		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	%[7]s := c.Param(%[8]q)
@@ -784,6 +1075,23 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 }
 `, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, pathArg, pathVar, pathVar)
 	case "EnqueueTask":
+		if d != nil && d.Reason == "" {
+			return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s——把任务投到 Asynq 队列。
+func (h *%[1]sHandler) %[3]s(c *gin.Context) {
+	var req service.%[6]s
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.WriteValidationError(c, err)
+		return
+	}
+	res, err := h.svc.%[3]s(c.Request.Context(), &req)
+	if err != nil {
+		response.WriteError(c, err)
+		return
+	}
+	response.WriteSuccess(c, res)
+}
+`, name, lower, op.HandlerMethod, op.Path, op.HTTPVerb, d.Name)
+		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s——把任务投到 Asynq 队列。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context())
@@ -851,10 +1159,75 @@ func New%[1]sService(repo %[1]sRepository, queue %[1]sQueue) *%[1]sService {
 }
 `, name, lower)
 
+	// DTO 模式：先在所有方法之前生成 DTO struct 段（按 op 顺序输出，dedupe
+	// 同名 DTO——同一资源里同名 DTO 视作同一个）。
+	seen := make(map[string]bool)
+	for _, op := range ops {
+		for _, d := range opDTOs(op) {
+			if d == nil || seen[d.Name] {
+				continue
+			}
+			seen[d.Name] = true
+			fmt.Fprintln(&b)
+			fmt.Fprint(&b, renderDTOStruct(d))
+		}
+	}
+
 	for _, op := range ops {
 		fmt.Fprintln(&b)
 		fmt.Fprint(&b, renderServiceMethod(name, op))
 	}
+	return b.String()
+}
+
+// opDTOs 把 op 上配的 DTO（ReqBody / Query）按"service 方法签名优先级"返回。
+// 同一 op 不会同时有 body 和 query 走业务签名（GET 不带 body / POST 不靠
+// query），冲突时 ReqBody 优先。返回的 *dto 可能为 nil。
+func opDTOs(op operation) []*dto {
+	return []*dto{op.ReqBodyDTO, op.QueryDTO}
+}
+
+// activeDTO 返回 op 用在 service 签名里的那个 DTO（不是同时生成两个 struct
+// 的那种"全部"列表）。优先 ReqBody > Query。
+func activeDTO(op operation) *dto {
+	if op.ReqBodyDTO != nil {
+		return op.ReqBodyDTO
+	}
+	if op.QueryDTO != nil {
+		return op.QueryDTO
+	}
+	return nil
+}
+
+// renderDTOStruct 生成单个 DTO struct 块。降级（Reason 非空）时生成空 struct
+// + 一条 // TODO 注释说明 schema 形态，让作者照 yaml 手补字段。
+//
+// 标签策略：query DTO 用 form: tag（ShouldBindQuery 走 form/url tag，不看
+// json），body DTO 用 json: tag。判定靠 dto.fromQuery 标志（在 extractQueryDTO
+// 里置位）。
+func renderDTOStruct(d *dto) string {
+	if d.Reason != "" {
+		return fmt.Sprintf(`// %[1]s 由 yaml schema 反推降级——原因：%[2]s。
+// TODO: 按 api/openapi.yaml 里的 schema 手写字段 + binding tag。
+type %[1]s struct {
+}
+`, d.Name, d.Reason)
+	}
+	tagKey := "json"
+	if d.fromQuery {
+		tagKey = "form"
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "// %s 由 make new-endpoint --dto 从 api/openapi.yaml 反推生成。\n", d.Name)
+	fmt.Fprintf(&b, "type %s struct {\n", d.Name)
+	for _, f := range d.Fields {
+		tag := fmt.Sprintf(`%s:%q`, tagKey, f.JSONName)
+		if f.BindingTag != "" {
+			tag = fmt.Sprintf(`%s:%q binding:%q`, tagKey, f.JSONName, f.BindingTag)
+		}
+		fmt.Fprintf(&b, "\t%s %s `%s`\n", f.GoName, f.GoType, tag)
+	}
+	fmt.Fprintln(&b, "}")
 	return b.String()
 }
 
@@ -869,11 +1242,24 @@ func serviceParamName(op operation) string {
 }
 
 // renderServiceMethod 生成 service 方法签名 + 占位实现。
-// 入参：context.Context + (Get/Update/Delete) id string + (Create/Update) 后续手补 req。
+// 入参：context.Context + (Get/Update/Delete) id string + (Create/Update/List with DTO) *XxxReq。
 // 返回：(any, error) ——精确返回类型让填业务的人换。
+//
+// activeDTO(op) != nil 时签名加上 *<DtoName>，body 里把 _ = req 占位，让骨架
+// 编译过；nil 时维持原始无 DTO 形态（向后兼容默认 DTO=0 行为）。
 func renderServiceMethod(name string, op operation) string {
+	d := activeDTO(op)
 	switch op.HandlerMethod {
 	case "List":
+		if d != nil {
+			return fmt.Sprintf(`// %[2]s TODO: 列表查询。返回类型 / 过滤逻辑按业务补。
+func (s *%[1]sService) %[2]s(ctx context.Context, req *%[3]s) (any, error) {
+	_ = ctx
+	_ = req
+	return nil, errcode.NotImplementedYet
+}
+`, name, op.HandlerMethod, d.Name)
+		}
 		return fmt.Sprintf(`// %[2]s TODO: 列表查询。返回类型 / 参数（limit/offset/filter）按业务补。
 func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
 	_ = ctx
@@ -881,6 +1267,15 @@ func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
 }
 `, name, op.HandlerMethod)
 	case "Create":
+		if d != nil {
+			return fmt.Sprintf(`// %[2]s TODO: 创建。返回 model 按业务补。
+func (s *%[1]sService) %[2]s(ctx context.Context, req *%[3]s) (any, error) {
+	_ = ctx
+	_ = req
+	return nil, errcode.NotImplementedYet
+}
+`, name, op.HandlerMethod, d.Name)
+		}
 		return fmt.Sprintf(`// %[2]s TODO: 创建。请求结构 / 返回 model 按业务补。
 func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
 	_ = ctx
@@ -898,6 +1293,16 @@ func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string) (any, error) {
 `, name, op.HandlerMethod, pathVar)
 	case "Update":
 		pathVar := serviceParamName(op)
+		if d != nil {
+			return fmt.Sprintf(`// %[2]s TODO: 按 %[3]s 更新。
+func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string, req *%[4]s) (any, error) {
+	_ = ctx
+	_ = %[3]s
+	_ = req
+	return nil, errcode.NotImplementedYet
+}
+`, name, op.HandlerMethod, pathVar, d.Name)
+		}
 		return fmt.Sprintf(`// %[2]s TODO: 按 %[3]s 更新。请求结构按业务补。
 func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string) (any, error) {
 	_ = ctx
@@ -915,6 +1320,18 @@ func (s *%[1]sService) %[2]s(ctx context.Context, %[3]s string) (any, error) {
 }
 `, name, op.HandlerMethod, pathVar)
 	case "EnqueueTask":
+		if d != nil {
+			return fmt.Sprintf(`// %[2]s TODO: 投异步任务。任务 payload 按业务补。
+func (s *%[1]sService) %[2]s(ctx context.Context, req *%[3]s) (any, error) {
+	_ = ctx
+	_ = req
+	if s.queue == nil || !s.queue.Available() {
+		return nil, errcode.QueueUnavailable
+	}
+	return nil, errcode.NotImplementedYet
+}
+`, name, op.HandlerMethod, d.Name)
+		}
 		return fmt.Sprintf(`// %[2]s TODO: 投异步任务。请求结构 / 任务 payload 按业务补。
 func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
 	_ = ctx
@@ -1430,6 +1847,28 @@ func renderDryRunPlan(name, lower string, ops []operation, groupPath string) str
 	fmt.Fprintln(&b, "  ~ internal/handler/openapi.go     (APIServer field + ServerInterface forwarders)")
 	if _, err := os.Stat("internal/router/router_test.go"); err == nil {
 		fmt.Fprintln(&b, "  ~ internal/router/router_test.go  (buildEngine deps fixture)")
+	}
+
+	// DTO 摘要——dtoMode 下打哪些 schema 被解析、哪些降级。空集时啥也不打。
+	var dtoLines []string
+	for _, op := range ops {
+		for _, d := range opDTOs(op) {
+			if d == nil {
+				continue
+			}
+			if d.Reason != "" {
+				dtoLines = append(dtoLines, fmt.Sprintf("  ! %s — 降级（%s）", d.Name, d.Reason))
+			} else {
+				dtoLines = append(dtoLines, fmt.Sprintf("  + %s — %d field(s)", d.Name, len(d.Fields)))
+			}
+		}
+	}
+	if len(dtoLines) > 0 {
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "DTO structs (--dto):")
+		for _, line := range dtoLines {
+			fmt.Fprintln(&b, line)
+		}
 	}
 
 	fmt.Fprintln(&b)

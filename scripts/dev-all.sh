@@ -32,11 +32,18 @@ cd "$ROOT"
 
 # 优雅停超时：超过这个时间还没退就 SIGKILL。
 GRACEFUL_SHUTDOWN_TIMEOUT="${GRACEFUL_SHUTDOWN_TIMEOUT:-15}"
+case "$GRACEFUL_SHUTDOWN_TIMEOUT" in
+  ''|*[!0-9]*)
+    echo "[dev-all] GRACEFUL_SHUTDOWN_TIMEOUT must be a non-negative integer, got: $GRACEFUL_SHUTDOWN_TIMEOUT" >&2
+    exit 2
+    ;;
+esac
 
 API_PID=""
 WORKER_PID=""
 CLEANUP_DONE=0
 
+# shellcheck disable=SC2329 # invoked via trap
 cleanup() {
   # trap 可能被多次触发（INT 之后 EXIT 又进一次）。CLEANUP_DONE 哨兵让
   # 第二次直接跳过，避免对已 wait 完的 PID 反复发信号 / 打多余日志。
@@ -99,17 +106,17 @@ go run ./cmd/migrate -cmd up
 
 # ---- 3. 并发起 API + Worker，加前缀输出 ----
 #
-# 用 awk 给每行加前缀（"[api]    " / "[worker] "）。awk 比 sed 跨平台
-# 省心：BSD sed 行缓冲是 -l，GNU sed 是 -u，写哪个都会在另一侧崩。awk
-# 走 fflush(stdout) 显式刷，所有实现都一致。
+# 用 process substitution + awk 给每行加前缀。不能写成
+# `go run ... | awk ... &`：那样 `$!` 是 awk 的 PID，不是服务进程 PID，
+# cleanup 和 exit code 都会盯错对象。
 echo "[dev-all] starting api + worker (Ctrl-C to stop both)..."
 
-go run ./cmd/api 2>&1 \
-  | awk '{ print "[api]    " $0; fflush(stdout) }' &
+go run ./cmd/api \
+  > >(awk '{ print "[api]    " $0; fflush(stdout) }') 2>&1 &
 API_PID=$!
 
-go run ./cmd/worker 2>&1 \
-  | awk '{ print "[worker] " $0; fflush(stdout) }' &
+go run ./cmd/worker \
+  > >(awk '{ print "[worker] " $0; fflush(stdout) }') 2>&1 &
 WORKER_PID=$!
 
 # 监控两个 PID，任一退出就触发 cleanup。用 polling 写法因为 macOS 自带
@@ -118,15 +125,13 @@ WORKER_PID=$!
 exit_code=0
 while true; do
   if [ -n "$API_PID" ] && ! kill -0 "$API_PID" 2>/dev/null; then
-    wait "$API_PID" 2>/dev/null
-    exit_code=$?
+    wait "$API_PID" 2>/dev/null || exit_code=$?
     API_PID=""
     echo "[dev-all] api exited (code=$exit_code), stopping worker..."
     break
   fi
   if [ -n "$WORKER_PID" ] && ! kill -0 "$WORKER_PID" 2>/dev/null; then
-    wait "$WORKER_PID" 2>/dev/null
-    exit_code=$?
+    wait "$WORKER_PID" 2>/dev/null || exit_code=$?
     WORKER_PID=""
     echo "[dev-all] worker exited (code=$exit_code), stopping api..."
     break

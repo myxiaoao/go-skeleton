@@ -63,6 +63,8 @@ Usage: ./scripts/rename.sh <NEW_MODULE> <NEW_SHORTNAME> [NEW_REPO_URL]
   NEW_SHORTNAME    Short service name, e.g. payments
                    Used for systemd unit names, Docker images, JWT issuer,
                    docker-compose container names, OS user/group.
+                   Must be RFC 1123 compatible: lowercase letters, digits,
+                   and hyphens; start/end with an alphanumeric character.
   NEW_REPO_URL     Optional. Upstream repo URL with no scheme / no trailing
                    slash, e.g. github.com/acme/payments. Replaces the
                    hard-coded `github.com/myxiaoao/go-skeleton` references
@@ -120,8 +122,9 @@ esac
 case "$NEW_SHORTNAME" in
   go-skeleton|"")
     echo "rename: NEW_SHORTNAME looks bogus: '$NEW_SHORTNAME'" >&2; exit 1 ;;
-  *[!a-zA-Z0-9_-]*)
-    echo "rename: NEW_SHORTNAME must be [a-zA-Z0-9_-]+, got '$NEW_SHORTNAME'" >&2; exit 1 ;;
+  *[!a-z0-9-]*|[-]*|*[-])
+    echo "rename: NEW_SHORTNAME must match RFC 1123 label syntax [a-z0-9]([-a-z0-9]*[a-z0-9])?, got '$NEW_SHORTNAME'" >&2
+    exit 1 ;;
 esac
 case "$NEW_REPO_URL" in
   *://*|*go-skeleton*)
@@ -195,7 +198,7 @@ done < <(
 #       slashes), so SHORTNAME is the right target, never MODULE.
 #
 # Each sed uses | as delimiter — we already validated SHORTNAME to be
-# [a-zA-Z0-9_-]+, and Go module / repo paths conventionally have no '|'.
+# RFC 1123 label syntax, and Go module / repo paths conventionally have no '|'.
 # sed -i.bak then rm works on both macOS (BSD) and Linux (GNU).
 for f in "${files[@]}"; do
   [ -f "$f" ] || continue
@@ -363,8 +366,7 @@ make oapi >/dev/null 2>&1 || {
 
 # Skip oapi-verify here because it checks git-diff against HEAD, and we
 # have intentionally uncommitted rewrites. Run the rest of the gate.
-make fmt >/dev/null 2>&1 || true
-for step in vet test lint docs-verify; do
+for step in fmt vet test lint docs-verify; do
   if ! make "$step" >/dev/null 2>&1; then
     echo "" >&2
     echo "rename: make $step FAILED after rewrites." >&2
@@ -389,7 +391,9 @@ remaining=$(git grep -n 'go-skeleton' -- ':!scripts/rename.sh' 2>/dev/null || tr
 if [ -z "$remaining" ]; then
   echo "  (none — repo is fully renamed)"
 else
-  echo "$remaining" | sed 's/^/  /'
+  while IFS= read -r line; do
+    echo "  $line"
+  done <<< "$remaining"
   echo ""
   echo "  Most of these are intentional (CHANGELOG history, upstream-attribution"
   echo "  prose). Anything that surprises you, fix by hand."

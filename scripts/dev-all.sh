@@ -85,7 +85,8 @@ if ! make --no-print-directory dev-deps-check; then
 
 [dev-all] deps unreachable. Choose one:
   - docker:  make dev-up
-  - brew:    brew services start postgresql@17 && brew services start redis
+  - brew:    brew services start postgresql && brew services start redis
+             (versioned formula: postgresql@17 / postgresql@16 / etc.)
   - manual:  start Postgres / Redis yourself, then re-run.
 
 EOF

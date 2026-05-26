@@ -45,6 +45,17 @@ for unit in "$UNIT_DIR"/*.service; do
       ExecStart|WorkingDirectory|EnvironmentFile)
         # ExecStart 可能带 args，只取第一个 token（路径）。
         path=${value%% *}
+        # systemd ExecStart 允许加前缀字符控制失败 / 权限行为：
+        #   -  失败不算 unit 失败
+        #   +  以 root 跑（绕开 User=）
+        #   !  以指定 UID 跑但不切换 capability
+        #   !! ! 同上但不切换 ambient capability
+        # 这些前缀不属于路径，校验前先剥掉。当前 unit 没用，但留住宽容
+        # 度避免以后加了 `-/opt/foo/bin/api` 这种写法时 verify 误报。
+        case "$path" in
+          !!*) path=${path#!!} ;;
+          [-+!]*) path=${path#?} ;;
+        esac
         check_in_doc "$path" "$base:$key"
         ;;
       User|Group)
@@ -59,7 +70,7 @@ while IFS= read -r ref; do
   if [ ! -f "$UNIT_DIR/$ref" ]; then
     missing+=("deploy.md references $ref but $UNIT_DIR/$ref does not exist")
   fi
-done < <(grep -oE '[A-Za-z0-9_-]+\.service' "$DEPLOY_DOC" | sort -u)
+done < <(grep -oE '[A-Za-z0-9._-]+\.service' "$DEPLOY_DOC" | sort -u)
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "deploy-doc-verify: drift detected"

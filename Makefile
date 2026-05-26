@@ -206,6 +206,10 @@ new-endpoint: ## 按 api/openapi.yaml 反向生成分层骨架（NAME=Order；DR
 scaffold-verify: ## 单跑 scripts/ 黑盒回归（调试 new-endpoint / env-verify / architecture-verify 时用）
 	$(GO) test ./scripts/... $(if $(RUN),-run $(RUN)) $(if $(V),-v)
 
+.PHONY: new-endpoint-check
+new-endpoint-check: ## 只读扫 yaml ↔ 代码漂移（NAME=Order 只扫单资源；不写盘、不并 verify）
+	$(GO) run scripts/new-endpoint-check.go $(NAME)
+
 .PHONY: mod-upgrade
 mod-upgrade: ## 干跑：列出可升的直接依赖（patch/minor）。APPLY=1 真升 + verify + 失败回滚
 	$(GO) run scripts/mod-upgrade.go

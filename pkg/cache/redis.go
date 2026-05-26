@@ -31,11 +31,13 @@ type Client struct {
 	rdb *redis.Client
 }
 
-// pingTimeout 限制启动期 Ping 的最长等待时间，防 Redis 节点假死把进程拖死。
-const pingTimeout = 5 * time.Second
-
-// NewClient 构造 Redis 客户端并做一次启动 Ping 探活。Ping 失败立即 Close
-// 并返 error，让上层 fail-fast；不返回半成品 client。
+// NewClient 构造 Redis 客户端，**不**做启动探活——探活由 bootstrap 层
+// 统一调度（`internal/bootstrap.probeDependencies` + `STARTUP_PROBE_TIMEOUT`），
+// 避免 NewClient 写死 5s 跟全局超时配置漂移。
+//
+// 配置校验仍在这里：addr 空直接返 error，让漏配快速发现；底层连接错误
+// （密码错 / 网络不通）推迟到 caller 的 probe 阶段——pkg/cache 不持有
+// "什么超时算合理"的话语权。
 func NewClient(cfg RedisConfig) (*Client, error) {
 	if strings.TrimSpace(cfg.Addr) == "" {
 		return nil, fmt.Errorf("redis address is required")
@@ -49,14 +51,7 @@ func NewClient(cfg RedisConfig) (*Client, error) {
 		MinIdleConns: cfg.MinIdleConns,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
-	defer cancel()
-	if _, err := rdb.Ping(ctx).Result(); err != nil {
-		_ = rdb.Close()
-		return nil, fmt.Errorf("connect to redis: %w", err)
-	}
-
-	applog.L().Info("redis connection successful", zap.String("addr", cfg.Addr), zap.Int("db", cfg.DB))
+	applog.L().Info("redis client constructed", zap.String("addr", cfg.Addr), zap.Int("db", cfg.DB))
 	return &Client{rdb: rdb}, nil
 }
 

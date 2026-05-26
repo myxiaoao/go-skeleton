@@ -1,6 +1,9 @@
 package errcode
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestErrorFields(t *testing.T) {
 	if InvalidParams.Code() != 1001 {
@@ -21,17 +24,17 @@ func TestHTTPStatus_PrecisePerReason(t *testing.T) {
 		err  Error
 		want int
 	}{
-		{InvalidParams, 400},
-		{Unauthorized, 401},
-		{PermissionDenied, 403},
-		{TooManyRequests, 429},
-		{RequestTimeout, 408},
-		{ServiceDisabled, 503},
-		{InternalError, 500},
-		{DatabaseError, 500},
-		{QueueUnavailable, 503},
-		{QueueError, 500},
-		{NotImplementedYet, 501},
+		{InvalidParams, http.StatusBadRequest},
+		{Unauthorized, http.StatusUnauthorized},
+		{PermissionDenied, http.StatusForbidden},
+		{TooManyRequests, http.StatusTooManyRequests},
+		{RequestTimeout, http.StatusRequestTimeout},
+		{ServiceDisabled, http.StatusServiceUnavailable},
+		{InternalError, http.StatusInternalServerError},
+		{DatabaseError, http.StatusInternalServerError},
+		{QueueUnavailable, http.StatusServiceUnavailable},
+		{QueueError, http.StatusInternalServerError},
+		{NotImplementedYet, http.StatusNotImplemented},
 	}
 	for _, tc := range cases {
 		if got := tc.err.HTTPStatus(); got != tc.want {
@@ -45,12 +48,12 @@ func TestHTTPStatus_PrecisePerReason(t *testing.T) {
 // 漏映射。
 func TestHTTPStatus_FallbackBySegment(t *testing.T) {
 	clientCustom := newError(1099, "CUSTOM_CLIENT_ERR")
-	if got := clientCustom.HTTPStatus(); got != 400 {
-		t.Errorf("1xxx fallback = %d, want 400", got)
+	if got := clientCustom.HTTPStatus(); got != http.StatusBadRequest {
+		t.Errorf("1xxx fallback = %d, want %d", got, http.StatusBadRequest)
 	}
 	serverCustom := newError(9999, "CUSTOM_SERVER_ERR")
-	if got := serverCustom.HTTPStatus(); got != 500 {
-		t.Errorf("9xxx fallback = %d, want 500", got)
+	if got := serverCustom.HTTPStatus(); got != http.StatusInternalServerError {
+		t.Errorf("9xxx fallback = %d, want %d", got, http.StatusInternalServerError)
 	}
 }
 
@@ -58,7 +61,7 @@ func TestHTTPStatus_FallbackBySegment(t *testing.T) {
 // caller 误用 errcode（构造时漏字段），返 500 让监控亮起来比静默 200 安全。
 func TestHTTPStatus_ZeroValue(t *testing.T) {
 	var zero Error
-	if got := zero.HTTPStatus(); got != 500 {
-		t.Errorf("zero-value HTTPStatus() = %d, want 500", got)
+	if got := zero.HTTPStatus(); got != http.StatusInternalServerError {
+		t.Errorf("zero-value HTTPStatus() = %d, want %d", got, http.StatusInternalServerError)
 	}
 }

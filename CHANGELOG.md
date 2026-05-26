@@ -12,6 +12,48 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING：HTTP 状态码按 errcode 映射，不再一律返 200**:
+  之前所有业务 API 永远返 HTTP 200、客户端只能靠 body code 判断成败；副作用
+  是 Prometheus `http_requests_total{status="200"}` 全绿，业务错误被监控
+  埋掉。
+  本轮改成 `pkg/errcode.Error.HTTPStatus()` 把 errcode 映射成对应 HTTP：
+  成功仍 200；1xxx 客户端错误 → 400 / 401 / 403 / 408 / 429 / 503（按 reason
+  精确映射，详见 [`docs/errcodes.md`](docs/errcodes.md)）；9xxx 服务端错误
+  → 500 / 501 / 503。客户端**仍**以 body `code` / `reason` 做精确分支，HTTP
+  status 给监控 / LB / 代理用作粗粒度信号；两者互不替代。
+  - **`pkg/errcode/type.go`**：加 `Error.HTTPStatus() int` + `HTTPStatusFor(code, reason)`
+    纯函数版（给 scripts/gen-errcodes 用，避免循环 import）。零值 / 未知 reason
+    走 500 兜底，让监控亮起来而不是静默 200。
+  - **`pkg/response/response.go`**：`WriteError` / `WriteValidationError` 改用
+    `ec.HTTPStatus()`；`WriteSuccess` 仍 200；三个 Write 函数顺手 `c.Set(MetricsCodeKey, code)`
+    把业务码塞进 gin.Context 给 metrics 拿。
+  - **`pkg/metrics/metrics.go`**：requests / duration 两个 Histogram labels 从
+    `[method, route, status]` 扩到 `[method, route, status, code]`——HTTP status
+    给粗粒度告警、code 给细粒度 SLO（两个码组合能精确定位是哪条业务错路径在涨）。
+    label 取自 gin.Context `response_code`，未走 pkg/response 的端点（如 /health）
+    兜底 "0"。
+  - **`api/openapi.yaml`**：顶部 description 重写、加 `ErrorEnvelope` schema +
+    `components.responses` 复用 7 条错误响应（BadRequest / Unauthorized /
+    Forbidden / RequestTimeout / TooManyRequests / InternalError / NotImplemented
+    / ServiceUnavailable）。5 个业务 endpoint 按可能错码挂上对应 `$ref`。
+    `internal/oapi/oapi.gen.go` 重新生成入库。
+  - **`scripts/gen-errcodes.go` + `docs/errcodes.md`**：表格加 HTTP 列，自动从
+    `errcode.HTTPStatusFor` 取，作者无需手填。
+  - **测试断言**：3 处 SERVICE_DISABLED 测试期望从 HTTP 200 改成 503（端点
+    在 spec 里但被配置开关关，与"路由不存在 / 404"区分开，body code=1006 进
+    一步说明是配置关而非依赖挂）。metrics 加 `TestRegistry_BusinessCodeLabel`
+    覆盖 code label。errcode 加 `TestHTTPStatus_PrecisePerReason` /
+    `TestHTTPStatus_FallbackBySegment` / `TestHTTPStatus_ZeroValue`。
+  - **`CLAUDE.md` / `AGENTS.md` §统一响应协议 + `docs/development.md` §五加错误码**
+    重写：明示新映射规则与新加错码时如何同步 HTTPStatus switch。
+  
+  **客户端影响**：只看 body `code` 的客户端**完全不受影响**；按 HTTP 2xx/4xx/5xx
+  判断成功失败的客户端会被影响（按文档之前的约定，这不应该存在，但需要标注）。
+  **监控影响**：已有按 `status="200"` 写的 SLO / 告警规则需要重做——现在业务
+  错误会出现在 4xx/5xx 上，可同时用新加的 `code` label 精确定位错误类型。
+
 ### Fixed
 
 - **new-endpoint 修审计发现的三个 hard stop**:

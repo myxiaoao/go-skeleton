@@ -98,11 +98,12 @@ yaml 是真相源。按这个顺序：
 
 1. 在 [`pkg/errcode/common.go`](../pkg/errcode/common.go) 加一行：`MyError = newError(NNN, "MY_ERROR")`
 2. 在 [`pkg/response/response.go::MessageFor`](../pkg/response/response.go) 加对应 case
-3. `make docs-errcodes` 重新生成 [`docs/errcodes.md`](./errcodes.md)
+3. 如果新 reason 需要映射到非段位默认的 HTTP status（默认 1xxx→400 / 9xxx→500），去 [`pkg/errcode/type.go::HTTPStatus`](../pkg/errcode/type.go) 的 switch 加 case + 配套单测
+4. `make docs-errcodes` 重新生成 [`docs/errcodes.md`](./errcodes.md)
 
-> 不用维护 `scripts/gen-errcodes.go` 里的清单——它走 AST 自动发现。
+> 不用维护 `scripts/gen-errcodes.go` 里的清单——它走 AST 自动发现。HTTP 状态码列也是从 `errcode.HTTPStatusFor` 自动取，不用手填。
 
-错误码段位约定：1000-1999 客户端错误，9000-9999 服务端错误。
+错误码段位约定：1000-1999 客户端错误（默认 HTTP 400），9000-9999 服务端错误（默认 HTTP 500）；具体每条码的 HTTP 映射见 [`docs/errcodes.md`](./errcodes.md)。
 
 ---
 

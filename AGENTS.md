@@ -78,7 +78,7 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## 统一响应协议
 
-业务 API 固定返回 HTTP 200，靠 JSON body 的 `code` 区分。响应结构定义在 `pkg/response/response.go`：
+所有业务 API 返回统一信封，结构定义在 `pkg/response/response.go`：
 
 ```json
 { "code": 0, "message": "success", "data": { ... } }
@@ -87,9 +87,17 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 字段名都用完整单词（`message` / `reason` / `metadata`），不引入简写。需要新增响应字段时同理。
 
-例外：`/livez` 与 `/health` 用真实 HTTP 状态码（200 / 503），给 LB 和 K8s 探针用；`/livez` 是 liveness（永远 200），`/health` 是 readiness（依赖不可用时 503）。
+**HTTP 状态码按 errcode 映射**（由 `errcode.Error.HTTPStatus()` 决定，pkg/response 的 `WriteError` / `WriteValidationError` 自动应用）：
 
-新增错误码：去 `pkg/errcode/common.go` 加一个 `newError(code, "REASON")` 常量，并在 `pkg/response/response.go` 的 `MessageFor` 里补默认英文文案，并跑 `make docs-errcodes` 重新生成 `docs/errcodes.md`。
+- 成功（`code=0`）→ 200
+- 1xxx 客户端错误段位 → 400 / 401 / 403 / 404 / 408 / 429 / 503（按 reason 精确映射）
+- 9xxx 服务端错误段位 → 500 / 501 / 503
+
+完整映射表见 [`docs/errcodes.md`](./docs/errcodes.md)（由 `make docs-errcodes` 生成）。客户端仍以 **body `code`** 做精确业务分支；HTTP status 给监控 / LB / 透明代理用作粗粒度信号，两者互不替代。
+
+例外：`/livez` 与 `/health` **不走信封**，直接返 200 / 503 给 K8s 探针；`/livez` 是 liveness（永远 200），`/health` 是 readiness（依赖不可用时 503）。
+
+新增错误码：(1) 去 `pkg/errcode/common.go` 加 `newError(code, "REASON")` 常量；(2) 在 `pkg/response/response.go::MessageFor` 补默认英文文案；(3) 如果新 reason 应映射到 HTTP 段位之外的特定 status，去 `pkg/errcode/type.go::HTTPStatus` 的 switch 加 case + 配套单测；(4) 跑 `make docs-errcodes` 重新生成 `docs/errcodes.md`。
 
 ## i18n
 

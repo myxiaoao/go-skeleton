@@ -2,8 +2,28 @@ package errcode
 
 // 错误码分段约定：
 //
-//	1000-1999  客户端错误（请求 / 鉴权 / 限流）
-//	9000-9999  服务端错误（基础设施 / 兜底）
+//	1000-1999  客户端错误（请求 / 鉴权 / 限流 / 业务规则前置）
+//	9000-9999  服务端错误（基础设施 / 兜底 / 异步任务失败）
+//
+// 一级段位（客户端 vs 服务端）由 errcode → HTTP 状态映射决定（见
+// pkg/errcode.Error.HTTPStatus）；不要把客户端错放进 9xxx，否则 HTTP
+// status 自动落到 5xx，监控误判服务异常。
+//
+// **二级 domain 段位（给业务模块预留 namespace，避免后续冲突）**：
+//
+//	1000-1099  common      通用客户端错误（INVALID_PARAMS / UNAUTHORIZED 等）
+//	1100-1199  auth        鉴权 / RBAC / 多租户特有客户端错误
+//	1200-1299  example     example 演示模块（fork 后通常删掉）
+//	1300-1399  <reserved>  预留给下一个业务模块（按字母序往后排）
+//	...
+//	9000-9099  common      通用服务端错误（INTERNAL_ERROR / DATABASE_ERROR 等）
+//	9100-9199  queue       异步任务 / 消息队列服务端错误
+//	9200-9299  <reserved>  预留给基础设施增强（如外部 API 调用失败、限流后端错误）
+//
+// **加新模块时**：在本注释里追加该模块的 domain 段（如 `1300-1399 order`），
+// 同模块内的错误码连续编排（1300/1301/1302...），不要散在多个段位里。这条
+// 约定纯靠 review 维持——errcode 包不做运行期校验，因为段位划分本身是
+// 治理决策不是技术约束。
 //
 // 新增错误码同步改 pkg/response.MessageFor + 跑 make docs-errcodes。
 var (

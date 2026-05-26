@@ -53,6 +53,12 @@ Run the worker in another terminal once Redis is configured:
 go run ./cmd/worker
 ```
 
+Or run migration + API + Worker together in the foreground (Ctrl-C drains both):
+
+```sh
+make dev-all      # probe deps → migrate → spawn API + Worker, log prefixed [api] / [worker]
+```
+
 Stop the local docker dependencies (data volumes are preserved):
 
 ```sh
@@ -77,17 +83,24 @@ Steps to take after cloning this repo as the starting point for a new service:
 1. Run the one-shot rename script to replace every `go-skeleton` reference:
 
    ```sh
-   ./scripts/rename.sh github.com/your-org/your-service your-service
-   #                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^^
-   #                    NEW_MODULE                      NEW_SHORTNAME
+   ./scripts/rename.sh github.com/your-org/your-service your-service \
+                       github.com/your-org/your-service
+   #                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   #                    NEW_MODULE                       NEW_SHORTNAME NEW_REPO_URL (optional; falls back to NEW_MODULE)
    ```
 
    The script rewrites: Go imports, `go.mod`, Makefile variables, `.env.example`,
-   `.golangci.yml`, the OpenAPI title, systemd unit filenames + contents,
-   `docker-compose` container names, the JWT issuer default, and test fixtures.
+   `.golangci.yml`, the OpenAPI title, systemd unit filenames + contents
+   (including `Documentation=` upstream URLs), `docker-compose` container names,
+   the JWT issuer default, test fixtures, Kubernetes labels / namespace /
+   `kubectl` commands, release tarball filenames / cosign verify URLs, and
+   user / group / chown / install -o/-g shell commands.
    It then runs `make fmt + vet + test + lint + docs-verify` to confirm nothing
-   broke, and lists the few remaining manual touch-ups (Documentation= URLs in
-   systemd units, comments referencing the skeleton's history).
+   broke, and prints any remaining `go-skeleton` mentions for you to review by hand.
+
+   The default mode keeps literal `go-skeleton` mentions in README / docs
+   (they describe the upstream skeleton, not your fork). Pass `RENAME_BARE=1`
+   to scrub those too; CHANGELOG history entries are always preserved.
 
    Review the diff, commit, then delete the script:
 
@@ -117,15 +130,18 @@ Steps to take after cloning this repo as the starting point for a new service:
      `internal/router/router.go` / `internal/handler/openapi.go::APIServer`.
      Generated `service` / `repository` methods return
      `errcode.NotImplementedYet` (9005), so the repo stays `make verify`-green
-     immediately; swap in real logic when you implement.
+     immediately; swap in real logic when you implement. `DRY_RUN=1` only prints
+     the plan without writing files; `DTO=1` also derives request DTO structs
+     from yaml schemas + injects `ShouldBind...` in handlers.
    - Fill in business logic: handler `c.ShouldBind...`, service rules, repository
      SQL, model fields. Async tasks: define the type in `internal/task/` and
      register the handler in `internal/worker/handler.go`.
+   - Debug yaml ↔ code drift with `make new-endpoint-check` (read-only).
 
 5. Keep CI green:
 
    ```sh
-   make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+   make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
    ```
 
 ## Runtime Dependencies
@@ -212,10 +228,12 @@ Tick these off before pointing real traffic at this service:
 - [ ] **warn** Configure `TRUSTED_PROXIES` to match your real LB network range; otherwise `c.ClientIP()` falls back to `RemoteAddr` and every client looks like the proxy IP behind the LB, breaking rate limiting and audit logs. Direct deployments without an LB may leave it empty.
 - [ ] **warn** Set `RATE_LIMIT_PER_MINUTE` to a non-zero value matching your traffic budget; keep 0 only when an upstream LB/WAF enforces limits.
 - [ ] **warn** Set `METRICS_ADDR` to a separate address (e.g. `127.0.0.1:9090`) so `/metrics` is isolated from the business API at L4. Empty means `/metrics` is served on the business port; exposing it publicly leaks metrics along with it.
+- [ ] **warn** When `PPROF_ENABLED=true`, `PPROF_ADDR` must bind to loopback (`127.0.0.1` / `::1` / `localhost`). The pprof endpoint exposes heap / goroutine / profile data — public reachability is both an info-leak and a DoS vector. Off by default; turn it on for incident response and reach it through an SSH tunnel.
 - [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do **not** point liveness at `/health` — a DB blip would restart healthy pods.
 - [ ] Tune `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections`. The defaults (30 / 15 / 30m) are development-tier, not production-tier.
 - [ ] Run `go run ./cmd/migrate` (goose up, applies pending `migrations/`) before the API process starts.
 - [ ] Decide on the worker process: if any `*/tasks` endpoints are reachable but no consumer is deployed, queued tasks pile up indefinitely.
+- [ ] **block** Wire real business processors into the worker. Under `APP_ENV=production`, if no real processor is injected (e.g. `internal/worker.go::buildWorkerDeps` sees `reg.DB == nil`), the worker fails to start — preventing the noop fallback from silently `ack`-ing tasks with only a warn log.
 
 ## Deployment
 
@@ -236,8 +254,9 @@ Every `v*` tag push triggers GitHub Actions to publish `linux-amd64` / `linux-ar
 - The OpenAPI spec is generated at build time from `api/openapi.yaml`; `internal/oapi/oapi.gen.go` is checked into the repo, so deployment doesn't need to run codegen.
 - `CORS_ALLOW_ORIGINS` is a comma-separated allow-list. Empty means no CORS allow headers are emitted.
 - Replace `JWT_SECRET` before using the auth example outside local development.
-- Business endpoint errors use the JSON envelope `code` / `message` / `reason`; by convention, most API errors are returned with HTTP 200.
+- Business endpoint errors use the JSON envelope `code` / `message` / `reason`, with HTTP status mapped from errcode segments: 1xxx client errors → 4xx, 9xxx server errors → 5xx. Clients should still branch on body `code`; HTTP status is the coarse signal for monitoring / LB / transparent proxies. See [`docs/errcodes.md`](./docs/errcodes.md) for the full map. **Exception**: `/livez` and `/health` do not use the envelope and return 200 / 503 directly for K8s probes.
 - `/livez` is the liveness probe (always 200); `/health` is the readiness probe and returns 503 when required dependencies are unavailable.
+- The K8s base ships with `PodDisruptionBudget` (API `minAvailable=1`) and `NetworkPolicy` (API metrics 9090 restricted to `namespaceSelector{purpose=monitoring}`, worker ingress fully denied) by default. Requires a NetworkPolicy-capable CNI (Calico / Cilium / Weave); drop them in your overlay when not needed. See [`deploy/k8s/README.md`](./deploy/k8s/README.md).
 
 ## Development Workflow
 
@@ -253,10 +272,10 @@ Every `v*` tag push triggers GitHub Actions to publish `linux-amd64` / `linux-ar
 One-stop check before every commit:
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
 ```
 
-Or call the underlying targets individually (`make test`, `make lint`, ...). See `make help` for the full list.
+Or call the underlying targets individually (`make test`, `make lint`, `make shell-verify`, `make scaffold-verify`, ...). See `make help` for the full list.
 
 ## Changelog
 

@@ -361,16 +361,16 @@ type ServerInterface interface {
 	// 3) server.go / router.go / handler/openapi.go —— 三处锚点宿主。
 	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
 
-type handlers struct {
+type HTTPHandlers struct {
 	// NEH handlers-fields
 }
 
-func newHTTPHandlers() *handlers {
+func newHTTPHandlers() *HTTPHandlers {
 	// NEH handlers-deps
 
 	// NEH handlers-construct
 
-	return &handlers{
+	return &HTTPHandlers{
 		// NEH handlers-return
 	}
 }
@@ -601,16 +601,16 @@ type ServerInterface interface {
 `)
 	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
 
-type handlers struct {
+type HTTPHandlers struct {
 	// NEH handlers-fields
 }
 
-func newHTTPHandlers() *handlers {
+func newHTTPHandlers() *HTTPHandlers {
 	// NEH handlers-deps
 
 	// NEH handlers-construct
 
-	return &handlers{
+	return &HTTPHandlers{
 		// NEH handlers-return
 	}
 }
@@ -692,16 +692,16 @@ type ServerInterface interface {
 `)
 	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
 
-type handlers struct {
+type HTTPHandlers struct {
 	// NEH handlers-fields
 }
 
-func newHTTPHandlers() *handlers {
+func newHTTPHandlers() *HTTPHandlers {
 	// NEH handlers-deps
 
 	// NEH handlers-construct
 
-	return &handlers{
+	return &HTTPHandlers{
 		// NEH handlers-return
 	}
 }
@@ -752,16 +752,16 @@ func minimalAnchorsFixture(t *testing.T) string {
 	initRepo(t, dir)
 	writeFile(t, filepath.Join(dir, "internal", "server.go"), `package app
 
-type handlers struct {
+type HTTPHandlers struct {
 	// NEH handlers-fields
 }
 
-func newHTTPHandlers() *handlers {
+func newHTTPHandlers() *HTTPHandlers {
 	// NEH handlers-deps
 
 	// NEH handlers-construct
 
-	return &handlers{
+	return &HTTPHandlers{
 		// NEH handlers-return
 	}
 }

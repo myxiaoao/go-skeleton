@@ -46,6 +46,39 @@ Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 - 依赖通过构造函数注入，**不要在 service 内部 `new` 其他 service / repository**。
 - 依赖接口（如 `ExampleRepository`、`ExampleQueue`）就近定义在 service 包里，方便测试 mock。
 
+**跨 repository 事务编排（标准范式）**：当一次业务操作需要在原子事务内调用两个及以上 repository 时，**只能** 在 service 层用 `repository.InTx` 包起来，repository 内部不要自己开事务（否则嵌套调用会撞 SAVEPOINT 语义）。模板：
+
+```go
+// service 层：跨 OrderRepository + InventoryRepository 的下单流程
+func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, error) {
+    var created *Order
+    err := repository.InTx(ctx, s.db, func(txCtx context.Context) error {
+        // 1) 扣减库存（库存不足 repo 返业务错，整事务回滚）
+        if err := s.inventory.Reserve(txCtx, req.SkuID, req.Qty); err != nil {
+            return err  // 透传 errcode.Error，InTx 不会包装
+        }
+        // 2) 落订单
+        order, err := s.orders.Create(txCtx, req.ToModel())
+        if err != nil {
+            return err
+        }
+        created = order
+        return nil
+    })
+    if err != nil {
+        return nil, err  // 已是 errcode.Error；handler 走 WriteError 自动映射 HTTP
+    }
+    return created, nil
+}
+```
+
+要点：
+- **`txCtx` 必须传给 repository**，不要在 fn 里继续用外层 `ctx`——否则 repository 内 `dbFromContext` 取不到事务句柄，会从 base db 起新连接绕过事务。
+- repository 接口直接收 `context.Context`，**不**给事务版另写一套方法签名（`CreateInTx` 这种风格禁止）。事务上下文通过 ctx 传，业务接口形状只有一种。
+- fn 返 error → GORM rollback；返 nil → commit。中途 panic 也会 rollback（GORM 默认行为，不要写自己的 recover 绕过）。
+- 需要强 isolation（分页 total 强一致、批量入账 + count）走 `repository.InTxWithOptions(ctx, db, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn)`；嵌套调用 opts 会被忽略，isolation 必须在最外层定。
+- **不要** 把队列投递（`taskqueue.Queue.Enqueue`）放进 InTx fn——Redis / Asynq 不参与 PG 事务，事务回滚队列消息也不会回滚。先 commit DB 再投队列；若必须同步走 outbox pattern（PG 表存待发消息 + 独立 worker 扫描），不在本骨架范围内。
+
 ### repository
 - **唯一允许写 GORM 或原生 SQL 的层**。其他层禁止 import `gorm.io/gorm`。
 - 所有查询都用 `db.WithContext(ctx)`，禁止 `context.Background()` 替换。

@@ -72,8 +72,8 @@ func TestAuthHandlerCreateTokenReturnsServiceDisabledWhenManagerMissing(t *testi
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected HTTP 200 envelope, got %d", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected HTTP 503 (SERVICE_DISABLED), got %d", rec.Code)
 	}
 
 	var body response.Response
@@ -109,8 +109,8 @@ func TestAuthHandlerCreateTokenReturnsServiceDisabledWhenGated(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected HTTP 200 envelope, got %d", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected HTTP 503 (SERVICE_DISABLED), got %d", rec.Code)
 	}
 
 	var body response.Response

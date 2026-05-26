@@ -135,8 +135,8 @@ func TestDevTokenEndpointReturnsServiceDisabledWhenOff(t *testing.T) {
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected HTTP 200 envelope, got %d (body=%s)", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected HTTP 503 (SERVICE_DISABLED), got %d (body=%s)", w.Code, w.Body.String())
 	}
 	// 解响应信封但不 import pkg/response，避免循环依赖。
 	if body := w.Body.String(); !strings.Contains(body, "SERVICE_DISABLED") {

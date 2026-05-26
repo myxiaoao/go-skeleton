@@ -15,8 +15,12 @@ import (
 // 机器可读的错误常量（INVALID_PARAMS 等），Message 是默认人读文案，
 // Metadata 通常带 trace_id 给前端反查日志用。
 //
-// 所有业务 API 一律返 HTTP 200，靠 Code 区分；/livez 与 /health 例外（用
-// 真实状态码给 LB / K8s 用）。
+// HTTP 状态码：成功走 200；失败按 errcode → HTTP 映射（见 pkg/errcode.Error
+// .HTTPStatus()）——1xxx 客户端错误段位走 400 / 401 / 403 / 404 / 408 / 429，
+// 9xxx 服务端错误段位走 500 / 501 / 503。客户端仍以 body.code 做精确判断，
+// HTTP status 给监控 / LB / 透明代理用作粗粒度信号。
+//
+// `/livez` 与 `/health` 例外（不走信封，直接返 200 / 503 给 K8s 探针）。
 type Response struct {
 	Code     int            `json:"code"`
 	Message  string         `json:"message"`
@@ -59,27 +63,40 @@ func BuildValidationErrorResponse(c *gin.Context, err error) Response {
 	}
 }
 
+// MetricsCodeKey 是 gin.Context 里业务 code 的 key，pkg/metrics 的
+// HTTPMiddleware 用它从 context 读 code 写到 Prometheus label。
+// 暴露成常量是为了避免 metrics 包反向 import response 包形成循环依赖
+// （response → errcode → 无依赖；metrics → 无依赖；约束是 metrics 不 import
+// response，所以两边共享这个 key 字符串）。
+const MetricsCodeKey = "response_code"
+
 // WriteSuccess 写一条成功响应（HTTP 200 + Code=0），handler 用它收尾。
 func WriteSuccess(c *gin.Context, data any) {
+	c.Set(MetricsCodeKey, 0)
 	c.JSON(http.StatusOK, SuccessResponse(data))
 }
 
 // WriteError 把 service 返的 error 转成响应信封。如果是 errcode.Error
-// 直接用对应 Code / Reason；其他类型一律压成 INTERNAL_ERROR，避免泄漏
-// 底层错误细节给客户端。
+// 直接用对应 Code / Reason + HTTPStatus；其他类型一律压成 INTERNAL_ERROR
+// (HTTP 500)，避免泄漏底层错误细节给客户端。
 func WriteError(c *gin.Context, err error) {
 	var ec errcode.Error
 	if errors.As(err, &ec) {
-		c.JSON(http.StatusOK, ErrorResponse(c, ec))
+		c.Set(MetricsCodeKey, ec.Code())
+		c.JSON(ec.HTTPStatus(), ErrorResponse(c, ec))
 		return
 	}
-	c.JSON(http.StatusOK, ErrorResponse(c, errcode.InternalError))
+	c.Set(MetricsCodeKey, errcode.InternalError.Code())
+	c.JSON(errcode.InternalError.HTTPStatus(), ErrorResponse(c, errcode.InternalError))
 }
 
 // WriteValidationError 写参数校验错误响应。handler 里 ShouldBind 失败统一
-// 走它，与 WriteSuccess / WriteError 三个 helper 调用形态对齐。
+// 走它，与 WriteSuccess / WriteError 三个 helper 调用形态对齐。HTTP 状态
+// 锁死成 errcode.InvalidParams.HTTPStatus()（400）—— validation 失败始终
+// 是客户端错误。
 func WriteValidationError(c *gin.Context, err error) {
-	c.JSON(http.StatusOK, BuildValidationErrorResponse(c, err))
+	c.Set(MetricsCodeKey, errcode.InvalidParams.Code())
+	c.JSON(errcode.InvalidParams.HTTPStatus(), BuildValidationErrorResponse(c, err))
 }
 
 // MessageFor 按 errcode reason 返默认英文人读文案。

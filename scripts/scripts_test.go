@@ -1526,6 +1526,45 @@ func gCall(g interface{}) ginGroup { return nil }
 	}
 }
 
+// TestNewEndpointCheck_RouterPathMismatch 验证 checker 会比对 yaml path 与
+// router 实际注册路径，而不只是看 verb + handler 方法名。
+func TestNewEndpointCheck_RouterPathMismatch(t *testing.T) {
+	bin := buildNewEndpointCheck(t)
+	dir := checkFixture(t)
+
+	writeFile(t, filepath.Join(dir, "internal", "router", "router.go"), `package router
+
+type Dependencies struct {
+	Order *struct{}
+}
+
+func registerOrderRoutes(r interface{}, deps Dependencies) {
+	g := r.Group("/orders")
+	g.GET("/legacy", listHandler{}.List)
+	g.POST("", listHandler{}.Create)
+}
+
+type listHandler struct{}
+
+func (listHandler) List()   {}
+func (listHandler) Create() {}
+
+type ginGroup interface {
+	Group(string, ...interface{}) ginGroup
+	GET(string, ...interface{})
+	POST(string, ...interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "Order")
+	if code == 0 {
+		t.Fatalf("check should fail on router path mismatch\n%s", out)
+	}
+	if !strings.Contains(out, "注册路径为 /orders/legacy") {
+		t.Errorf("expected router path mismatch diagnostic, got:\n%s", out)
+	}
+}
+
 // TestNewEndpointCheck_NameFilter: 传 NAME=Order 只扫该资源；不会因为别处
 // yaml 不一致而误报。
 func TestNewEndpointCheck_NameFilter(t *testing.T) {
@@ -1566,6 +1605,64 @@ paths:
 	if code != 0 {
 		t.Fatalf("NAME=Order should be clean even with Product drift, got exit=%d:\n%s",
 			code, out)
+	}
+}
+
+// TestNewEndpointCheck_AuthGroupFromGeneratedRouter 验证 checker 能识别
+// new-endpoint 真实生成的鉴权子组形态：authed := g.Group("", deps.AuthRequired)
+// 后续 authed.POST(...) 应被视为 AuthRequired 路由。
+func TestNewEndpointCheck_AuthGroupFromGeneratedRouter(t *testing.T) {
+	genBin := buildNewEndpoint(t)
+	checkBin := buildNewEndpointCheck(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    x-resource: Order
+    get:
+      operationId: listOrders
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: createOrder
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: OK }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+	CreateOrder(c interface{})
+}
+`)
+	writeFile(t, filepath.Join(dir, "internal", "router", "router_test.go"), `package router
+
+func buildEngine() {
+	deps := Dependencies{
+		// NEH test-deps
+	}
+	_ = deps
+}
+`)
+
+	code, out := runBinary(t, dir, genBin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d:\n%s", code, out)
+	}
+
+	code, out = runBinary(t, dir, checkBin, "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint-check should accept generated auth group, exit=%d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "clean") {
+		t.Errorf("expected clean output, got:\n%s", out)
 	}
 }
 
@@ -1791,5 +1888,73 @@ func TestNewEndpoint_DTOEnvVar(t *testing.T) {
 	service, _ := os.ReadFile(filepath.Join(dir, "internal", "service", "order.go"))
 	if !strings.Contains(string(service), "CreateOrderReq") {
 		t.Errorf("DTO=1 env 应生成 CreateOrderReq，got:\n%s", service)
+	}
+}
+
+// TestNewEndpoint_DTOIdentifierNames 验证 schema / query 字段名里的 snake_case
+// 和 kebab-case 会转成合法 exported Go 字段名，wire tag 保留协议原名。
+func TestNewEndpoint_DTOIdentifierNames(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := minimalAnchorsFixture(t)
+
+	writeFile(t, filepath.Join(dir, "api", "openapi.yaml"), `openapi: 3.1.0
+info: { title: fixture, version: 0.1.0 }
+paths:
+  /api/v1/orders:
+    x-resource: Order
+    get:
+      operationId: listOrders
+      parameters:
+        - in: query
+          name: x-request-id
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order_id: { type: string }
+                2fa-enabled: { type: boolean }
+      responses:
+        '200': { description: OK }
+`)
+	writeFile(t, filepath.Join(dir, "internal", "oapi", "oapi.gen.go"), `package oapi
+
+type ServerInterface interface {
+	ListOrders(c interface{})
+	CreateOrder(c interface{})
+}
+`)
+
+	code, out := runBinary(t, dir, bin, "--dto", "Order")
+	if code != 0 {
+		t.Fatalf("new-endpoint exit=%d:\n%s", code, out)
+	}
+
+	service, err := os.ReadFile(filepath.Join(dir, "internal", "service", "order.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(service)
+	want := []string{
+		"OrderId string `json:\"order_id\"`",
+		"Field2faEnabled bool `json:\"2fa-enabled\"`",
+		"XRequestId string `form:\"x-request-id\"`",
+	}
+	for _, w := range want {
+		if !strings.Contains(got, w) {
+			t.Errorf("service should contain %q, got:\n%s", w, got)
+		}
+	}
+	for _, bad := range []string{"Order_id string", "X-request-id string", "\n\t2faEnabled"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("service should not contain invalid / unsanitized field %q:\n%s", bad, got)
+		}
 	}
 }

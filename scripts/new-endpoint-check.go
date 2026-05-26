@@ -39,6 +39,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -419,18 +420,23 @@ func checkResource(resource string, ops []operation) []finding {
 			fmt.Sprintf("%s 在 %s 未定义", registerFn, routerFile),
 		})
 	} else {
-		// 每条 yaml op 应该在 registered 里找到一条匹配 (verb + ginPath)
-		// 这里只比对 verb——精确比对 ginPath 需要知道 group 前缀，那是 AST
-		// 静态分析较重的部分。先做一个粗版：对每个 yaml op 至少要有同 verb
-		// 同 handler 方法名的 register 调用，方法名用作锚点。
+		resourcePrefix := findResourcePrefix(ops, resource)
 		for _, op := range ops {
 			if op.HandlerMethod == "" {
 				continue
 			}
+			expectedPath := expectedRoutePath(op.Path, resourcePrefix)
 			matched := false
 			for _, r := range registeredRoutes {
 				if strings.EqualFold(r.verb, op.HTTPVerb) && r.handler == op.HandlerMethod {
 					matched = true
+					if r.pathKnown && r.path != expectedPath {
+						out = append(out, finding{
+							resource, "mismatch",
+							fmt.Sprintf("router %s %s 注册路径为 %s",
+								op.HTTPVerb, op.Path, r.path),
+						})
+					}
 					// 鉴权分组检查：yaml 要求 bearerAuth 但路由挂在公开组（或反之）
 					if op.RequiresAuth && !r.inAuthGroup {
 						out = append(out, finding{
@@ -557,17 +563,29 @@ func exprName(e ast.Expr) string {
 // AuthRequired 子组内。
 type routerRegistration struct {
 	verb        string
+	path        string
+	pathKnown   bool
 	handler     string // selector 末段，如 "List" (deps.Example.List → "List")
 	inAuthGroup bool   // 调用前一个参数是 deps.AuthRequired？
+}
+
+type routerGroupInfo struct {
+	path      string
+	pathKnown bool
+	auth      bool
 }
 
 // collectRegisteredRoutes 扫 router.go 里的 register<Resource>Routes 函数体，
 // 提取每条 verb 调用（如 examples.GET("/x", deps.Example.List)）成
 // routerRegistration。
 //
-// inAuthGroup 启发式：调用参数 ≥3 且第二个参数引用了 "AuthRequired"（如
-// `deps.AuthRequired` 或 `authRequired`）时认为该路由在鉴权组。完整 AST
-// 分析 g.Group() 上下文较重，先用这个粗版能覆盖绝大多数模板生成的形态。
+// path 判定：尽量解析 `g := r.Group("/orders")` 这类字面量 group path，再
+// 拼接 `.GET("/:id", ...)` 的第一个字面量参数；遇到自定义 helper / const path
+// 时 pathKnown=false，避免误报。
+//
+// inAuthGroup 判定：
+//   - 路由调用直接带 AuthRequired middleware（如 g.GET(..., deps.AuthRequired, h)）
+//   - 或接收者是由 *.Group(... AuthRequired ...) 派生出来的子组
 func collectRegisteredRoutes(file, fnName string) []routerRegistration {
 	if _, err := os.Stat(file); err != nil {
 		return nil
@@ -588,6 +606,8 @@ func collectRegisteredRoutes(file, fnName string) []routerRegistration {
 	if fn == nil || fn.Body == nil {
 		return nil
 	}
+
+	groups := collectRouterGroupInfo(fn)
 
 	var routes []routerRegistration
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -614,8 +634,9 @@ func collectRegisteredRoutes(file, fnName string) []routerRegistration {
 		if handlerName == "" {
 			return true
 		}
-		// inAuthGroup：args ≥3 && 中间某个 arg 字面包含 "AuthRequired"。
-		inAuth := false
+		group, groupKnown := groups[selectorString(sel.X)]
+		path, pathKnown := routeCallPath(call, group, groupKnown)
+		inAuth := group.auth
 		if len(call.Args) >= 3 {
 			for _, a := range call.Args[1 : len(call.Args)-1] {
 				if strings.Contains(selectorString(a), "AuthRequired") {
@@ -626,12 +647,122 @@ func collectRegisteredRoutes(file, fnName string) []routerRegistration {
 		}
 		routes = append(routes, routerRegistration{
 			verb:        verb,
+			path:        path,
+			pathKnown:   pathKnown,
 			handler:     handlerName,
 			inAuthGroup: inAuth,
 		})
 		return true
 	})
 	return routes
+}
+
+// collectRouterGroupInfo 找出 register<Resource>Routes 函数里的 gin RouterGroup
+// 变量，记录它们的相对 path 与是否携带 AuthRequired。覆盖脚手架生成的：
+//
+//	authed := g.Group("", deps.AuthRequired)
+//	authed.POST("", deps.Order.Create)
+//
+// 也覆盖从已鉴权 group 再派生子 group 的形态：
+//
+//	nested := authed.Group("/nested")
+func collectRouterGroupInfo(fn *ast.FuncDecl) map[string]routerGroupInfo {
+	groups := make(map[string]routerGroupInfo)
+	if fn.Type != nil && fn.Type.Params != nil {
+		for _, field := range fn.Type.Params.List {
+			for _, name := range field.Names {
+				groups[name.Name] = routerGroupInfo{pathKnown: true}
+			}
+		}
+	}
+
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch stmt := n.(type) {
+		case *ast.AssignStmt:
+			for i, rhs := range stmt.Rhs {
+				info, ok := routerGroupInfoFromExpr(rhs, groups)
+				if !ok {
+					continue
+				}
+				if i >= len(stmt.Lhs) {
+					continue
+				}
+				if id, ok := stmt.Lhs[i].(*ast.Ident); ok {
+					groups[id.Name] = info
+				}
+			}
+		case *ast.ValueSpec:
+			for i, rhs := range stmt.Values {
+				info, ok := routerGroupInfoFromExpr(rhs, groups)
+				if !ok {
+					continue
+				}
+				if i >= len(stmt.Names) {
+					continue
+				}
+				groups[stmt.Names[i].Name] = info
+			}
+		}
+		return true
+	})
+
+	return groups
+}
+
+func routerGroupInfoFromExpr(expr ast.Expr, groups map[string]routerGroupInfo) (routerGroupInfo, bool) {
+	if info, ok := groups[selectorString(expr)]; ok {
+		return info, true
+	}
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return routerGroupInfo{}, false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Group" {
+		return routerGroupInfo{}, false
+	}
+
+	info, ok := groups[selectorString(sel.X)]
+	if !ok {
+		info = routerGroupInfo{}
+	}
+	if len(call.Args) == 0 {
+		info.pathKnown = false
+	} else if p, ok := stringLiteral(call.Args[0]); ok && info.pathKnown {
+		info.path = joinRoutePath(info.path, p)
+	} else {
+		info.pathKnown = false
+	}
+	for _, arg := range call.Args {
+		if strings.Contains(selectorString(arg), "AuthRequired") {
+			info.auth = true
+			break
+		}
+	}
+	return info, true
+}
+
+func routeCallPath(call *ast.CallExpr, group routerGroupInfo, groupKnown bool) (string, bool) {
+	if !groupKnown || !group.pathKnown || len(call.Args) == 0 {
+		return "", false
+	}
+	p, ok := stringLiteral(call.Args[0])
+	if !ok {
+		return "", false
+	}
+	return joinRoutePath(group.path, p), true
+}
+
+func stringLiteral(expr ast.Expr) (string, bool) {
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	s, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	return s, true
 }
 
 // selectorLastIdent 取 selector 表达式（如 deps.Example.List）的末段 Ident
@@ -701,6 +832,69 @@ func fileContains(file, needle string) bool {
 		return false
 	}
 	return strings.Contains(string(data), needle)
+}
+
+func findResourcePrefix(ops []operation, _ string) string {
+	if len(ops) == 0 {
+		return ""
+	}
+	prefix := ops[0].Path
+	for _, op := range ops[1:] {
+		prefix = commonPrefix(prefix, op.Path)
+	}
+	if idx := strings.LastIndex(prefix, "/"); idx >= 0 && idx < len(prefix)-1 {
+		tail := prefix[idx+1:]
+		if strings.HasPrefix(tail, "{") {
+			prefix = prefix[:idx]
+		}
+	}
+	return strings.TrimRight(prefix, "/")
+}
+
+func commonPrefix(a, b string) string {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	i := 0
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	return a[:i]
+}
+
+func ginPath(path, prefix string) string {
+	rest := strings.TrimPrefix(path, prefix)
+	if rest == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`\{([^}]+)\}`)
+	return re.ReplaceAllString(rest, ":$1")
+}
+
+func expectedRoutePath(path, resourcePrefix string) string {
+	groupPath := strings.TrimPrefix(resourcePrefix, "/api/v1")
+	if groupPath == "" {
+		groupPath = "/"
+	}
+	return joinRoutePath(groupPath, ginPath(path, resourcePrefix))
+}
+
+func joinRoutePath(base, child string) string {
+	switch {
+	case base == "" || base == "/":
+		if child == "" {
+			return "/"
+		}
+		if strings.HasPrefix(child, "/") {
+			return child
+		}
+		return "/" + child
+	case child == "":
+		return base
+	default:
+		return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(child, "/")
+	}
 }
 
 // ---------------------------------------------------------------------------

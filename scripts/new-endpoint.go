@@ -686,7 +686,7 @@ func extractScalarField(propName string, ref *openapi3.SchemaRef, isRequired boo
 	// 初版不映射，让作者自补。
 
 	return dtoField{
-		GoName:     pascalize(propName),
+		GoName:     goIdentifier(propName),
 		GoType:     goType,
 		JSONName:   propName,
 		BindingTag: strings.Join(tags, ","),
@@ -712,13 +712,48 @@ func schemaTypes(s *openapi3.Schema) string {
 	return fmt.Sprintf("%v", *s.Type)
 }
 
-// pascalize 把 "createExample" 转成 "CreateExample"——oapi-codegen 生成
-// ServerInterface 上方法名的规则。
+// pascalize 把 camelCase / snake_case / kebab-case 化为 PascalCase——
+// oapi-codegen 生成 ServerInterface 上方法名的规则。
 func pascalize(s string) string {
 	if s == "" {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	parts := regexp.MustCompile(`[_\-\s]+`).Split(s, -1)
+	var b strings.Builder
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]))
+		if len(p) > 1 {
+			b.WriteString(p[1:])
+		}
+	}
+	return b.String()
+}
+
+// goIdentifier 把 OpenAPI schema / query 字段名转成合法 exported Go identifier，
+// tag 仍保留 yaml 原名。覆盖 snake_case / kebab-case / dotted name 等常见协议字段。
+func goIdentifier(s string) string {
+	parts := regexp.MustCompile(`[^A-Za-z0-9]+`).Split(s, -1)
+	var b strings.Builder
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]))
+		if len(p) > 1 {
+			b.WriteString(p[1:])
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "Field"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		return "Field" + out
+	}
+	return out
 }
 
 // findResourcePrefix 找一组 operation path 的最长公共"资源前缀"——脚本据此

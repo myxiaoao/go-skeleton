@@ -33,6 +33,26 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`make new-endpoint-check` —— yaml ↔ 代码漂移只读 checker**:
+  `scripts/new-endpoint-check.go`：重新解析 `api/openapi.yaml`，按
+  `x-resource` (op > path) + fallback (扫 `internal/handler/*.go` 的
+  `<Name>Handler` struct 名作为 known resource 池) 把 op 分组，对每个非
+  builtin 资源跑 6 项检查：handler / service / router 注册 / APIServer
+  转发 / `HTTPHandlers` struct 装配 / `router_test.go` deps fixture。
+  输出按 `[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档；有 finding
+  exit 1。**不写盘 / 不并入 `make verify`** —— 单跑做调试入口，避免
+  schema 调整让 PR 抖动。
+  调用：`make new-endpoint-check` 扫全；`make new-endpoint-check NAME=Order`
+  只扫单资源。builtin (Auth / Health / OpenAPI) 自动跳过；`getLivez` →
+  `Health` 这类 op 名跟资源名不字面相关的 builtin 通过显式映射表
+  `builtinOpToResource` 处理。yaml 解析逻辑与 `new-endpoint.go` 同源
+  copy（顶部注释明示 keep in sync），未抽 internal 子包是为了保持
+  `go run scripts/X.go` 单文件运行约定。
+  `Makefile` 加 `new-endpoint-check` target；`scripts/scripts_test.go`
+  新增 4 个回归（clean fixture / Missing 全层 / Stale router 残留 /
+  NAME 过滤）。`CLAUDE.md` / `AGENTS.md` §"支持边界" 子节同步加一行；
+  `docs/development.md` / `docs/runbook.md` 同步。
+
 - **`make new-endpoint` 二轮增强（x-resource / dry-run / route diff / 边界文档）**:
   收齐四项改进让脚手架更稳更可 review。
   (1) `x-resource: <Name>` 显式资源归属——path 级声明一次下面所有 verb 继承，

@@ -77,6 +77,8 @@ yaml 是真相源。按这个顺序：
 
 **支持边界与不支持形态**：see CLAUDE.md / AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节——列清了脚本能跑（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run）和需手写（≥2 个 path 参数 / 同资源跨多根路径）的形态。
 
+**漂移检查（drift detector）**：`make new-endpoint-check` 是只读 checker——重新解析 yaml 比对代码端，按 `[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档输出 yaml ↔ 代码漂移。**不写盘**、不删代码。改完 yaml 没跑 `make new-endpoint`、或 rename / 删 operation 后代码端残留 router 注册 / handler 方法时它都能抓到。传 `NAME=Order` 只扫单资源。不并入 `make verify`（避免 schema 调整让 PR 抖动），作为调试入口单跑；CI 想接进定时扫的话另起 job。
+
 ---
 
 ## 四、加一个 Asynq 异步任务

@@ -200,6 +200,7 @@ yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注
 - **path 参数**：0 或 1 个 `{var}`。参数名按 yaml 实际取（`{order_id}` → `c.Param("order_id")` + service `(ctx, order_id string)`）。
 - **鉴权**：yaml `security: [{ bearerAuth: [] }]` 自动放进 `deps.AuthRequired` 子组；非 bearerAuth 的 scheme（API key / OAuth2 / ...）当前忽略。
 - **dry-run**：`--dry-run` / `DRY_RUN=1` 跑解析 / 校验但不写盘——review 计划用。
+- **drift 检查**：`make new-endpoint-check` 只读 checker，重新解析 yaml 比对代码端，按 `[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档报漂移。**不写盘 / 不删代码**。传 `NAME=Order` 只扫单资源；不并入 `make verify`（避免 schema 调整让 PR 抖动），单跑作为调试入口。
 
 不支持，需要手写的形态：
 

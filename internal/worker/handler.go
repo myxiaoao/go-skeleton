@@ -62,6 +62,37 @@ type Deps struct {
 	Queue   *taskqueue.Queue
 }
 
+// ProcessorRequirement 描述一个 task processor 在装配链里的状态：
+// Name 用于错误信息（如 "ExampleProcessor"），Present 表示**真业务**是否注入
+// （noop 兜底不算 present——production 下漏注入会被 noop 静默 ack 掉）。
+type ProcessorRequirement struct {
+	Name    string
+	Present bool
+}
+
+// RequiredProcessors 返回每个 task 类型对应的 processor 注入状态。
+// caller（如 internal/worker.go::buildWorkerDeps）在 APP_ENV=production 下
+// 调它，任一 Present=false 就 fail-fast 退出。
+//
+// **加新 task 类型的硬约束**：在 Deps 上加新 processor 字段后，本方法必须
+// 同步追加一条记录；漏加 = production 下静默 noop。这是 CLAUDE.md §异步队列
+// 里"production 漏注入 fail-fast"约束的强制执行点——把"是否需要真 processor"
+// 从 reg.DB == nil 这种巧合代理换成显式声明，避免"新 task 不依赖 DB 但仍需
+// 真业务处理"这种场景下旧逻辑失效。
+func (d *Deps) RequiredProcessors() []ProcessorRequirement {
+	if d == nil {
+		return nil
+	}
+	// noop 兜底 (noopExampleProcessor) 是 RegisterHandlers 阶段回填的；
+	// 在 buildWorkerDeps 调本方法时，d.Example 仍然只在真业务注入时非 nil。
+	// 用类型断言把 noop 也过滤掉，让本方法在 RegisterHandlers 之后调也能
+	// 保持语义——"noop 不算 present"。
+	_, exampleIsNoop := d.Example.(noopExampleProcessor)
+	return []ProcessorRequirement{
+		{Name: "ExampleProcessor", Present: d.Example != nil && !exampleIsNoop},
+	}
+}
+
 // HandleExampleTask 消费 example 异步任务：解 payload → 调 typed
 // ExampleProcessor。处理失败返回 error 让 asynq 走重试策略；解析失败也返
 // error 但属于不可恢复（数据错），上层 asynq 会按 MaxRetry 控制。

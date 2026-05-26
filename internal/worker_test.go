@@ -47,3 +47,22 @@ func TestBuildWorkerDeps_DevelopmentAllowsNoopFallback(t *testing.T) {
 		t.Errorf("dev with reg.DB=nil should leave Example=nil for RegisterHandlers to noop-backfill, got %T", deps.Example)
 	}
 }
+
+// TestBuildWorkerDeps_ProductionGuardListsAllMissing 验证 fail-fast 错误
+// 消息列出所有缺失的 processor 名称，**通过 deps.RequiredProcessors()
+// 表驱动**——确保新 task 类型加进来后只要在 RequiredProcessors 里登记，
+// production guard 自动覆盖，不需要改 buildWorkerDeps。
+func TestBuildWorkerDeps_ProductionGuardListsAllMissing(t *testing.T) {
+	reg := &bootstrap.Registry{
+		Cfg: &config.Config{Env: config.EnvProduction},
+	}
+
+	_, err := buildWorkerDeps(reg)
+	if err == nil {
+		t.Fatal("expected error listing missing processors")
+	}
+	// 当前只有 ExampleProcessor 一个 task；将来加新 task 后这一断言要扩展。
+	if !strings.Contains(err.Error(), "[ExampleProcessor]") {
+		t.Errorf("error should list missing processor names, got: %v", err)
+	}
+}

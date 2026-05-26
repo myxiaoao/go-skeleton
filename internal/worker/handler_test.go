@@ -153,3 +153,69 @@ func TestRegisterHandlersFillsNoopProcessor(t *testing.T) {
 		t.Fatalf("noop processor returned err = %v, want nil", err)
 	}
 }
+
+// TestRequiredProcessors 验证 Deps.RequiredProcessors() 把"真业务注入"和
+// "noop 兜底"区分开——buildWorkerDeps 用它在 production 下判 fail-fast。
+func TestRequiredProcessors(t *testing.T) {
+	tests := []struct {
+		name        string
+		deps        *Deps
+		wantName    string
+		wantPresent bool
+	}{
+		{
+			name:        "nil Example: not present",
+			deps:        &Deps{},
+			wantName:    "ExampleProcessor",
+			wantPresent: false,
+		},
+		{
+			name:        "noop Example: not present (重要：noop 不算真注入)",
+			deps:        &Deps{Example: noopExampleProcessor{}},
+			wantName:    "ExampleProcessor",
+			wantPresent: false,
+		},
+		{
+			name:        "real Example: present",
+			deps:        &Deps{Example: &exampleProcessorStub{}},
+			wantName:    "ExampleProcessor",
+			wantPresent: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reqs := tc.deps.RequiredProcessors()
+			if len(reqs) == 0 {
+				t.Fatal("RequiredProcessors should not be empty")
+			}
+			var got *ProcessorRequirement
+			for i := range reqs {
+				if reqs[i].Name == tc.wantName {
+					got = &reqs[i]
+					break
+				}
+			}
+			if got == nil {
+				t.Fatalf("RequiredProcessors missing %q, got: %+v", tc.wantName, reqs)
+			}
+			if got.Present != tc.wantPresent {
+				t.Errorf("Present = %v, want %v", got.Present, tc.wantPresent)
+			}
+		})
+	}
+}
+
+// TestRequiredProcessors_NilDeps 验证 nil 接收者安全：返 nil，不 panic。
+func TestRequiredProcessors_NilDeps(t *testing.T) {
+	var d *Deps
+	if got := d.RequiredProcessors(); got != nil {
+		t.Errorf("nil Deps should return nil, got: %+v", got)
+	}
+}
+
+// exampleProcessorStub 用于测试"非 noop 的 ExampleProcessor 视为 present"。
+type exampleProcessorStub struct{}
+
+func (*exampleProcessorStub) ProcessExample(_ context.Context, _ task.ExamplePayload) error {
+	return nil
+}

@@ -99,10 +99,15 @@ func validateWorkerRegistry(reg *bootstrap.Registry) error {
 // noopExampleProcessor 兜底，便于无 DB 的 worker 部署形态（如只跑外部 API
 // 任务）也能起得来。worker 包本身不 import gorm，符合分层规则。
 //
-// 安全门槛：APP_ENV=production 下，如果真业务 processor 没注入（这里以
-// reg.DB == nil 为信号），直接 fail-fast 退出——production 漏注入意味着
-// 任务会被 noop 消费 + ack 掉，比 panic 更危险（消息消失但只打 warn 日志）。
-// dev / staging 仍然允许 noop，方便从模板态启动。
+// 安全门槛：APP_ENV=production 下调 deps.RequiredProcessors() 显式检查
+// 每个 task processor 是否真注入。任一 missing 就 fail-fast——production
+// 漏注入意味着任务会被 noop 消费 + ack 掉，比 panic 更危险（消息消失但
+// 只打 warn 日志）。dev / staging 仍然允许 noop，方便从模板态启动。
+//
+// 新增 task 类型时**不必改本函数**：在对应 service / repository 装配处加
+// `deps.Xxx = service.NewXxxService(...)` 即可，production guard 通过
+// `deps.RequiredProcessors()` 自动扩展（前提是新 processor 已加进
+// worker.Deps 的 RequiredProcessors 返回列表）。
 func buildWorkerDeps(reg *bootstrap.Registry) (*worker.Deps, error) {
 	deps := &worker.Deps{
 		Cache: reg.Cache,
@@ -112,8 +117,16 @@ func buildWorkerDeps(reg *bootstrap.Registry) (*worker.Deps, error) {
 		repo := repository.NewExampleRepository(reg.DB.DB())
 		deps.Example = service.NewExampleService(repo, reg.Queue)
 	}
-	if deps.Example == nil && reg.Cfg != nil && reg.Cfg.Env.IsProduction() {
-		return nil, fmt.Errorf("worker: no ExampleProcessor wired in production (reg.DB is nil); refusing to start with noop fallback, tasks would be ack'd without side effects")
+	if reg.Cfg != nil && reg.Cfg.Env.IsProduction() {
+		var missing []string
+		for _, req := range deps.RequiredProcessors() {
+			if !req.Present {
+				missing = append(missing, req.Name)
+			}
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("worker: production refusing to start; missing real processors %v (tasks would be silently ack'd by noop fallback)", missing)
+		}
 	}
 	return deps, nil
 }

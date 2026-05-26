@@ -223,6 +223,16 @@ oapi-codegen 会生成两类东西，**区分对待**：
 
 `internal/oapi/oapi.gen.go` 顶部标了 `DO NOT EDIT`——**不要手改它**，改 yaml 然后 `make oapi`。它会入库（和 `go.sum` 一样），CI / 队友不需要重跑生成。
 
+### yaml 文档语言
+
+`api/openapi.yaml` 的 `summary` / `description` 字段**统一用中文**——会被 `/docs`（Stoplight Elements）渲染成 Markdown 给团队浏览，中文更易读。命名相关字段保持英文：
+
+- ✅ 中文：`summary`、`description`（path-level / operation-level / parameter / requestBody / response / schema / property / tag）
+- ✅ 英文：`operationId`、字段名（key）、`reason` 常量串（`INVALID_PARAMS` 等需要稳定机读，**不译**）
+- `summary` 写**短中文标题**（左侧菜单和列表项标题），长说明放 `description`
+- `description` 支持 Markdown，可用列表 / 代码块 / 加粗；**别用 `#` / `##`** 一级二级标题（会与 Elements 自带层级冲突）
+- 错误码 `reason` 字符串（如 `INVALID_PARAMS`）保留英文常量，中文说明放周边 description 里
+
 ### 不做的事
 
 - 不生成 client SDK（内部联调用不到）。

@@ -14,6 +14,18 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Changed
 
+- **`api/openapi.yaml` 全量加中文 `summary` / `description`**:
+  Stoplight Elements 渲染 description 走 Markdown 原生支持中文，团队 review
+  /docs 更顺。覆盖：4 个 tag（health/auth/example/meta）、8 个 endpoint 的
+  summary + description、所有 parameters / requestBody / responses 的描述、
+  所有 schemas 顶层 + 每个 property 的描述、8 条 reusable components.responses
+  的描述。命名相关字段（`operationId` / 字段 key / `reason` 常量串）保留
+  英文以保证机读稳定性。
+  `internal/oapi/oapi.gen.go` 重新生成入库。`CLAUDE.md` / `AGENTS.md` §API
+  契约 加 "yaml 文档语言" 子节，约束未来新增 endpoint 时 summary/description
+  用中文、命名相关字段保持英文。
+
+
 - **BREAKING：HTTP 状态码按 errcode 映射，不再一律返 200**:
   之前所有业务 API 永远返 HTTP 200、客户端只能靠 body code 判断成败；副作用
   是 Prometheus `http_requests_total{status="200"}` 全绿，业务错误被监控

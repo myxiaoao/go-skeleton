@@ -1,0 +1,69 @@
+# NetworkPolicy — 限制 Pod 的入向流量。
+#
+# 设计取舍：
+# - 只配 ingress 不配 egress。egress 想限制必须知道 Postgres / Redis /
+#   外部 API 的具体地址或 namespace，这些是部署细节、不该写死在 base/。
+#   各 overlay 自行加 egress policy 收紧。
+# - ingress 区分两组：
+#     1) API → 业务端口 3000 来自任意 Pod（具体限制由 Ingress / LB 决定，
+#        集群内部组件横向调用也常见），metrics 9090 只允许 Prometheus
+#        所在 namespace。需要更严的话改 from.podSelector 限定客户端。
+#     2) Worker → 不开任何端口，**全部** ingress 拒绝。
+# - default-deny 不放 base：太激进，集群里可能跑着 sidecar / mesh 需要
+#   额外端口。要 default-deny 自行在 overlay 加。
+#
+# 集群必须装了 NetworkPolicy CNI 实现（Calico / Cilium / Weave 等）才生效；
+# 没装的话 K8s 会接受 yaml 但策略形同虚设——这是集群级配置问题，不是
+# 应用问题。
+#
+# 不需要 NetworkPolicy 时（开发集群 / mesh 接管网络层）通过 overlay 的
+# patches.delete 移除即可，不必动 base。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: go-skeleton-api
+  labels:
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    # 业务端口：允许所有 Pod 入站。生产收紧的常见做法是把 from 改成
+    # 指定 ingress-nginx / istio-ingressgateway 的 namespaceSelector。
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 3000
+          protocol: TCP
+    # metrics 端口：只允许监控系统 namespace。约定 namespace 带
+    # purpose=monitoring 标签（Prometheus / kube-prometheus-stack 默认或
+    # 手动加）。集群没这个标签 → 策略 = 拒绝所有，metrics 端口被锁死，
+    # 这是 fail-secure 行为。
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              purpose: monitoring
+      ports:
+        - port: 9090
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: go-skeleton-worker
+  labels:
+    app.kubernetes.io/component: worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Ingress
+  # 空 ingress = 拒绝所有入站。worker 是纯消费者，没人需要主动连它。
+  ingress: []

@@ -1,0 +1,22 @@
+# PodDisruptionBudget — 让 voluntary disruption（节点维护 / drain / 扩缩
+# 容）受控，保证 API 至少有 N 个 ready 副本，避免单台节点维护时 API 全
+# 部被驱逐。
+#
+# Worker 不配 PDB：消费者无外部入口，短暂全部下线只是消费速率掉到 0，
+# 不像 API 直接影响用户。需要 worker 也保护时复制本文件改 selector 即可。
+#
+# minAvailable: 1 是最弱保护——单副本时阻止 voluntary 驱逐，保证至少
+# 留一个；多副本时仍允许逐个滚动。需要更严格保护改 minAvailable: 2 或
+# maxUnavailable: 25%。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: go-skeleton-api
+  labels:
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: api

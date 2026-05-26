@@ -22,6 +22,8 @@ resources:
   - migrate-job.yaml
   - hpa.yaml
   - servicemonitor.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
 
 # 镜像 tag 占位 REPLACE-TAG 给 overlay 覆盖；base 跑 `kustomize build` 之前
 # 必须有 overlay 指定真 tag，否则 K8s 拒收 :REPLACE-TAG 镜像。

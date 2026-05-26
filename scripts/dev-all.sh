@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# 全文件抑制 SC2317：cleanup() 通过 `trap cleanup INT TERM EXIT` 间接调用，
+# 0.9.x 的 SC2317 静态分析看不见这条路径，会把函数体每一行标成 unreachable。
+# 0.11.0+ 默认关掉该 check；显式 disable 兼顾两个版本。
+# shellcheck disable=SC2317
+
 # scripts/dev-all.sh — 一条命令起完整本地三进程：依赖 → 迁移 → API + Worker。
 #
 # Usage:

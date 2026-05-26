@@ -25,7 +25,10 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 		return nil, err
 	}
 
-	deps := buildWorkerDeps(reg)
+	deps, err := buildWorkerDeps(reg)
+	if err != nil {
+		return nil, err
+	}
 	mux := asynq.NewServeMux()
 	worker.RegisterHandlers(mux, deps)
 
@@ -95,7 +98,12 @@ func validateWorkerRegistry(reg *bootstrap.Registry) error {
 // （走 repository → gorm 落库），DB 不可用时让 RegisterHandlers 回填
 // noopExampleProcessor 兜底，便于无 DB 的 worker 部署形态（如只跑外部 API
 // 任务）也能起得来。worker 包本身不 import gorm，符合分层规则。
-func buildWorkerDeps(reg *bootstrap.Registry) *worker.Deps {
+//
+// 安全门槛：APP_ENV=production 下，如果真业务 processor 没注入（这里以
+// reg.DB == nil 为信号），直接 fail-fast 退出——production 漏注入意味着
+// 任务会被 noop 消费 + ack 掉，比 panic 更危险（消息消失但只打 warn 日志）。
+// dev / staging 仍然允许 noop，方便从模板态启动。
+func buildWorkerDeps(reg *bootstrap.Registry) (*worker.Deps, error) {
 	deps := &worker.Deps{
 		Cache: reg.Cache,
 		Queue: reg.Queue,
@@ -104,5 +112,8 @@ func buildWorkerDeps(reg *bootstrap.Registry) *worker.Deps {
 		repo := repository.NewExampleRepository(reg.DB.DB())
 		deps.Example = service.NewExampleService(repo, reg.Queue)
 	}
-	return deps
+	if deps.Example == nil && reg.Cfg != nil && reg.Cfg.Env.IsProduction() {
+		return nil, fmt.Errorf("worker: no ExampleProcessor wired in production (reg.DB is nil); refusing to start with noop fallback, tasks would be ack'd without side effects")
+	}
+	return deps, nil
 }

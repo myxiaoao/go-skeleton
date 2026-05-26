@@ -349,6 +349,68 @@ func TestProductionWarnings(t *testing.T) {
 			wantCount: 0,
 		},
 		{
+			name: "production pprof 绑 loopback IPv4 不 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+				c.Server.PprofEnabled = true
+				c.Server.PprofAddr = "127.0.0.1:6060"
+			},
+			wantCount: 0,
+		},
+		{
+			name: "production pprof 绑 localhost 不 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+				c.Server.PprofEnabled = true
+				c.Server.PprofAddr = "localhost:6060"
+			},
+			wantCount: 0,
+		},
+		{
+			name: "production pprof 绑 0.0.0.0 触发 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+				c.Server.PprofEnabled = true
+				c.Server.PprofAddr = "0.0.0.0:6060"
+			},
+			wantCount:   1,
+			wantInclude: "PPROF",
+		},
+		{
+			name: "production pprof 绑公网 IP 触发 warn",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+				c.Server.PprofEnabled = true
+				c.Server.PprofAddr = "10.0.0.5:6060"
+			},
+			wantCount:   1,
+			wantInclude: "PPROF",
+		},
+		{
+			name: "production pprof 关闭时 PPROF_ADDR 不查",
+			mutate: func(c *Config) {
+				c.Env = EnvProduction
+				c.RateLimit.RequestsPerMinute = 60
+				c.Server.TrustedProxies = []string{"10.0.0.0/8"}
+				c.Server.MetricsAddr = "127.0.0.1:9090"
+				c.Server.PprofEnabled = false
+				c.Server.PprofAddr = "0.0.0.0:6060"
+			},
+			wantCount: 0,
+		},
+		{
 			name: "nil 输入安全：返 nil",
 			mutate: func(*Config) { /* mutate 不用，直接传 nil 走特殊路径 */
 			},

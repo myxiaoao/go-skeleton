@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 )
 
@@ -158,7 +159,37 @@ func ProductionWarnings(cfg *Config) []string {
 		warns = append(warns, "/metrics is exposed on the business API port; set METRICS_ADDR to bind a separate loopback/internal listener in production")
 	}
 
+	// PPROF_ENABLED=true 且 PPROF_ADDR 不在 loopback：pprof 端点暴露 heap /
+	// goroutine / CPU profile，公网可访问 = 信息泄露 + 拒绝服务向量（profile
+	// 抓取本身耗 CPU）。生产 pprof 只能绑 loopback + SSH 隧道访问。
+	if cfg.Server.PprofEnabled && !isLoopbackAddr(cfg.Server.PprofAddr) {
+		warns = append(warns, fmt.Sprintf("PPROF_ENABLED=true with non-loopback PPROF_ADDR=%q exposes pprof to the network; bind to 127.0.0.1 / ::1 and tunnel via SSH instead", cfg.Server.PprofAddr))
+	}
+
 	return warns
+}
+
+// isLoopbackAddr 判断 listener 地址是否绑在回环。空 addr / `:port` / `0.0.0.0:port`
+// 都视为非 loopback——它们会监听所有网卡，包括公网网卡。Go 标准的 net.SplitHostPort
+// 能稳定取出 host 部分，配合 net.ParseIP 走 IP 的 IsLoopback 比字符串前缀匹配
+// 抗变形（"localhost"、"127.0.0.2" 这种边角也认）。
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		// addr 形如 ":6060" 或空——host 段无法解析为 loopback，按非 loopback 处理。
+		return false
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func isInsecureJWTSecret(secret string) bool {

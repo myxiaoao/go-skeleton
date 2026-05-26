@@ -80,112 +80,159 @@ func (e HealthResponseStatus) Valid() bool {
 	}
 }
 
-// CreateExampleReq defines model for CreateExampleReq.
+// CreateExampleReq 创建示例的请求体。
 type CreateExampleReq struct {
+	// Name 名称；不可为空，最长 255。
 	Name string `json:"name"`
 }
 
 // CreateTokenEnvelope defines model for CreateTokenEnvelope.
 type CreateTokenEnvelope struct {
-	// Code 0 on success; non-zero error code otherwise.
-	Code     int             `json:"code"`
-	Data     *CreateTokenRes `json:"data,omitempty"`
-	Message  string          `json:"message"`
+	// Code 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
+	Code int `json:"code"`
+
+	// Data 签发成功返回的 token 数据。
+	Data *CreateTokenRes `json:"data,omitempty"`
+
+	// Message 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
+	Message string `json:"message"`
+
+	// Metadata 附加元信息。
 	Metadata *struct {
+		// TraceId 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
 
-	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
+	// Reason 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
 	Reason *string `json:"reason,omitempty"`
 }
 
-// CreateTokenReq defines model for CreateTokenReq.
+// CreateTokenReq 签发示例 token 的请求体。
 type CreateTokenReq struct {
+	// Subject 要签进 token 的 subject（通常是用户 ID 或用户名）。不可为空。
 	Subject string `json:"subject"`
 }
 
-// CreateTokenRes defines model for CreateTokenRes.
+// CreateTokenRes 签发成功返回的 token 数据。
 type CreateTokenRes struct {
-	AccessToken string                  `json:"access_token"`
-	TokenType   CreateTokenResTokenType `json:"token_type"`
+	// AccessToken HS256 签名的 JWT。客户端把它放进 `Authorization: Bearer <token>` 头。
+	AccessToken string `json:"access_token"`
+
+	// TokenType 固定为 "Bearer"。
+	TokenType CreateTokenResTokenType `json:"token_type"`
 }
 
-// CreateTokenResTokenType defines model for CreateTokenRes.TokenType.
+// CreateTokenResTokenType 固定为 "Bearer"。
 type CreateTokenResTokenType string
 
 // EnqueueExampleTaskEnvelope defines model for EnqueueExampleTaskEnvelope.
 type EnqueueExampleTaskEnvelope struct {
-	// Code 0 on success; non-zero error code otherwise.
-	Code     int                    `json:"code"`
-	Data     *EnqueueExampleTaskRes `json:"data,omitempty"`
-	Message  string                 `json:"message"`
+	// Code 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
+	Code int `json:"code"`
+
+	// Data 投递结果。
+	Data *EnqueueExampleTaskRes `json:"data,omitempty"`
+
+	// Message 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
+	Message string `json:"message"`
+
+	// Metadata 附加元信息。
 	Metadata *struct {
+		// TraceId 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
 
-	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
+	// Reason 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
 	Reason *string `json:"reason,omitempty"`
 }
 
-// EnqueueExampleTaskReq defines model for EnqueueExampleTaskReq.
+// EnqueueExampleTaskReq 投递异步任务的请求体。
 type EnqueueExampleTaskReq struct {
+	// Name 任务名（业务自定义）；长度 1-255。
 	Name string `json:"name"`
 }
 
-// EnqueueExampleTaskRes defines model for EnqueueExampleTaskRes.
+// EnqueueExampleTaskRes 投递结果。
 type EnqueueExampleTaskRes struct {
+	// Queued true = 已成功入队（不代表已执行）。
 	Queued bool `json:"queued"`
 }
 
-// Envelope Standard envelope. Success is `code: 0`. Failure carries a non-zero
-// `code`, a stable `reason` slug, and optionally `metadata.trace_id`.
+// Envelope 统一响应信封。成功 `code: 0`；失败带非 0 `code`、稳定 `reason` 串
+// 和可选的 `metadata.trace_id`，方便前端报问题时给后端定位日志。
 type Envelope struct {
-	// Code 0 on success; non-zero error code otherwise.
-	Code     int    `json:"code"`
-	Message  string `json:"message"`
+	// Code 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
+	Code int `json:"code"`
+
+	// Message 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
+	Message string `json:"message"`
+
+	// Metadata 附加元信息。
 	Metadata *struct {
+		// TraceId 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
 
-	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
+	// Reason 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
 	Reason *string `json:"reason,omitempty"`
 }
 
-// ErrorEnvelope Standard envelope. Success is `code: 0`. Failure carries a non-zero
-// `code`, a stable `reason` slug, and optionally `metadata.trace_id`.
+// ErrorEnvelope 统一响应信封。成功 `code: 0`；失败带非 0 `code`、稳定 `reason` 串
+// 和可选的 `metadata.trace_id`，方便前端报问题时给后端定位日志。
 type ErrorEnvelope = Envelope
 
-// Example defines model for Example.
+// Example 示例资源实体。
 type Example struct {
+	// CreatedAt 创建时间（RFC3339，UTC）。
 	CreatedAt time.Time `json:"created_at"`
-	Id        int64     `json:"id"`
-	Name      string    `json:"name"`
+
+	// Id 主键，单调递增。
+	Id int64 `json:"id"`
+
+	// Name 名称；长度 1-255，与 DB `varchar(255)` 对齐。
+	Name string `json:"name"`
+
+	// UpdatedAt 最近一次更新时间（RFC3339，UTC）。
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ExampleEnvelope defines model for ExampleEnvelope.
 type ExampleEnvelope struct {
-	// Code 0 on success; non-zero error code otherwise.
-	Code     int      `json:"code"`
-	Data     *Example `json:"data,omitempty"`
-	Message  string   `json:"message"`
+	// Code 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
+	Code int `json:"code"`
+
+	// Data 示例资源实体。
+	Data *Example `json:"data,omitempty"`
+
+	// Message 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
+	Message string `json:"message"`
+
+	// Metadata 附加元信息。
 	Metadata *struct {
+		// TraceId 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
 
-	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
+	// Reason 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
 	Reason *string `json:"reason,omitempty"`
 }
 
-// HealthResponse defines model for HealthResponse.
+// HealthResponse readiness 探针响应。
 type HealthResponse struct {
-	// Build Build-time metadata injected via ldflags. Lets monitoring scrape
-	// the version off /health without a separate endpoint.
+	// Build 构建期元信息（ldflags 注入）。让监控直接从 /health 抓版本号，不必
+	// 再单独开一个版本端点。
 	Build struct {
+		// BuildTime 构建时间戳（RFC3339，UTC）。
 		BuildTime string `json:"build_time"`
-		Commit    string `json:"commit"`
-		Version   string `json:"version"`
+
+		// Commit 短 commit SHA。
+		Commit string `json:"commit"`
+
+		// Version 语义化版本号或 tag 名。
+		Version string `json:"version"`
 	} `json:"build"`
+
+	// Checks 每个依赖的健康状态，key 是依赖名（postgres / redis / asynq 等）。
 	Checks map[string]HealthResponseChecks `json:"checks"`
 
 	// Status ok: 全部依赖可达；degraded: 非关键依赖（Redis）异常，HTTP 仍 200，
@@ -202,82 +249,100 @@ type HealthResponseStatus string
 
 // ListExamplesEnvelope defines model for ListExamplesEnvelope.
 type ListExamplesEnvelope struct {
-	// Code 0 on success; non-zero error code otherwise.
-	Code     int              `json:"code"`
-	Data     *ListExamplesRes `json:"data,omitempty"`
-	Message  string           `json:"message"`
+	// Code 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
+	Code int `json:"code"`
+
+	// Data 分页查询的响应数据。
+	Data *ListExamplesRes `json:"data,omitempty"`
+
+	// Message 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
+	Message string `json:"message"`
+
+	// Metadata 附加元信息。
 	Metadata *struct {
+		// TraceId 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
 
-	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
+	// Reason 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
 	Reason *string `json:"reason,omitempty"`
 }
 
-// ListExamplesRes defines model for ListExamplesRes.
+// ListExamplesRes 分页查询的响应数据。
 type ListExamplesRes struct {
+	// Examples 当前页结果。
 	Examples []Example `json:"examples"`
-	Total    int64     `json:"total"`
+
+	// Total 满足查询条件的总条数（用于前端算总页数）。
+	Total int64 `json:"total"`
 }
 
-// LivenessResponse defines model for LivenessResponse.
+// LivenessResponse liveness 探针响应。
 type LivenessResponse struct {
-	// Status Always "ok" — the probe is hard-coded to succeed.
+	// Status 永远是 "ok"——探针硬编码成功。
 	Status string `json:"status"`
 
-	// Version Build version injected via ldflags, for quick "what's running" checks.
+	// Version 通过 ldflags 注入的构建版本号，用于快速确认"现在跑的是哪一版"。
 	Version string `json:"version"`
 }
 
 // MeEnvelope defines model for MeEnvelope.
 type MeEnvelope struct {
-	// Code 0 on success; non-zero error code otherwise.
-	Code     int    `json:"code"`
-	Data     *MeRes `json:"data,omitempty"`
-	Message  string `json:"message"`
+	// Code 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
+	Code int `json:"code"`
+
+	// Data 当前已鉴权主体信息。
+	Data *MeRes `json:"data,omitempty"`
+
+	// Message 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
+	Message string `json:"message"`
+
+	// Metadata 附加元信息。
 	Metadata *struct {
+		// TraceId 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 		TraceId *string `json:"trace_id,omitempty"`
 	} `json:"metadata,omitempty"`
 
-	// Reason Stable machine-readable error reason (e.g. INVALID_PARAMS).
+	// Reason 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
 	Reason *string `json:"reason,omitempty"`
 }
 
-// MeRes defines model for MeRes.
+// MeRes 当前已鉴权主体信息。
 type MeRes struct {
+	// Subject 从 Bearer token 解析出的 subject。
 	Subject string `json:"subject"`
 }
 
-// BadRequest Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// BadRequest 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type BadRequest = ErrorEnvelope
 
-// Forbidden Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// Forbidden 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type Forbidden = ErrorEnvelope
 
-// InternalError Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// InternalError 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type InternalError = ErrorEnvelope
 
-// NotImplemented Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// NotImplemented 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type NotImplemented = ErrorEnvelope
 
-// RequestTimeout Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// RequestTimeout 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type RequestTimeout = ErrorEnvelope
 
-// ServiceUnavailable Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// ServiceUnavailable 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type ServiceUnavailable = ErrorEnvelope
 
-// TooManyRequests Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// TooManyRequests 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type TooManyRequests = ErrorEnvelope
 
-// Unauthorized Error response envelope. Same shape as Envelope but never carries data.
-// See pkg/errcode for the full code/reason catalog.
+// Unauthorized 错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+// code / reason 目录见 `docs/errcodes.md`。
 type Unauthorized = ErrorEnvelope
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
@@ -285,10 +350,10 @@ type bearerAuthContextKey string
 
 // ListExamplesParams defines parameters for ListExamples.
 type ListExamplesParams struct {
-	// Limit Page size. Defaults to 20 when omitted or 0.
+	// Limit 分页大小。默认 20；省略或传 0 时回退到默认。
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Page offset (rows to skip).
+	// Offset 分页偏移（跳过的行数）。从 0 开始。
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -303,28 +368,28 @@ type EnqueueExampleTaskJSONRequestBody = EnqueueExampleTaskReq
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// Return the subject of the current Bearer token
+	// 返回当前 Bearer token 的 subject
 	// (GET /api/v1/auth/me)
 	GetAuthMe(c *gin.Context)
-	// Issue a sample JWT (dev-only)
+	// 签发示例 JWT（仅开发环境）
 	// (POST /api/v1/auth/token)
 	CreateAuthToken(c *gin.Context)
-	// List examples ordered by newest first
+	// 列出示例（按创建时间倒序）
 	// (GET /api/v1/examples)
 	ListExamples(c *gin.Context, params ListExamplesParams)
-	// Create an example
+	// 创建一个示例
 	// (POST /api/v1/examples)
 	CreateExample(c *gin.Context)
-	// Publish an example async task to Asynq
+	// 投递一个示例异步任务到 Asynq
 	// (POST /api/v1/examples/tasks)
 	EnqueueExampleTask(c *gin.Context)
-	// Readiness probe (DB + Redis health)
+	// 就绪探针（依赖健康检查）
 	// (GET /health)
 	GetHealth(c *gin.Context)
-	// Liveness probe
+	// 存活探针
 	// (GET /livez)
 	GetLivez(c *gin.Context)
-	// Return the raw OpenAPI 3.1 spec
+	// 返回原始 OpenAPI 3.1 spec
 	// (GET /openapi.json)
 	GetOpenAPISpec(c *gin.Context)
 }
@@ -508,65 +573,95 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"1vLSWXdxf7xh7B8WFy2bi/nWEbfPb/8nAAD//w==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -28,27 +28,34 @@ servers:
 
 tags:
   - name: health
-    description: Liveness and readiness probes
+    description: |
+      健康检查端点。`/livez` 给 Kubernetes liveness 探针（永远返 200，失败
+      会重启 pod）；`/health` 给 readiness 探针（依赖不可用返 503，LB 摘流
+      不重启）。
   - name: auth
-    description: Minimal JWT example
+    description: |
+      JWT 鉴权示例。`/auth/token` 仅用于开发环境签发示例 token（生产关闭）；
+      `/auth/me` 用于校验当前 Bearer token 并返回 subject。
   - name: example
-    description: Sample resource demonstrating the request flow
+    description: |
+      示例资源，演示完整请求流：参数校验 → service 业务 → repository 落库
+      → 统一响应信封。新模块照葫芦画瓢即可。
   - name: meta
-    description: API metadata (spec, version)
+    description: |
+      API 元信息端点（OpenAPI spec / 版本号）。客户端可拉 spec 自动生成代码。
 
 paths:
   /livez:
     get:
       tags: [health]
       operationId: getLivez
-      summary: Liveness probe
+      summary: 存活探针
       description: |
-        Always returns 200 as long as the process is running. Use this for
-        Kubernetes liveness probes — failure here will restart the pod, so
-        it must not depend on external systems like DB or Redis.
+        进程在运行就永远返 200。给 Kubernetes liveness 探针用——失败会重启
+        pod，因此**不能**依赖任何外部系统（DB / Redis 等）。
       responses:
         '200':
-          description: Process is alive
+          description: 进程存活。
           content:
             application/json:
               schema:
@@ -58,21 +65,20 @@ paths:
     get:
       tags: [health]
       operationId: getHealth
-      summary: Readiness probe (DB + Redis health)
+      summary: 就绪探针（依赖健康检查）
       description: |
-        Returns real HTTP status codes (200 / 503) so load balancers and
-        Kubernetes can decide on traffic. Use this for readiness probes —
-        failure removes the pod from the LB without restarting it. Does not
-        follow the business envelope.
+        用真实 HTTP 状态码（200 / 503）给 LB 与 Kubernetes 做流量决策。给
+        readiness 探针用——失败会让 LB 摘流但**不**重启 pod。响应**不**走
+        统一信封，body code 字段不存在。
       responses:
         '200':
-          description: Service is healthy
+          description: 服务健康，所有必要依赖可达。
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
         '503':
-          description: One or more required dependencies are unavailable
+          description: 一个或多个必要依赖不可用。
           content:
             application/json:
               schema:
@@ -82,13 +88,13 @@ paths:
     get:
       tags: [meta]
       operationId: getOpenAPISpec
-      summary: Return the raw OpenAPI 3.1 spec
+      summary: 返回原始 OpenAPI 3.1 spec
       description: |
-        Returns the embedded OpenAPI 3.1 specification as JSON. Import it into
-        Postman, Bruno, Insomnia, or any tool that understands OpenAPI.
+        以 JSON 形式返回内嵌的 OpenAPI 3.1 规范。可导入 Postman / Bruno /
+        Insomnia 等理解 OpenAPI 的工具自动生成客户端 / mock。
       responses:
         '200':
-          description: OpenAPI 3.1 spec
+          description: OpenAPI 3.1 spec。
           content:
             application/json:
               schema:
@@ -99,22 +105,21 @@ paths:
     post:
       tags: [auth]
       operationId: createAuthToken
-      summary: Issue a sample JWT (dev-only)
+      summary: 签发示例 JWT（仅开发环境）
       description: |
-        Always routed. When `JWT_SECRET` is configured AND
-        `AUTH_DEV_TOKEN_ENABLED=true`, signs a HS256 token for the supplied
-        subject. Otherwise the handler returns the business envelope with
-        `code=1006` / `reason=SERVICE_DISABLED` so clients can distinguish
-        "endpoint gone" from "feature off". MUST stay off in production.
+        路由**始终**注册。`JWT_SECRET` 已配置且 `AUTH_DEV_TOKEN_ENABLED=true`
+        时签发 HS256 token；否则返业务信封 `code=1006` / `reason=SERVICE_DISABLED`，
+        客户端据此区分"端点不存在"与"端点被关"。**生产环境必须关闭。**
       requestBody:
         required: true
+        description: 签发参数。
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateTokenReq'
       responses:
         '200':
-          description: Business envelope. `data` holds the token on success.
+          description: 业务信封；成功时 `data` 字段携带 token。
           content:
             application/json:
               schema:
@@ -130,12 +135,15 @@ paths:
     get:
       tags: [auth]
       operationId: getAuthMe
-      summary: Return the subject of the current Bearer token
+      summary: 返回当前 Bearer token 的 subject
+      description: |
+        校验 `Authorization: Bearer <token>` 头，返回 token 解析出的 subject。
+        token 缺失 / 过期 / 签名无效时返 401（`UNAUTHORIZED`）。
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Business envelope. `data.subject` is set when authenticated.
+          description: 业务信封；通过校验时 `data.subject` 携带当前主体。
           content:
             application/json:
               schema:
@@ -149,7 +157,11 @@ paths:
     get:
       tags: [example]
       operationId: listExamples
-      summary: List examples ordered by newest first
+      summary: 列出示例（按创建时间倒序）
+      description: |
+        分页查询示例资源列表。返回当前页数据 + 总条数（`total`），客户端
+        据此计算总页数。**强一致性 total**：内部走 `RepeatableRead + ReadOnly`
+        事务，保证 list 和 total 来自同一快照、不会页数对不上。
       parameters:
         - in: query
           name: limit
@@ -157,16 +169,16 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
-          description: Page size. Defaults to 20 when omitted or 0.
+          description: 分页大小。默认 20；省略或传 0 时回退到默认。
         - in: query
           name: offset
           schema:
             type: integer
             minimum: 0
-          description: Page offset (rows to skip).
+          description: 分页偏移（跳过的行数）。从 0 开始。
       responses:
         '200':
-          description: Business envelope. `data` holds the page.
+          description: 业务信封；`data` 字段携带本页结果。
           content:
             application/json:
               schema:
@@ -178,16 +190,21 @@ paths:
     post:
       tags: [example]
       operationId: createExample
-      summary: Create an example
+      summary: 创建一个示例
+      description: |
+        在 `examples` 表插入一条记录。`name` 字段在 binding 阶段做校验
+        （长度 1-255，与 GORM `varchar(255)` 字段对齐），超长直接返
+        `INVALID_PARAMS`，不会到 DB 层。
       requestBody:
         required: true
+        description: 创建参数。
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateExampleReq'
       responses:
         '200':
-          description: Business envelope. `data` holds the created example.
+          description: 业务信封；`data` 字段携带新建的资源。
           content:
             application/json:
               schema:
@@ -201,19 +218,21 @@ paths:
     post:
       tags: [example]
       operationId: enqueueExampleTask
-      summary: Publish an example async task to Asynq
+      summary: 投递一个示例异步任务到 Asynq
       description: |
-        Returns `QUEUE_UNAVAILABLE` (code 9003) when Redis / Asynq is not
-        configured.
+        把任务塞进 Asynq 队列异步执行。Redis / Asynq 未配置时返
+        `QUEUE_UNAVAILABLE`（code 9003），HTTP 503——客户端可据此判断是
+        "依赖暂时挂了"还是真实业务失败。
       requestBody:
         required: true
+        description: 任务参数。
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/EnqueueExampleTaskReq'
       responses:
         '200':
-          description: Business envelope. `data.queued` is true on success.
+          description: 业务信封；成功时 `data.queued` 为 true。
           content:
             application/json:
               schema:
@@ -237,61 +256,61 @@ components:
   responses:
     BadRequest:
       description: |
-        Client error (1xxx). Examples: INVALID_PARAMS (1001). The body envelope
-        carries the exact reason / code so the client can branch precisely.
+        客户端错误（1xxx 段）。常见：`INVALID_PARAMS` (1001) 参数校验失败。
+        body 信封带精确的 `reason` / `code`，客户端据此分支判断。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     Unauthorized:
       description: |
-        Authentication required or invalid (token missing / expired / signature
-        invalid). reason=UNAUTHORIZED (code 1002).
+        鉴权失败或缺少凭证（token 缺失 / 过期 / 签名无效）。
+        `reason=UNAUTHORIZED`（code 1002）。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     Forbidden:
       description: |
-        Authenticated but lacks permission. reason=PERMISSION_DENIED (code 1003).
+        已鉴权但无权限。`reason=PERMISSION_DENIED`（code 1003）。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     RequestTimeout:
       description: |
-        Request exceeded configured timeout. reason=REQUEST_TIMEOUT (code 1005).
+        请求处理超过配置的 RequestTimeout。`reason=REQUEST_TIMEOUT`（code 1005）。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     TooManyRequests:
       description: |
-        Rate limited. reason=TOO_MANY_REQUESTS (code 1004).
+        触发限流。`reason=TOO_MANY_REQUESTS`（code 1004）。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     InternalError:
       description: |
-        Generic server-side failure (9xxx). Catch-all for INTERNAL_ERROR (9001),
-        DATABASE_ERROR (9002), QUEUE_ERROR (9004), etc.
+        服务端兜底错误（9xxx 段）。覆盖 `INTERNAL_ERROR` (9001)、
+        `DATABASE_ERROR` (9002)、`QUEUE_ERROR` (9004) 等。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     NotImplemented:
       description: |
-        Endpoint is scaffolded but business logic isn't filled in yet.
-        reason=NOT_IMPLEMENTED_YET (code 9005).
+        端点已脚手架生成但业务逻辑未实现。`reason=NOT_IMPLEMENTED_YET`（code 9005）。
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     ServiceUnavailable:
       description: |
-        Downstream dependency unavailable or endpoint disabled by configuration.
-        Examples: QUEUE_UNAVAILABLE (9003), SERVICE_DISABLED (1006).
+        下游依赖不可用或端点被配置开关关闭。覆盖 `QUEUE_UNAVAILABLE` (9003)
+        与 `SERVICE_DISABLED` (1006)——前者表示依赖暂时挂了、可重试；后者
+        表示配置态关闭、重试无用。客户端用 body `reason` 区分。
       content:
         application/json:
           schema:
@@ -301,18 +320,20 @@ components:
     # ---------- Health ----------
     LivenessResponse:
       type: object
+      description: liveness 探针响应。
       required: [status, version]
       properties:
         status:
           type: string
-          description: Always "ok" — the probe is hard-coded to succeed.
+          description: 永远是 "ok"——探针硬编码成功。
           example: ok
         version:
           type: string
-          description: Build version injected via ldflags, for quick "what's running" checks.
+          description: 通过 ldflags 注入的构建版本号，用于快速确认"现在跑的是哪一版"。
 
     HealthResponse:
       type: object
+      description: readiness 探针响应。
       required: [status, checks, build]
       properties:
         status:
@@ -323,44 +344,51 @@ components:
             LB 不摘流；unhealthy: 关键依赖（Postgres）异常，HTTP 503，LB 摘流。
         checks:
           type: object
+          description: 每个依赖的健康状态，key 是依赖名（postgres / redis / asynq 等）。
           additionalProperties:
             type: string
             enum: [ok, unavailable, not_configured]
         build:
           type: object
           description: |
-            Build-time metadata injected via ldflags. Lets monitoring scrape
-            the version off /health without a separate endpoint.
+            构建期元信息（ldflags 注入）。让监控直接从 /health 抓版本号，不必
+            再单独开一个版本端点。
           required: [version, commit, build_time]
           properties:
             version:
               type: string
+              description: 语义化版本号或 tag 名。
             commit:
               type: string
+              description: 短 commit SHA。
             build_time:
               type: string
+              description: 构建时间戳（RFC3339，UTC）。
 
     # ---------- Business envelope ----------
     Envelope:
       type: object
       required: [code, message]
       description: |
-        Standard envelope. Success is `code: 0`. Failure carries a non-zero
-        `code`, a stable `reason` slug, and optionally `metadata.trace_id`.
+        统一响应信封。成功 `code: 0`；失败带非 0 `code`、稳定 `reason` 串
+        和可选的 `metadata.trace_id`，方便前端报问题时给后端定位日志。
       properties:
         code:
           type: integer
-          description: 0 on success; non-zero error code otherwise.
+          description: 业务错误码。0 表示成功；非 0 详见 `pkg/errcode` 与 `docs/errcodes.md`。
         message:
           type: string
+          description: 人读的默认英文文案；按 reason 查 `pkg/response.MessageFor` 表。
         reason:
           type: string
-          description: Stable machine-readable error reason (e.g. INVALID_PARAMS).
+          description: 机器可读的错误常量（如 `INVALID_PARAMS`、`DATABASE_ERROR`）。前端用它做分支判断。
         metadata:
           type: object
+          description: 附加元信息。
           properties:
             trace_id:
               type: string
+              description: 本次请求的 trace_id；与日志、X-Request-ID 头同源，用于反查链路。
 
     # ErrorEnvelope 是 Envelope 用于错误响应的别名：所有非 2xx 状态码都使用
     # 同一信封结构（code/reason/message/metadata），但 data 永远为空。专门
@@ -369,27 +397,32 @@ components:
       allOf:
         - $ref: '#/components/schemas/Envelope'
       description: |
-        Error response envelope. Same shape as Envelope but never carries data.
-        See pkg/errcode for the full code/reason catalog.
+        错误响应信封。结构与 Envelope 一致，但 `data` 永远为空。完整的
+        code / reason 目录见 `docs/errcodes.md`。
 
     # ---------- Auth ----------
     CreateTokenReq:
       type: object
+      description: 签发示例 token 的请求体。
       required: [subject]
       properties:
         subject:
           type: string
           minLength: 1
+          description: 要签进 token 的 subject（通常是用户 ID 或用户名）。不可为空。
 
     CreateTokenRes:
       type: object
+      description: 签发成功返回的 token 数据。
       required: [access_token, token_type]
       properties:
         access_token:
           type: string
+          description: "HS256 签名的 JWT。客户端把它放进 `Authorization: Bearer <token>` 头。"
         token_type:
           type: string
           enum: [Bearer]
+          description: 固定为 "Bearer"。
 
     CreateTokenEnvelope:
       allOf:
@@ -401,10 +434,12 @@ components:
 
     MeRes:
       type: object
+      description: 当前已鉴权主体信息。
       required: [subject]
       properties:
         subject:
           type: string
+          description: 从 Bearer token 解析出的 subject。
 
     MeEnvelope:
       allOf:
@@ -417,29 +452,36 @@ components:
     # ---------- Example ----------
     Example:
       type: object
+      description: 示例资源实体。
       required: [id, name, created_at, updated_at]
       properties:
         id:
           type: integer
           format: int64
           minimum: 1
+          description: 主键，单调递增。
         name:
           type: string
+          description: 名称；长度 1-255，与 DB `varchar(255)` 对齐。
         created_at:
           type: string
           format: date-time
+          description: 创建时间（RFC3339，UTC）。
         updated_at:
           type: string
           format: date-time
+          description: 最近一次更新时间（RFC3339，UTC）。
 
     CreateExampleReq:
       type: object
+      description: 创建示例的请求体。
       required: [name]
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 255
+          description: 名称；不可为空，最长 255。
 
     ExampleEnvelope:
       allOf:
@@ -451,16 +493,19 @@ components:
 
     ListExamplesRes:
       type: object
+      description: 分页查询的响应数据。
       required: [examples, total]
       properties:
         examples:
           type: array
+          description: 当前页结果。
           items:
             $ref: '#/components/schemas/Example'
         total:
           type: integer
           format: int64
           minimum: 0
+          description: 满足查询条件的总条数（用于前端算总页数）。
 
     ListExamplesEnvelope:
       allOf:
@@ -472,19 +517,23 @@ components:
 
     EnqueueExampleTaskReq:
       type: object
+      description: 投递异步任务的请求体。
       required: [name]
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 255
+          description: 任务名（业务自定义）；长度 1-255。
 
     EnqueueExampleTaskRes:
       type: object
+      description: 投递结果。
       required: [queued]
       properties:
         queued:
           type: boolean
+          description: true = 已成功入队（不代表已执行）。
 
     EnqueueExampleTaskEnvelope:
       allOf:

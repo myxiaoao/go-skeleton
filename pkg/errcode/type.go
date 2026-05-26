@@ -40,3 +40,61 @@ func (e Error) Reason() string {
 func (e Error) Error() string {
 	return e.Reason()
 }
+
+// HTTPStatusFor 是 HTTPStatus 的纯函数版——按 (code, reason) 映射 HTTP status。
+// 供 scripts/gen-errcodes.go 这种"只有原始字段、构造不出未导出字段 Error{}"
+// 的 caller 用，与 (Error).HTTPStatus() 共享同一份精确映射规则。
+//
+// 想加新精确映射只改 (Error).HTTPStatus 的 switch；本函数已委托给它。
+func HTTPStatusFor(code int, reason string) int {
+	return Error{code: code, reason: reason}.HTTPStatus()
+}
+
+// HTTPStatus 把 errcode 映射到 HTTP 状态码。pkg/response 的 WriteError /
+// WriteValidationError 据此决定 c.JSON 的第一参数。
+//
+// 映射策略：先按 Reason 做精确覆盖（语义清晰的几条），fallback 到 code
+// 段位——1xxx 客户端错误 → 400；9xxx 服务端错误 → 500；零值 / 未知 reason
+// 走 500 兜底（这种情况说明上游错码构造有问题，宁可让监控亮起来而不是
+// 静默 200 误导调用方）。
+//
+// 客户端仍以 body 里的 code 做精确判断——HTTP status 是给监控 / LB / 透明
+// 代理用的粗粒度信号，body code 是给业务用的细粒度信号；两者互不替代。
+func (e Error) HTTPStatus() int {
+	switch e.Reason() {
+	case "INVALID_PARAMS":
+		return 400
+	case "UNAUTHORIZED":
+		return 401
+	case "PERMISSION_DENIED":
+		return 403
+	case "TOO_MANY_REQUESTS":
+		return 429
+	case "REQUEST_TIMEOUT":
+		return 408
+	case "SERVICE_DISABLED":
+		// 端点在 OpenAPI spec 里有、但被配置开关关掉了（如 dev-token 在生产
+		// 环境关闭）。**不能**用 404——404 与"端点根本不存在"撞，前端无法
+		// 区分。用 503 表示"服务暂时不可用"，body code=1006 / reason 进一步
+		// 区分这是配置关而不是依赖挂。
+		return 503
+	case "QUEUE_UNAVAILABLE":
+		return 503
+	case "NOT_IMPLEMENTED_YET":
+		return 501
+	}
+	// code == 0 + reason 空 → 零值 Error，500 兜底（监控亮起，不静默 200）。
+	// code == 0 + reason 非空（理论上不该发生）也走 500，让 caller 修复构造。
+	if e.code == 0 {
+		return 500
+	}
+	code := e.Code()
+	switch {
+	case code >= 1000 && code < 2000:
+		return 400
+	case code >= 9000 && code < 10000:
+		return 500
+	default:
+		return 500
+	}
+}

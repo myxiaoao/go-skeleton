@@ -208,6 +208,20 @@ yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注
 - **≥2 个 path 参数**（如 `/users/{uid}/orders/{oid}`）：脚本 fail-fast。加 `x-handler-method` 拿到方法名后手写 handler / router。
 - **同一资源跨多个根路径**：脚本按 `x-resource` 拉到一起没问题；但 `r.Group` 路径取 ops 的最长公共前缀，多根路径时只能用最长公共部分，子路径走 `g.GET("/sub/...", ...)`——少见，能跑但不优雅。
 
+### scripts/ 脚手架 ownership（hotspot 边界）
+
+`scripts/new-endpoint.go`（~2k 行）/ `new-endpoint-check.go`（~1k 行）/ `drop-example.go`（~800 行）是已知的大文件——单文件 main 同时承载 yaml 解析 + AST 扫描 + render + 装配注入，这是 **有意保留** 的状态，不是欠的债。**拆分时机**：当且仅当出现"两个 main 之间要共享一份 OpenAPI 解析 / AST 抽取代码"时再做（提取到 `scripts/internal/*` 子包）；只是单个文件大、不构成拆分理由。
+
+测试侧已经按被测脚本拆开（`scripts/{env_verify,architecture_verify,new_endpoint,new_endpoint_check,new_endpoint_dto}_test.go` + `helpers_test.go` + `shell_scripts_test.go`），最大单测文件 ~1k 行；测试拆分独立于业务脚本拆分。
+
+工具入口集中在 `make` target：
+- `make new-endpoint NAME=<Name>` —— 生成五层骨架（+ `DRY_RUN=1` 只打印计划；`DTO=1` 反推 DTO struct）
+- `make new-endpoint-check [NAME=<Name>]` —— 只读 drift detector，不并入 `make verify`
+- `make drop-example` —— 一次性清掉 example 演示资源
+- `make scaffold-verify` —— 单跑 `scripts/` 黑盒回归（调试 new-endpoint / env-verify / architecture-verify 时用）
+
+不要直接 `go run scripts/new-endpoint.go ...` 绕开 make target——`scaffold-verify` 等回归测试通过 makefile 进入,绕开会让 fixture 路径解析、CI 集成漂移。
+
 ### 单一真相约定（重要）
 
 oapi-codegen 会生成两类东西，**区分对待**：

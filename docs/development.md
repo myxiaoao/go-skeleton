@@ -79,6 +79,8 @@ yaml 是真相源。按这个顺序：
 
 **漂移检查（drift detector）**：`make new-endpoint-check` 是只读 checker——重新解析 yaml 比对代码端，按 `[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档输出 yaml ↔ 代码漂移。**不写盘**、不删代码。改完 yaml 没跑 `make new-endpoint`、或 rename / 删 operation 后代码端残留 router 注册 / handler 方法时它都能抓到。传 `NAME=Order` 只扫单资源。不并入 `make verify`（避免 schema 调整让 PR 抖动），作为调试入口单跑；CI 想接进定时扫的话另起 job。
 
+**DTO 反推（`make new-endpoint NAME=Order DTO=1`）**：从 yaml schema 反推 service 包的请求 DTO struct（`CreateOrderReq` 等）+ handler 自动调 `ShouldBindJSON` / `ShouldBindQuery` + service 签名同步换成 `(ctx, *XxxReq)`。默认关，避免改 baseline 行为。仅支持简单 object schema（顶层 string/integer/boolean + required + min/max/minLength/maxLength 约束）；复杂形态（allOf / oneOf / anyOf / 嵌套 object / array / enum / $ref）降级生成空 struct + `// TODO` 注释指明 reason，让作者照 yaml 手写。query DTO 走 `form:` tag、body DTO 走 `json:` tag。
+
 ---
 
 ## 四、加一个 Asynq 异步任务

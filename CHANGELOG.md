@@ -33,6 +33,27 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Added
 
+- **`make new-endpoint NAME=Order DTO=1` —— yaml schema 反推 DTO（可选）**:
+  默认关；开启后从 yaml schema 反推 service 包的请求 DTO struct + handler
+  自动调 ShouldBindJSON / ShouldBindQuery + service 签名同步换成
+  `(ctx, *XxxReq)`，省掉绑参样板。
+  `scripts/new-endpoint.go` 新增 `extractRequestBodyDTO` / `extractQueryDTO` /
+  `extractDTOFromSchema` / `extractScalarField`：仅支持简单 object schema
+  （顶层 string / integer / boolean + required + min/max/minLength/maxLength
+  约束），遇到 allOf / oneOf / anyOf / 嵌套 object / array / enum / $ref
+  降级到空 struct + `// TODO` 注释指明 reason，不阻塞其他 op。
+  query DTO 用 `form:` tag（gin ShouldBindQuery 走 form / url）；body DTO
+  用 `json:` tag。模板按 `op.ReqBodyDTO != nil` / `op.QueryDTO != nil` 分
+  支生成两套形态——DTO=0 时维持原有行为，DTO=1 时按动作（List / Create /
+  Update / EnqueueTask）追加 ShouldBind + 签名扩展。
+  `--dry-run` 输出同步加 DTO 摘要段（生成成功的 + 降级的）。
+  接受 `--dto` flag 或 `DTO=1` env，与 `--dry-run` / `DRY_RUN=1` 等价。
+  `scripts/scripts_test.go` 新增 5 个回归：DTO=0 默认行为不变 / RequestBody
+  生成 binding tag / Query params 用 form tag / allOf 降级带 reason 注释 /
+  DTO=1 env 与 --dto flag 等价。
+  Makefile help / CLAUDE.md / AGENTS.md / docs/development.md /
+  docs/runbook.md 同步加 DTO 说明。
+
 - **`make new-endpoint-check` —— yaml ↔ 代码漂移只读 checker**:
   `scripts/new-endpoint-check.go`：重新解析 `api/openapi.yaml`，按
   `x-resource` (op > path) + fallback (扫 `internal/handler/*.go` 的

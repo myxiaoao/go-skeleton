@@ -142,6 +142,8 @@ make verify
 
 漂移检查：`make new-endpoint-check` 只读扫 yaml ↔ 代码漂移（`[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档），不写盘、不并 `make verify`。改完 yaml 没跑 `make new-endpoint` 或 rename / 删 operation 残留 router 注册时会被抓到；传 `NAME=Order` 只扫单资源。
 
+DTO 反推（可选）：`make new-endpoint NAME=Order DTO=1`（或 `--dto`）从 yaml schema 反推 service 请求 DTO + handler 自动 `ShouldBindJSON` / `ShouldBindQuery` + service 签名 `(ctx, *XxxReq)`。默认关；只覆盖简单 object schema，复杂 schema (allOf 等) 自动降级到空 struct + `// TODO` 让作者手写。
+
 中间件注入：yaml 里某 operation 含 `security: [{ bearerAuth: [] }]` 时，生成的 register 函数把它放进 `deps.AuthRequired` 子组；公开 operation 直接挂在 `g` 上。整组在 `deps.AuthRequired == nil` 时跳过——保持开发环境不强依赖 JWT 配置。
 
 **编译期保险**：`internal/handler/openapi.go` 里有

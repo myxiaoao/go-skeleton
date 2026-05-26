@@ -192,6 +192,7 @@ yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注
 - **鉴权**：yaml `security: [{ bearerAuth: [] }]` 自动放进 `deps.AuthRequired` 子组；非 bearerAuth 的 scheme（API key / OAuth2 / ...）当前忽略。
 - **dry-run**：`--dry-run` / `DRY_RUN=1` 跑解析 / 校验但不写盘——review 计划用。
 - **drift 检查**：`make new-endpoint-check` 只读 checker，重新解析 yaml 比对代码端，按 `[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档报漂移。**不写盘 / 不删代码**。传 `NAME=Order` 只扫单资源；不并入 `make verify`（避免 schema 调整让 PR 抖动），单跑作为调试入口。
+- **DTO 反推（可选）**：`--dto` / `DTO=1` 时从 yaml schema 反推 service 包内的请求 DTO struct（如 `CreateOrderReq`）+ handler 自动 `ShouldBindJSON` / `ShouldBindQuery` + service 签名同步换成 `(ctx, *XxxReq)`。**默认关**——避免一刀切改变骨架行为。仅支持简单 object schema（顶层 string / integer / boolean + required + min/max/minLength/maxLength）；遇到 allOf / oneOf / anyOf / 嵌套 object / array / enum / $ref 时降级到空 struct + `// TODO` 注释，让作者照 yaml 手写。query DTO 用 `form:` tag（gin `ShouldBindQuery` 不看 json）；body DTO 用 `json:` tag。
 
 不支持，需要手写的形态：
 

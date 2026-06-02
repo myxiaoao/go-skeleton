@@ -71,6 +71,9 @@ func TestBearerAuthRejectsMissingToken(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
+	if rec.Code != errcode.Unauthorized.HTTPStatus() {
+		t.Fatalf("status = %d, want %d", rec.Code, errcode.Unauthorized.HTTPStatus())
+	}
 	var body response.Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)

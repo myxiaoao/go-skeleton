@@ -90,6 +90,14 @@ func WriteError(c *gin.Context, err error) {
 	c.JSON(errcode.InternalError.HTTPStatus(), ErrorResponse(c, errcode.InternalError))
 }
 
+// AbortError 给 middleware 使用：写出 errcode 对应的 HTTP status + 错误信封，
+// 同时阻断后续 handler，并设置 metrics 业务 code。handler 层仍优先用
+// WriteError / WriteValidationError，保持调用语义清晰。
+func AbortError(c *gin.Context, errorCode errcode.Error) {
+	c.Set(MetricsCodeKey, errorCode.Code())
+	c.AbortWithStatusJSON(errorCode.HTTPStatus(), ErrorResponse(c, errorCode))
+}
+
 // WriteValidationError 写参数校验错误响应。handler 里 ShouldBind 失败统一
 // 走它，与 WriteSuccess / WriteError 三个 helper 调用形态对齐。HTTP 状态
 // 锁死成 errcode.InvalidParams.HTTPStatus()（400）—— validation 失败始终

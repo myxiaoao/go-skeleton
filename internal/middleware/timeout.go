@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +35,7 @@ func Timeout(timeout time.Duration) gin.HandlerFunc {
 			return
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			c.AbortWithStatusJSON(http.StatusOK, response.ErrorResponse(c, errcode.RequestTimeout))
+			response.AbortError(c, errcode.RequestTimeout)
 		}
 	}
 }

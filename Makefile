@@ -540,23 +540,31 @@ lint: ## golangci-lint run（需要先 make init）
 
 .PHONY: _ensure-govulncheck
 _ensure-govulncheck:
-	@want="$(GOVULNCHECK_VERSION)"; \
-	if ! command -v govulncheck >/dev/null 2>&1; then \
-		echo "Installing govulncheck $$want..."; \
-		$(GO) install golang.org/x/vuln/cmd/govulncheck@$$want; \
+	@want="$(GOVULNCHECK_VERSION)"; want_short="$${want#v}"; \
+	if command -v govulncheck >/dev/null 2>&1; then \
+		got=$$(go version -m "$$(command -v govulncheck)" 2>/dev/null | awk '$$1=="mod" && $$2=="golang.org/x/vuln" {print $$3; exit}'); \
+		if [ "$$got" = "$$want" ] || [ "$$got" = "$$want_short" ]; then \
+			echo "govulncheck $$got: ok"; exit 0; \
+		fi; \
+		echo "govulncheck $${got:-unknown} != $$want, reinstalling..."; \
 	else \
-		echo "govulncheck: ok"; \
-	fi
+		echo "Installing govulncheck $$want..."; \
+	fi; \
+	$(GO) install golang.org/x/vuln/cmd/govulncheck@$$want
 
 .PHONY: _ensure-gosec
 _ensure-gosec:
-	@want="$(GOSEC_VERSION)"; \
-	if ! command -v gosec >/dev/null 2>&1; then \
-		echo "Installing gosec $$want..."; \
-		$(GO) install github.com/securego/gosec/v2/cmd/gosec@$$want; \
+	@want="$(GOSEC_VERSION)"; want_short="$${want#v}"; \
+	if command -v gosec >/dev/null 2>&1; then \
+		got=$$(go version -m "$$(command -v gosec)" 2>/dev/null | awk '$$1=="mod" && $$2=="github.com/securego/gosec/v2" {print $$3; exit}'); \
+		if [ "$$got" = "$$want" ] || [ "$$got" = "$$want_short" ]; then \
+			echo "gosec $$got: ok"; exit 0; \
+		fi; \
+		echo "gosec $${got:-unknown} != $$want, reinstalling..."; \
 	else \
-		echo "gosec: ok"; \
-	fi
+		echo "Installing gosec $$want..."; \
+	fi; \
+	$(GO) install github.com/securego/gosec/v2/cmd/gosec@$$want
 
 .PHONY: vuln
 vuln: ## govulncheck 扫已知 CVE

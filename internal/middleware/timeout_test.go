@@ -50,8 +50,8 @@ func TestTimeoutEmitsRequestTimeoutEnvelope(t *testing.T) {
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/slow", nil))
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected HTTP 200 envelope, got %d", w.Code)
+	if w.Code != errcode.RequestTimeout.HTTPStatus() {
+		t.Fatalf("status = %d, want %d", w.Code, errcode.RequestTimeout.HTTPStatus())
 	}
 
 	var resp response.Response

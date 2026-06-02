@@ -21,7 +21,6 @@ func init() {
 }
 
 // 在 burst 内请求全部放行；超出返业务错误码 TooManyRequests。
-// 响应 HTTP 状态仍 200（统一响应协议），用 body code 区分。
 func TestIPRateLimiterAllowsWithinBurstThenBlocks(t *testing.T) {
 	const burst = 3
 	limiter := NewIPRateLimiterPerMinute(burst)
@@ -45,6 +44,9 @@ func TestIPRateLimiterAllowsWithinBurstThenBlocks(t *testing.T) {
 
 	// burst+1 应该被限流。
 	w := serve(router, "1.2.3.4:5000")
+	if w.Code != errcode.TooManyRequests.HTTPStatus() {
+		t.Fatalf("burst+1: status = %d, want %d", w.Code, errcode.TooManyRequests.HTTPStatus())
+	}
 	if code := decodeCode(t, w); code != errcode.TooManyRequests.Code() {
 		t.Errorf("burst+1: code = %d, want %d", code, errcode.TooManyRequests.Code())
 	}

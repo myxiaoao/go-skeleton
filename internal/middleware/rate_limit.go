@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net/http"
 	"sync"
 	"time"
 
@@ -61,7 +60,7 @@ func (l *IPRateLimiter) Middleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		c.AbortWithStatusJSON(http.StatusOK, response.ErrorResponse(c, errcode.TooManyRequests))
+		response.AbortError(c, errcode.TooManyRequests)
 	}
 }
 

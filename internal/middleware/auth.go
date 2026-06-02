@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
 	"go-skeleton/pkg/auth"
@@ -28,13 +26,13 @@ func AuthSubject(c *gin.Context) string {
 func BearerAuth(manager *auth.JWTManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if manager == nil {
-			c.AbortWithStatusJSON(http.StatusOK, response.ErrorResponse(c, errcode.Unauthorized))
+			response.AbortError(c, errcode.Unauthorized)
 			return
 		}
 
 		claims, err := manager.ParseToken(c.GetHeader("Authorization"))
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusOK, response.ErrorResponse(c, errcode.Unauthorized))
+			response.AbortError(c, errcode.Unauthorized)
 			return
 		}
 

@@ -55,6 +55,9 @@ func TestWriteErrorMapsKnownErrcode(t *testing.T) {
 	c.Set("trace_id", "trace-42")
 	WriteError(c, errcode.Unauthorized)
 
+	if w.Code != errcode.Unauthorized.HTTPStatus() {
+		t.Fatalf("status = %d, want %d", w.Code, errcode.Unauthorized.HTTPStatus())
+	}
 	resp := decode(t, w)
 	if resp.Code != errcode.Unauthorized.Code() {
 		t.Errorf("code = %d, want %d", resp.Code, errcode.Unauthorized.Code())
@@ -77,6 +80,29 @@ func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
 	}
 	if resp.Reason != errcode.InternalError.Reason() {
 		t.Errorf("expected reason %q, got %q", errcode.InternalError.Reason(), resp.Reason)
+	}
+}
+
+func TestAbortErrorMapsStatusAndMetricsCode(t *testing.T) {
+	c, w := newCtx()
+	AbortError(c, errcode.TooManyRequests)
+
+	if w.Code != errcode.TooManyRequests.HTTPStatus() {
+		t.Fatalf("status = %d, want %d", w.Code, errcode.TooManyRequests.HTTPStatus())
+	}
+	resp := decode(t, w)
+	if resp.Code != errcode.TooManyRequests.Code() {
+		t.Fatalf("code = %d, want %d", resp.Code, errcode.TooManyRequests.Code())
+	}
+	got, ok := c.Get(MetricsCodeKey)
+	if !ok {
+		t.Fatal("metrics code was not set")
+	}
+	if got != errcode.TooManyRequests.Code() {
+		t.Fatalf("metrics code = %v, want %d", got, errcode.TooManyRequests.Code())
+	}
+	if !c.IsAborted() {
+		t.Fatal("context was not aborted")
 	}
 }
 

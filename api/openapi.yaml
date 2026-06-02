@@ -3,18 +3,18 @@ info:
   title: go-skeleton API
   version: 0.1.0
   description: |
-    Internal API contract for the go-skeleton service.
+    go-skeleton 服务的内部 API 契约。
 
-    Convention:
-    - Responses use a uniform envelope: `{code, message, reason?, data?, metadata?}`.
-      `code = 0` means success; non-zero codes are stable business error codes
-      defined in `pkg/errcode` (1xxx client errors, 9xxx server errors).
-    - HTTP status mirrors the body code per `pkg/errcode.Error.HTTPStatus()`:
-      success → 200; 1xxx → 400/401/403/404/408/429/503; 9xxx → 500/501/503.
-      Clients should make precise decisions on `body.code`; HTTP status is a
-      coarse signal for monitoring / LB / transparent proxies.
-    - Infrastructure endpoints `/livez` and `/health` do **not** use the envelope:
-      they return 200/503 directly to drive Kubernetes probes.
+    约定：
+    - 业务响应统一使用 `{code, message, reason?, data?, metadata?}` 信封。
+      `code = 0` 表示成功；非 0 code 是 `pkg/errcode` 定义的稳定业务错误码
+      （1xxx 客户端错误，9xxx 服务端错误）。
+    - HTTP status 按 `pkg/errcode.Error.HTTPStatus()` 映射 body code：
+      成功 → 200；1xxx → 400/401/403/404/408/429/503；9xxx → 500/501/503。
+      客户端应以 `body.code` 做精确业务判断；HTTP status 只作为监控、LB、
+      透明代理使用的粗粒度信号。
+    - 基础设施端点 `/livez` 与 `/health` 不走业务信封，直接返回 200/503 给
+      Kubernetes 探针使用。
   contact:
     name: go-skeleton
 

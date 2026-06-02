@@ -9,7 +9,8 @@ import (
 
 // CORS 返回一个基于白名单的简版 CORS 中间件，只允许 allowOrigins 列出的
 // Origin。Origin 头匹配时写 Allow-Origin / Allow-Methods / Allow-Headers；
-// 不匹配时不写头，让浏览器原生拦下。OPTIONS 预检请求直接返 204。
+// 不匹配时不写头，让浏览器原生拦下。带 Origin 的非白名单 OPTIONS 预检请求
+// 显式返 403，避免监控里看起来像成功预检。
 //
 // allowCredentials 控制是否带 Access-Control-Allow-Credentials: true。
 // 本骨架默认是无状态 JWT API（Authorization 头），不需要 cookie，所以默认
@@ -26,7 +27,8 @@ func CORS(allowOrigins []string, allowCredentials bool) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
-		if origin != "" && containsOrigin(allowed, origin) {
+		originAllowed := origin != "" && containsOrigin(allowed, origin)
+		if originAllowed {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
@@ -37,6 +39,10 @@ func CORS(allowOrigins []string, allowCredentials bool) gin.HandlerFunc {
 		}
 
 		if c.Request.Method == http.MethodOptions {
+			if origin != "" && !originAllowed {
+				c.AbortWithStatus(http.StatusForbidden)
+				return
+			}
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}

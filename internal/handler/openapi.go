@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"html"
 	"net/http"
+	"strings"
 	"text/template"
 
 	"github.com/gin-gonic/gin"
@@ -85,8 +87,8 @@ const elementsVersion = "8.4.2"
 // 内网/离线环境打不开。
 //
 // 模板用 text/template（不是 html/template）：页面内嵌大段 JS，html/template
-// 会把 JS 里的 < / & 等转义破坏脚本。注入值都来自受信任的启动期 env（运维配置，
-// 非用户输入），且 Theme/Layout 已在 config.validate 限定为枚举，无注入面。
+// 会把 JS 里的 < / & 等转义破坏脚本。注入值在 safeDocsView 里预先转义，
+// Theme/Layout 另由 config.validate 限定为枚举。
 //
 // 行为要点：
 //   - router="hash"：Elements 走单页 hash 路由，不和后端路由冲突。
@@ -182,6 +184,38 @@ type docsView struct {
 	Version     string
 }
 
+// safeDocsView 把启动期 docs 配置转换成模板可直接插入的 view。docsTemplate
+// 使用 text/template，必须在进入模板前完成 HTML attribute/text escape。
+func safeDocsView(docs config.DocsConfig) docsView {
+	return docsView{
+		Title:       html.EscapeString(docs.Title),
+		Theme:       html.EscapeString(docs.Theme),
+		Layout:      html.EscapeString(docs.Layout),
+		Logo:        html.EscapeString(sanitizeDocsLogo(docs.Logo)),
+		HideTryIt:   docs.HideTryIt,
+		HideSchemas: docs.HideSchemas,
+		Version:     elementsVersion,
+	}
+}
+
+// sanitizeDocsLogo 只允许安全、可预期的 logo URL 形态，防止配置值逃逸
+// elements-api 的 logo attribute。相对路径用于同域静态资源；http(s)
+// 用于常规 CDN；data:image/ 支持小型内联图片。
+func sanitizeDocsLogo(raw string) string {
+	logo := strings.TrimSpace(raw)
+	if logo == "" {
+		return ""
+	}
+	lower := strings.ToLower(logo)
+	if strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(lower, "http://") ||
+		(strings.HasPrefix(logo, "/") && !strings.HasPrefix(logo, "//")) ||
+		strings.HasPrefix(lower, "data:image/") {
+		return logo
+	}
+	return ""
+}
+
 // OpenAPIHandler 把 embed 进二进制的 OpenAPI 3.1 spec 以 JSON 暴露给客户端，
 // 用于前端导入 Postman / Bruno / Insomnia 等工具；同时通过 Docs 提供基于
 // Stoplight Elements 的 /docs 在线文档页。docsPage 在构造时按启动期配置一次性
@@ -195,15 +229,7 @@ type OpenAPIHandler struct {
 // 暴露而非静默降级。
 func NewOpenAPIHandler(docs config.DocsConfig) *OpenAPIHandler {
 	var buf bytes.Buffer
-	if err := docsTemplate.Execute(&buf, docsView{
-		Title:       docs.Title,
-		Theme:       docs.Theme,
-		Layout:      docs.Layout,
-		Logo:        docs.Logo,
-		HideTryIt:   docs.HideTryIt,
-		HideSchemas: docs.HideSchemas,
-		Version:     elementsVersion,
-	}); err != nil {
+	if err := docsTemplate.Execute(&buf, safeDocsView(docs)); err != nil {
 		panic("handler: render docs page: " + err.Error())
 	}
 	return &OpenAPIHandler{docsPage: buf.Bytes()}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,23 @@ import (
 
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+func TestServerMetricsFailedState(t *testing.T) {
+	srv := &Server{}
+	if srv.MetricsFailed() {
+		t.Fatal("MetricsFailed() = true before any runtime error")
+	}
+
+	srv.markMetricsFailed(http.ErrServerClosed)
+	if srv.MetricsFailed() {
+		t.Fatal("MetricsFailed() = true after normal server close")
+	}
+
+	srv.markMetricsFailed(errors.New("listener closed unexpectedly"))
+	if !srv.MetricsFailed() {
+		t.Fatal("MetricsFailed() = false after metrics runtime error")
+	}
 }
 
 func testRegistryForServer(t *testing.T, metricsAddr string) *bootstrap.Registry {

@@ -114,8 +114,7 @@ type ListExamplesReq struct {
 	Offset int `form:"offset" binding:"omitempty,min=0"`
 }
 
-// ListExamplesRes 是分页列表响应。total 在默认 READ COMMITTED 下是近似值，
-// 见 repository.List 的快照一致性说明。
+// ListExamplesRes 是分页列表响应。total 和 examples 来自同一只读事务快照。
 type ListExamplesRes struct {
 	Examples []model.Example `json:"examples"`
 	Total    int64           `json:"total"`

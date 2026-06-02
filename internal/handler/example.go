@@ -45,8 +45,7 @@ func (h *ExampleHandler) Create(c *gin.Context) {
 	response.WriteSuccess(c, example)
 }
 
-// List 处理 GET /api/v1/examples：返回分页列表 + total（近似值，
-// 见 repository.List 的快照一致性说明）。
+// List 处理 GET /api/v1/examples：返回分页列表 + total。
 func (h *ExampleHandler) List(c *gin.Context) {
 	var req service.ListExamplesReq
 	if err := c.ShouldBindQuery(&req); err != nil {

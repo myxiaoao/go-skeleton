@@ -163,3 +163,48 @@ func TestDocsConfigRendering(t *testing.T) {
 		})
 	}
 }
+
+func TestDocsConfigEscapesTemplateValues(t *testing.T) {
+	body := renderDocs(t, config.DocsConfig{
+		Title:  `<script>alert("x")</script>`,
+		Theme:  "light",
+		Layout: `sidebar" bad="1`,
+		Logo:   `" onerror="alert(1)`,
+	}).Body.String()
+
+	if strings.Contains(body, `<script>alert("x")</script>`) {
+		t.Fatal("expected raw script title to be escaped")
+	}
+	if !strings.Contains(body, `&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt;`) {
+		t.Fatalf("expected escaped title, got body: %s", body)
+	}
+	if strings.Contains(body, `layout="sidebar" bad="1"`) {
+		t.Fatal("expected layout attribute injection to be escaped")
+	}
+	if strings.Contains(body, `onerror=`) || strings.Contains(body, `logo="`) {
+		t.Fatal("expected unsafe logo to be dropped")
+	}
+}
+
+func TestDocsLogoSanitizerAllowsExpectedSources(t *testing.T) {
+	tests := []struct {
+		name string
+		logo string
+		want string
+	}{
+		{name: "https", logo: "https://example.com/logo.svg", want: "https://example.com/logo.svg"},
+		{name: "http", logo: "http://example.com/logo.svg", want: "http://example.com/logo.svg"},
+		{name: "relative path", logo: "/assets/logo.svg", want: "/assets/logo.svg"},
+		{name: "data image", logo: "data:image/png;base64,abc", want: "data:image/png;base64,abc"},
+		{name: "javascript", logo: "javascript:alert(1)", want: ""},
+		{name: "protocol relative", logo: "//evil.example.com/logo.svg", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeDocsLogo(tt.logo); got != tt.want {
+				t.Fatalf("sanitizeDocsLogo(%q) = %q, want %q", tt.logo, got, tt.want)
+			}
+		})
+	}
+}

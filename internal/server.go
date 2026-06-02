@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,7 @@ type Server struct {
 	Handlers           *HTTPHandlers
 	rateLimiter        *middleware.IPRateLimiter
 	stopMetricsCollect context.CancelFunc
+	metricsFailed      atomic.Bool
 }
 
 // NewServer 把 handler / 中间件 / 底层 http.Server 一次性装配齐。reg 不全
@@ -172,12 +174,7 @@ func (s *Server) Run(onReady func()) error {
 			return fmt.Errorf("listen metrics on %s: %w", s.MetricsHTTP.Addr, err)
 		}
 		go func() {
-			if err := s.MetricsHTTP.Serve(metricsLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				// metrics 端运行期异常不应让业务也 fail——独立 goroutine 无法把
-				// err propagate 出去，走 applog 记一条 error 让 SRE 能告警。
-				// Shutdown 时返回的 ErrServerClosed 被屏蔽，不当 error。
-				applog.L().Error("metrics server error", zap.Error(err))
-			}
+			s.markMetricsFailed(s.MetricsHTTP.Serve(metricsLn))
 		}()
 	}
 
@@ -188,6 +185,24 @@ func (s *Server) Run(onReady func()) error {
 		return fmt.Errorf("serve http server: %w", err)
 	}
 	return nil
+}
+
+// MetricsFailed 暴露独立 metrics listener 是否发生过运行期异常。它不包含
+// Shutdown 期间的 http.ErrServerClosed，主要给测试 / 外部监控钩子查询。
+func (s *Server) MetricsFailed() bool {
+	return s != nil && s.metricsFailed.Load()
+}
+
+func (s *Server) markMetricsFailed(err error) {
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		return
+	}
+	if s != nil {
+		s.metricsFailed.Store(true)
+	}
+	// metrics 端运行期异常不应让业务也 fail——独立 goroutine 无法把 err
+	// propagate 出去，走 applog 记一条 error 让 SRE 能告警。
+	applog.L().Error("metrics server error", zap.Error(err))
 }
 
 // Shutdown 优雅停服：先停限流器后台 goroutine + metrics collector，再让

@@ -75,3 +75,56 @@ func TestCORSDoesNotAllowOriginsByDefault(t *testing.T) {
 		t.Fatalf("expected no default credentials header, got %q", got)
 	}
 }
+
+func TestCORSPreflightAllowedOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(CORS([]string{"https://app.example.com"}, false))
+
+	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected allowed preflight status 204, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("expected allowed origin header, got %q", got)
+	}
+}
+
+func TestCORSPreflightRejectsDisallowedOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(CORS([]string{"https://app.example.com"}, false))
+
+	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected disallowed preflight status 403, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected no allow origin header, got %q", got)
+	}
+}
+
+func TestCORSOptionsWithoutOriginKeepsNoContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(CORS([]string{"https://app.example.com"}, false))
+
+	req := httptest.NewRequest(http.MethodOptions, "/ping", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected non-CORS OPTIONS status 204, got %d", rec.Code)
+	}
+}

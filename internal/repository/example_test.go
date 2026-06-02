@@ -158,7 +158,7 @@ func TestExampleRepositoryListBuildsCountAndPaginationQuery(t *testing.T) {
 	db := newDryRunDB(t, capture)
 	repo := NewExampleRepository(db)
 
-	examples, total, err := repo.List(context.Background(), 10, 3)
+	examples, total, err := repo.List(WithTx(context.Background(), db), 10, 3)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

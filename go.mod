@@ -1,6 +1,6 @@
 module go-skeleton
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/coreos/go-systemd/v22 v22.7.0

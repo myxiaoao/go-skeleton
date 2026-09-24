@@ -69,7 +69,8 @@ func TestNewTraceIDJoinsTrimmedParts(t *testing.T) {
 
 func TestFromContextReusesCachedLogger(t *testing.T) {
 	ctx := WithTraceID(context.Background(), "t-1")
-	if FromContext(ctx) != FromContext(ctx) {
+	first, second := FromContext(ctx), FromContext(ctx)
+	if first != second {
 		t.Error("FromContext should reuse the trace-bound logger cached in ctx")
 	}
 	if FromContext(context.Background()) != L() {

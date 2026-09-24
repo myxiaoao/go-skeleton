@@ -28,7 +28,7 @@ LDFLAGS  ?= -s -w \
 	-X 'go-skeleton/pkg/buildinfo.BuildTime=$(BUILD_TIME)'
 
 # 工具链版本固定。升级时改这里 + 跑 make init 重新装，让 CI / 队友复现一致。
-GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_LINT_VERSION ?= v2.13.2
 OAPI_CODEGEN_VERSION  ?= v2.7.0
 # 格式化工具：gofumpt 收紧 gofmt 风格细节（多余空行、struct 对齐等），
 # gci 用显式 sections 控制 import 分组（standard / default / prefix），

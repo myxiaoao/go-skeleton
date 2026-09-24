@@ -27,6 +27,10 @@ LDFLAGS  ?= -s -w \
 	-X 'go-skeleton/pkg/buildinfo.Commit=$(COMMIT)' \
 	-X 'go-skeleton/pkg/buildinfo.BuildTime=$(BUILD_TIME)'
 
+# 附加给 `make test` 的 go test 参数。CI 用 `make verify GO_TEST_FLAGS=-race`
+# 让 verify 里唯一一轮单测同时开 race detector，避免整套测试跑两遍。
+GO_TEST_FLAGS ?=
+
 # 工具链版本固定。升级时改这里 + 跑 make init 重新装，让 CI / 队友复现一致。
 GOLANGCI_LINT_VERSION ?= v2.13.2
 OAPI_CODEGEN_VERSION  ?= v2.7.0
@@ -610,8 +614,8 @@ sec: vuln gosec ## 安全扫描一站式（govulncheck + gosec）
 # 单测的偶发波动算到集成 job 头上。
 
 .PHONY: test
-test: ## 跑单元测试（不含 integration tag）
-	$(GO) test ./...
+test: ## 跑单元测试（不含 integration tag；GO_TEST_FLAGS 可追加参数如 -race）
+	$(GO) test $(GO_TEST_FLAGS) ./...
 
 .PHONY: test-integration
 test-integration: ## 跑集成测试（需要 make dev-up 起 Postgres + Redis）；-run Integration 只跑集成测试，不重跑单测

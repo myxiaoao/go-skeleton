@@ -22,10 +22,21 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Go
+        id: setup-go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
+
+      # 缓存 make init / make sec 装到 ~/go/bin 的工具二进制（setup-go 只缓存
+      # GOMODCACHE / GOCACHE）。key 带 Go 版本：旧 Go 编译的分析工具处理不了新
+      # 版本代码；工具版本变了 Makefile 的 _ensure-* 会自动重装，restore-keys 安全。
+      - name: Cache tool binaries
+        uses: actions/cache@v6
+        with:
+          path: ~/go/bin
+          key: ${{ runner.os }}-gobin-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('Makefile') }}
+          restore-keys: ${{ runner.os }}-gobin-${{ steps.setup-go.outputs.go-version }}-
 
       - name: Install ShellCheck
         run: |
@@ -36,10 +47,8 @@ jobs:
         run: make init
 
       - name: Verify
-        run: make verify
-
-      - name: Race detector
-        run: make test-race
+        # 单测只跑一轮并开 race detector，不再额外跑 make test-race。
+        run: make verify GO_TEST_FLAGS=-race
 
   # integration tests 跟单元测试解耦：需要真实 Postgres + Redis，跑得慢；
   # 但留着不跑会让 //go:build integration 的代码慢慢腐烂。这里用 GitHub

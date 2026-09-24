@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,13 +77,11 @@ func (m *JWTManager) GenerateToken(subject string) (string, error) {
 
 	now := m.now().UTC()
 	claims := Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   subject,
-			Issuer:    m.issuer,
-			IssuedAt:  jwt.NewNumericDate(now),
-			NotBefore: jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
-		},
+		Subject:   subject,
+		Issuer:    m.issuer,
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
 	}
 
 	return m.GenerateTokenWithClaims(claims)
@@ -98,9 +97,7 @@ func (m *JWTManager) GenerateTokenWithClaims(claims Claims) (string, error) {
 	if claims.ExpiresAt == nil {
 		return "", ErrMissingTTL
 	}
-	if claims.Issuer == "" {
-		claims.Issuer = m.issuer
-	}
+	claims.Issuer = cmp.Or(claims.Issuer, m.issuer)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(m.secret)
 	if err != nil {

@@ -10,6 +10,7 @@
 package metrics
 
 import (
+	"cmp"
 	"net/http"
 	"strconv"
 	"time"
@@ -114,10 +115,7 @@ func (r *Registry) HTTPMiddleware() gin.HandlerFunc {
 
 		r.inflight.Dec()
 
-		route := c.FullPath()
-		if route == "" {
-			route = "not_found"
-		}
+		route := cmp.Or(c.FullPath(), "not_found")
 		status := strconv.Itoa(c.Writer.Status())
 		method := c.Request.Method
 		code := businessCodeLabel(c)

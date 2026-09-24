@@ -1,6 +1,7 @@
 package log
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -206,9 +207,7 @@ func Error(err error) zap.Field {
 // parseLevel 把字符串 level 翻译成 zapcore.Level。空串当 "info" 处理。
 func parseLevel(level string) (zapcore.Level, error) {
 	var parsed zapcore.Level
-	if level == "" {
-		level = "info"
-	}
+	level = cmp.Or(level, "info")
 	if err := parsed.Set(level); err != nil {
 		return zapcore.InfoLevel, fmt.Errorf("parse log level %q: %w", level, err)
 	}

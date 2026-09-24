@@ -80,8 +80,7 @@ func WriteSuccess(c *gin.Context, data any) {
 // 直接用对应 Code / Reason + HTTPStatus；其他类型一律压成 INTERNAL_ERROR
 // (HTTP 500)，避免泄漏底层错误细节给客户端。
 func WriteError(c *gin.Context, err error) {
-	var ec errcode.Error
-	if errors.As(err, &ec) {
+	if ec, ok := errors.AsType[errcode.Error](err); ok {
 		c.Set(MetricsCodeKey, ec.Code())
 		c.JSON(ec.HTTPStatus(), ErrorResponse(c, ec))
 		return

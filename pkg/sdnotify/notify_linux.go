@@ -33,13 +33,12 @@ func Watchdog(ctx context.Context, interval time.Duration) {
 		interval = 10 * time.Second
 	}
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	tick := time.Tick(interval)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-tick:
 			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
 		}
 	}

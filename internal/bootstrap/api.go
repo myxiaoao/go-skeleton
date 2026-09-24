@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"go-skeleton/config"
@@ -111,9 +112,9 @@ type cachePinger interface {
 // 释放已开资源，nil 元素与单次失败都被静默吞掉——这是 init 失败兜底，
 // 不需要再传播。
 func runCleanups(cleanups []func() error) {
-	for i := len(cleanups) - 1; i >= 0; i-- {
-		if cleanups[i] != nil {
-			_ = cleanups[i]()
+	for _, cleanup := range slices.Backward(cleanups) {
+		if cleanup != nil {
+			_ = cleanup()
 		}
 	}
 }

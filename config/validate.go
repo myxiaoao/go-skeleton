@@ -67,6 +67,11 @@ func validate(cfg *Config) error {
 		strings.TrimSpace(cfg.Auth.JWTIssuer) == "" {
 		add("JWT_ISSUER must be non-empty when JWT_SECRET is set; empty issuer disables iss claim validation")
 	}
+	// JWT_TTL <= 0 时 JWTManager.GenerateToken 一律返 ErrMissingTTL，签不出任何
+	// token；这是纯运维错配，拦在启动期而不是让每次签发都失败。
+	if strings.TrimSpace(cfg.Auth.JWTSecret) != "" && cfg.Auth.JWTTTL <= 0 {
+		add(fmt.Sprintf("JWT_TTL must be > 0 when JWT_SECRET is set, got %s", cfg.Auth.JWTTTL))
+	}
 
 	// 生产环境安全 guard：把"复制 .env.example 上生产"这种最常见的事故拦在
 	// 启动期。development 下放行，方便本地快速起服。限流 0（无限）不在这里

@@ -125,6 +125,23 @@ func TestValidateTableDriven(t *testing.T) {
 			wantInclude: "JWT_ISSUER",
 		},
 		{
+			name: "JWT_SECRET 非空时 JWT_TTL 必须 > 0",
+			mutate: func(c *Config) {
+				c.Auth.JWTSecret = "deadbeef"
+				c.Auth.JWTTTL = 0
+			},
+			wantErr:     true,
+			wantInclude: "JWT_TTL",
+		},
+		{
+			name: "JWT_SECRET 为空时不校验 JWT_TTL",
+			mutate: func(c *Config) {
+				c.Auth.JWTSecret = ""
+				c.Auth.JWTTTL = 0
+			},
+			wantErr: false,
+		},
+		{
 			name: "JWT_SECRET 为空时不校验 issuer",
 			mutate: func(c *Config) {
 				c.Auth.JWTSecret = ""
@@ -264,6 +281,9 @@ func defaultValidConfig() *Config {
 		},
 		Log: LogConfig{
 			Format: "json",
+		},
+		Auth: AuthConfig{
+			JWTTTL: 24 * time.Hour,
 		},
 		Worker: WorkerConfig{
 			Concurrency: 10,

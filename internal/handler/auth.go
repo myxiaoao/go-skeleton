@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"errors"
+
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"go-skeleton/internal/middleware"
 	"go-skeleton/pkg/auth"
 	"go-skeleton/pkg/errcode"
+	applog "go-skeleton/pkg/log"
 	"go-skeleton/pkg/response"
 )
 
@@ -61,8 +65,14 @@ func (h *AuthHandler) CreateToken(c *gin.Context) {
 	}
 
 	token, err := h.manager.GenerateToken(req.Subject)
-	if err != nil {
+	if errors.Is(err, auth.ErrMissingSubject) {
 		response.WriteError(c, errcode.InvalidParams)
+		return
+	}
+	if err != nil {
+		// 其余错误（如 JWT_TTL 错配）是服务端问题，不能伪装成客户端参数错误。
+		applog.FromContext(c.Request.Context()).Error("generate token", zap.Error(err))
+		response.WriteError(c, errcode.InternalError)
 		return
 	}
 

@@ -33,7 +33,8 @@ formatters:
       # third-party and the linter flags random files as "not gofumpt-ed".
       # https://github.com/golangci/golangci-lint/issues/4004
       module-path: go-skeleton
-      extra-rules: true
+      extra:
+        group-params: true
     gci:
       # standard         → "errors", "net/http", ...
       # default          → everything not matched (third-party deps)

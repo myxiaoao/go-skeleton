@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -38,7 +37,7 @@ func TestZapGormLoggerTrace(t *testing.T) {
 			core, logs := observer.New(zapcore.DebugLevel)
 			defer applog.SetLogger(zap.New(core))()
 
-			ctx := applog.WithTraceID(context.Background(), "trace-db")
+			ctx := applog.WithTraceID(t.Context(), "trace-db")
 			l := newGormLogger("").LogMode(c.level)
 			l.Trace(ctx, c.begin, func() (string, int64) { return "SELECT 1", 1 }, c.err)
 
@@ -69,8 +68,8 @@ func TestZapGormLoggerPrintfRespectsLevel(t *testing.T) {
 	defer applog.SetLogger(zap.New(core))()
 
 	l := newGormLogger("error")
-	l.Warn(context.Background(), "dropped %d", 1)
-	l.Error(context.Background(), "kept %d", 2)
+	l.Warn(t.Context(), "dropped %d", 1)
+	l.Error(t.Context(), "kept %d", 2)
 
 	entries := logs.All()
 	if len(entries) != 1 || entries[0].Message != "kept 2" {

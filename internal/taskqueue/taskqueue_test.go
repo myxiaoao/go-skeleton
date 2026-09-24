@@ -1,7 +1,6 @@
 package taskqueue
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -16,7 +15,7 @@ func TestNewQueueNil(t *testing.T) {
 
 func TestQueueUnavailable(t *testing.T) {
 	var q *Queue
-	_, err := q.Enqueue(context.Background(), asynq.NewTask("example", nil))
+	_, err := q.Enqueue(t.Context(), asynq.NewTask("example", nil))
 	if !errors.Is(err, ErrQueueUnavailable) {
 		t.Fatalf("expected ErrQueueUnavailable, got %v", err)
 	}
@@ -31,7 +30,7 @@ func TestQueueRejectsNilTask(t *testing.T) {
 	}()
 
 	q := NewQueue(client)
-	_, err := q.Enqueue(context.Background(), nil)
+	_, err := q.Enqueue(t.Context(), nil)
 	if !errors.Is(err, ErrNilTask) {
 		t.Fatalf("expected ErrNilTask, got %v", err)
 	}

@@ -1,7 +1,6 @@
 package log
 
 import (
-	"context"
 	"testing"
 
 	"go.uber.org/zap"
@@ -9,7 +8,7 @@ import (
 )
 
 func TestTraceIDFromMissing(t *testing.T) {
-	if got := TraceIDFrom(context.Background()); got != "" {
+	if got := TraceIDFrom(t.Context()); got != "" {
 		t.Errorf("TraceIDFrom on empty ctx = %q, want empty", got)
 	}
 	//nolint:staticcheck // 故意传 nil ctx，验证 nil-safe 分支
@@ -19,14 +18,14 @@ func TestTraceIDFromMissing(t *testing.T) {
 }
 
 func TestWithTraceIDAndTraceIDFromRoundtrip(t *testing.T) {
-	ctx := WithTraceID(context.Background(), "abc")
+	ctx := WithTraceID(t.Context(), "abc")
 	if got := TraceIDFrom(ctx); got != "abc" {
 		t.Errorf("roundtrip = %q, want abc", got)
 	}
 }
 
 func TestEnsureTraceIDPreservesExisting(t *testing.T) {
-	ctx := WithTraceID(context.Background(), "first")
+	ctx := WithTraceID(t.Context(), "first")
 	ctx = EnsureTraceID(ctx, "second")
 	if got := TraceIDFrom(ctx); got != "first" {
 		t.Errorf("EnsureTraceID overwrote existing: %q", got)
@@ -34,14 +33,14 @@ func TestEnsureTraceIDPreservesExisting(t *testing.T) {
 }
 
 func TestEnsureTraceIDFillsWhenMissing(t *testing.T) {
-	ctx := EnsureTraceID(context.Background(), " trace-1 ")
+	ctx := EnsureTraceID(t.Context(), " trace-1 ")
 	if got := TraceIDFrom(ctx); got != "trace-1" {
 		t.Errorf("EnsureTraceID = %q, want trace-1 (trimmed)", got)
 	}
 }
 
 func TestEnsureTraceIDIgnoresEmptyInput(t *testing.T) {
-	ctx := EnsureTraceID(context.Background(), "   ")
+	ctx := EnsureTraceID(t.Context(), "   ")
 	if got := TraceIDFrom(ctx); got != "" {
 		t.Errorf("expected no trace id from blank input, got %q", got)
 	}
@@ -68,18 +67,18 @@ func TestNewTraceIDJoinsTrimmedParts(t *testing.T) {
 }
 
 func TestFromContextReusesCachedLogger(t *testing.T) {
-	ctx := WithTraceID(context.Background(), "t-1")
+	ctx := WithTraceID(t.Context(), "t-1")
 	first, second := FromContext(ctx), FromContext(ctx)
 	if first != second {
 		t.Error("FromContext should reuse the trace-bound logger cached in ctx")
 	}
-	if FromContext(context.Background()) != L() {
+	if FromContext(t.Context()) != L() {
 		t.Error("FromContext without trace id should return the global logger")
 	}
 }
 
 func TestFromContextFollowsReplacedGlobalLogger(t *testing.T) {
-	ctx := WithTraceID(context.Background(), "t-2")
+	ctx := WithTraceID(t.Context(), "t-2")
 
 	core, logs := observer.New(zap.InfoLevel)
 	defer SetLogger(zap.New(core))()

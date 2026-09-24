@@ -58,12 +58,12 @@ func TestWithTxAndDBFromContext(t *testing.T) {
 	base := new(gorm.DB)
 	tx := new(gorm.DB)
 
-	ctx := WithTx(context.Background(), tx)
+	ctx := WithTx(t.Context(), tx)
 	if got := dbFromContext(ctx, base); got != tx {
 		t.Fatalf("expected tx db from context, got %#v", got)
 	}
 
-	if got := dbFromContext(context.Background(), base); got != base {
+	if got := dbFromContext(t.Context(), base); got != base {
 		t.Fatalf("expected fallback base db, got %#v", got)
 	}
 }
@@ -77,7 +77,7 @@ func TestExampleRepositoryCreateUsesTransactionFromContext(t *testing.T) {
 	repo := NewExampleRepository(baseDB)
 	example := &model.Example{Name: "example"}
 
-	if err := repo.Create(WithTx(context.Background(), txDB), example); err != nil {
+	if err := repo.Create(WithTx(t.Context(), txDB), example); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -93,17 +93,17 @@ func TestExampleRepositoryCreateUsesTransactionFromContext(t *testing.T) {
 // db=nil 返 errNilDB。fn=nil 优先级高于 db=nil（调用者既没说要干什么、
 // 又没给连接，先抱怨更具体的 fn）。
 func TestInTxNilArgs(t *testing.T) {
-	if err := InTx(context.Background(), nil, nil); !errors.Is(err, errNilTxFn) {
+	if err := InTx(t.Context(), nil, nil); !errors.Is(err, errNilTxFn) {
 		t.Fatalf("fn=nil err = %v, want errNilTxFn", err)
 	}
-	if err := InTx(context.Background(), nil, func(context.Context) error { return nil }); !errors.Is(err, errNilDB) {
+	if err := InTx(t.Context(), nil, func(context.Context) error { return nil }); !errors.Is(err, errNilDB) {
 		t.Fatalf("db=nil err = %v, want errNilDB", err)
 	}
 	// InTxWithOptions 同样的兜底。
-	if err := InTxWithOptions(context.Background(), nil, &sql.TxOptions{ReadOnly: true}, nil); !errors.Is(err, errNilTxFn) {
+	if err := InTxWithOptions(t.Context(), nil, &sql.TxOptions{ReadOnly: true}, nil); !errors.Is(err, errNilTxFn) {
 		t.Fatalf("WithOptions fn=nil err = %v, want errNilTxFn", err)
 	}
-	if err := InTxWithOptions(context.Background(), nil, nil, func(context.Context) error { return nil }); !errors.Is(err, errNilDB) {
+	if err := InTxWithOptions(t.Context(), nil, nil, func(context.Context) error { return nil }); !errors.Is(err, errNilDB) {
 		t.Fatalf("WithOptions db=nil err = %v, want errNilDB", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestInTxNilArgs(t *testing.T) {
 // 的 opts 必须被忽略（isolation 只能在最外层 BeginTx 定，子事务改不动）。
 func TestInTxReusesActiveTransaction(t *testing.T) {
 	stubTx := new(gorm.DB)
-	ctx := WithTx(context.Background(), stubTx)
+	ctx := WithTx(t.Context(), stubTx)
 
 	called := 0
 	if err := InTx(ctx, nil, func(inner context.Context) error {
@@ -146,7 +146,7 @@ func TestInTxReusesActiveTransaction(t *testing.T) {
 // 回滚事务而不是吞掉错误。嵌套路径（ctx 已有事务）测起来最直接。
 func TestInTxPropagatesFnError(t *testing.T) {
 	want := errors.New("biz boom")
-	ctx := WithTx(context.Background(), new(gorm.DB))
+	ctx := WithTx(t.Context(), new(gorm.DB))
 	err := InTxWithOptions(ctx, nil, nil, func(context.Context) error { return want })
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
@@ -158,7 +158,7 @@ func TestExampleRepositoryListBuildsCountAndPaginationQuery(t *testing.T) {
 	db := newDryRunDB(t, capture)
 	repo := NewExampleRepository(db)
 
-	examples, total, err := repo.List(WithTx(context.Background(), db), 10, 3)
+	examples, total, err := repo.List(WithTx(t.Context(), db), 10, 3)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

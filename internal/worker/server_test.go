@@ -75,7 +75,7 @@ func TestTaskLogContextUsesPayloadTraceID(t *testing.T) {
 	payload := []byte(`{"trace_id":"` + wantTrace + `","other":1}`)
 	tsk := asynq.NewTask("example:noop", payload)
 
-	ctx, fields := taskLogContext(context.Background(), tsk, taskRuntimeMetadata{TaskID: "tid"})
+	ctx, fields := taskLogContext(t.Context(), tsk, taskRuntimeMetadata{TaskID: "tid"})
 
 	if got := applog.TraceIDFrom(ctx); got != wantTrace {
 		t.Errorf("trace_id in ctx = %q, want %q", got, wantTrace)
@@ -89,7 +89,7 @@ func TestTaskLogContextUsesPayloadTraceID(t *testing.T) {
 // trace_source=asynq_task。这是任务本身触发（非来自 API enqueue）的标记。
 func TestTaskLogContextFallsBackToTaskID(t *testing.T) {
 	tsk := asynq.NewTask("example:noop", []byte(`{}`))
-	ctx, fields := taskLogContext(context.Background(), tsk, taskRuntimeMetadata{TaskID: "tid-7"})
+	ctx, fields := taskLogContext(t.Context(), tsk, taskRuntimeMetadata{TaskID: "tid-7"})
 
 	got := applog.TraceIDFrom(ctx)
 	if got == "" {
@@ -117,7 +117,7 @@ func TestTraceMiddlewareSurfacesHandlerError(t *testing.T) {
 	}
 	wrapped := traceMiddleware(handler, stub)
 
-	err := wrapped.ProcessTask(context.Background(), asynq.NewTask("t", []byte(`{}`)))
+	err := wrapped.ProcessTask(t.Context(), asynq.NewTask("t", []byte(`{}`)))
 	if !errors.Is(err, wantErr) {
 		t.Errorf("traceMiddleware swallowed error: got %v, want %v", err, wantErr)
 	}

@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -17,13 +16,13 @@ import (
 
 type mockInspector struct {
 	mu        sync.Mutex
-	callCount int32
+	callCount atomic.Int32
 	infos     map[string]*asynq.QueueInfo
 	errFor    map[string]error
 }
 
 func (m *mockInspector) GetQueueInfo(queue string) (*asynq.QueueInfo, error) {
-	atomic.AddInt32(&m.callCount, 1)
+	m.callCount.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err, ok := m.errFor[queue]; ok {
@@ -45,15 +44,14 @@ func TestRegistry_StartAsynqCollector_PopulatesGauges(t *testing.T) {
 		},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// 起步抓一次同步发生，goroutine 起来后周期采集；这里不用等 ticker，第
 	// 一次抓数据就足够断言。
 	r.StartAsynqCollector(ctx, inspector, []string{"critical", "default"}, time.Hour, nil)
 
 	// 给 goroutine 一个调度窗口完成首次抓取。
 	deadline := time.Now().Add(time.Second)
-	for atomic.LoadInt32(&inspector.callCount) < 2 && time.Now().Before(deadline) {
+	for inspector.callCount.Load() < 2 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -83,16 +81,15 @@ func TestRegistry_StartAsynqCollector_InspectorErrorLogged(t *testing.T) {
 		errFor: map[string]error{"critical": errors.New("redis down")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// 这次 collector 抓失败也不应 panic / 退出 goroutine；行为兜底验证。
 	r.StartAsynqCollector(ctx, inspector, []string{"critical"}, time.Hour, nil)
 
 	deadline := time.Now().Add(time.Second)
-	for atomic.LoadInt32(&inspector.callCount) < 1 && time.Now().Before(deadline) {
+	for inspector.callCount.Load() < 1 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if atomic.LoadInt32(&inspector.callCount) == 0 {
+	if inspector.callCount.Load() == 0 {
 		t.Fatal("expected at least one inspector call before deadline")
 	}
 }

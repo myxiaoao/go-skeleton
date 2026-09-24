@@ -147,8 +147,8 @@ func extractUpSection(body string) string {
 		return ""
 	}
 	rest := body[up:]
-	if down := strings.Index(rest, "-- +goose Down"); down >= 0 {
-		return rest[:down]
+	if before, _, ok := strings.Cut(rest, "-- +goose Down"); ok {
+		return before
 	}
 	return rest
 }

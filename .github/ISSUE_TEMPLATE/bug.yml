@@ -67,7 +67,7 @@ body:
     attributes:
       label: 运行环境
       placeholder: |
-        Go: go1.26.x
+        Go: go1.27.x
         OS: ubuntu 22.04 / macOS 14.x
         Postgres: 16
         Redis: 7

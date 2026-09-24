@@ -6,7 +6,7 @@
 
 ## 技术栈
 
-Go 1.26+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
+Go 1.27+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## 顶层目录
 

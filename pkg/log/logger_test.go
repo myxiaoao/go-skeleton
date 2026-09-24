@@ -3,6 +3,9 @@ package log
 import (
 	"context"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestTraceIDFromMissing(t *testing.T) {
@@ -61,5 +64,31 @@ func TestNewTraceIDJoinsTrimmedParts(t *testing.T) {
 				t.Errorf("NewTraceID(%v) = %q, want %q", c.parts, got, c.want)
 			}
 		})
+	}
+}
+
+func TestFromContextReusesCachedLogger(t *testing.T) {
+	ctx := WithTraceID(context.Background(), "t-1")
+	if FromContext(ctx) != FromContext(ctx) {
+		t.Error("FromContext should reuse the trace-bound logger cached in ctx")
+	}
+	if FromContext(context.Background()) != L() {
+		t.Error("FromContext without trace id should return the global logger")
+	}
+}
+
+func TestFromContextFollowsReplacedGlobalLogger(t *testing.T) {
+	ctx := WithTraceID(context.Background(), "t-2")
+
+	core, logs := observer.New(zap.InfoLevel)
+	defer SetLogger(zap.New(core))()
+
+	FromContext(ctx).Info("hello")
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("got %d log entries, want 1", len(entries))
+	}
+	if got := entries[0].ContextMap()["trace_id"]; got != "t-2" {
+		t.Errorf("trace_id = %v, want t-2", got)
 	}
 }

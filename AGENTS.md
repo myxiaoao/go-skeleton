@@ -200,7 +200,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 
 请求级 `context.Context` 从 handler 一路传到 repository，**业务层禁止用 `context.Background()` 替换**。它带着 `trace_id`、超时、取消信号，断了会导致：HTTP 已超时但 DB 查询还在傻跑。
 
-写测试可以用 `context.Background()`，业务代码不行。
+测试里用 `t.Context()`（随测试结束自动取消），业务代码禁止用 `context.Background()` 替换。
 
 ## 环境变量
 
@@ -232,6 +232,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 
 下面这些规则**写得很明白，但 AI 助手仍然会犯**。开始任何写代码任务前先内化这几条，可以省下大量返工：
 
+- **写现代 Go（目标 Go 1.27）**：遵循 [JetBrains go-modern-guidelines](https://github.com/JetBrains/go-modern-guidelines)（Claude Code 已在 `.claude/settings.json` 启用该插件），如 `errors.AsType`、`cmp.Or`、`for i := range n`、`t.Context()`、标准库 `uuid`。改代码后可跑 `go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -test ./...` 自查。
 - **不要修改 `internal/oapi/oapi.gen.go`**。它顶部标了 DO NOT EDIT，唯一改它的方式是改 `api/openapi.yaml` 然后 `make oapi`。哪怕只是改一行 import / 注释 / 字段名都会被 oapi-verify 抓出来。
 - **`oapi.Example`、`oapi.CreateExampleReq` 等业务实体类型不要 import**。业务结构以 `internal/service` 包为准（如 `service.CreateExampleReq`）；只有协议层 schema（`oapi.HealthResponse` / `oapi.LivenessResponse` / `oapi.ListExamplesParams` 等）可以直接用。
 - **service 入参永远是 `context.Context`，不是 `*gin.Context`**。Worker 也消费 service，绑死 gin 会让 Worker 跑不通。需要 trace_id / auth subject 这种字段，由 handler 提前从 `*gin.Context` 取出来，作为 primitive 传给 service。
@@ -354,7 +355,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 
 ### 工具栈
 
-- ✅ 用 `testing`、`net/http/httptest`、`errors.As`、`gorm.io/gorm` 的 `DryRun`。
+- ✅ 用 `testing`、`net/http/httptest`、`errors.AsType`、`gorm.io/gorm` 的 `DryRun`。
 - ❌ **不引入 testify / gomock / mockery / sqlmock / testcontainers**。如果觉得不够用，先在 PR 描述里说服别人，再加依赖。
 
 ### 测试文件位置
@@ -374,7 +375,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 ### 必须遵守的细节
 
 - **测试里的日志静音**：在 `init()` 调 `applog.SetLogger(zap.NewNop())`。否则跑 `go test ./...` 会刷一堆 audit log。handler 测试还要 `validator.InitValidator()`，否则 binding 校验报错文案是空的。
-- **错误断言走 `errcode`**：用 `errors.As(err, &ec)` 拿 `errcode.Error`，比对 `ec.Code() == errcode.XxxError.Code()`。**不要**用 `err.Error() == "..."` 比较字符串。
+- **错误断言走 `errcode`**：用 `ec, ok := errors.AsType[errcode.Error](err)` 拿 `errcode.Error`，比对 `ec.Code() == errcode.XxxError.Code()`。**不要**用 `err.Error() == "..."` 比较字符串。
 - **mock 命名**：包内未导出，`mockXxx` 驼峰；持 func 字段而不是写一堆条件分支：
 
   ```go
@@ -387,7 +388,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
   ```
 
 - **trace_id 注入**：handler 测试如果要验证 `metadata.trace_id`，用一个 `gin.HandlerFunc` 提前 `c.Set("trace_id", "test-trace")`，别去 mock 整套 TraceLogger。
-- **`context.Background()` 在测试里允许**，业务代码里不行（见上文 context 传递）。
+- **测试里的 ctx 用 `t.Context()`**，不要 `context.Background()`：它随测试结束自动取消，能暴露泄漏的 goroutine。业务代码同样禁止 `context.Background()`（见上文 context 传递）。
 - **表驱动**：测试用例多于 3 个时用 `t.Run(name, ...)` + 切片表。同一个行为正反两面的 case 用独立 `TestXxx` 函数也可以，本项目两种都有，按可读性挑。
 
 ### 跑测试

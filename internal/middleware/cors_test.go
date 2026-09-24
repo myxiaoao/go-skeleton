@@ -74,6 +74,9 @@ func TestCORSDoesNotAllowOriginsByDefault(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Fatalf("expected no default credentials header, got %q", got)
 	}
+	if got := rec.Header().Get("Vary"); got != "Origin" {
+		t.Fatalf("expected Vary: Origin on rejected origin, got %q", got)
+	}
 }
 
 func TestCORSPreflightAllowedOrigin(t *testing.T) {

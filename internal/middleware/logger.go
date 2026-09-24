@@ -33,7 +33,7 @@ func TraceLogger(auditEnabled bool, auditExcludes []string) gin.HandlerFunc {
 		// 复用上游传入的 X-Request-ID 头（比如网关已经分配过 trace_id），让全链
 		// 路 trace 拼得起来；上游没传才自己生成。
 		traceID := c.GetHeader("X-Request-ID")
-		if traceID == "" {
+		if !validRequestID(traceID) {
 			traceID = uuid.NewString()
 		}
 		c.Set("trace_id", traceID)
@@ -56,4 +56,26 @@ func TraceLogger(auditEnabled bool, auditExcludes []string) gin.HandlerFunc {
 			zap.String("client_ip", c.ClientIP()),
 		)
 	}
+}
+
+// maxRequestIDLen 限制客户端传入 X-Request-ID 的长度：它会原样写进响应头和
+// 每条日志，不设上限等于让客户端控制日志体积。
+const maxRequestIDLen = 128
+
+// validRequestID 只接受非空、不超长、由字母数字和 -_.: 组成的 ID（覆盖 UUID、
+// 常见网关 trace 格式），其余一律丢弃重新生成，避免日志字段被注入污染。
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLen {
+		return false
+	}
+	for i := range len(id) {
+		ch := id[i]
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch >= '0' && ch <= '9':
+		case ch == '-', ch == '_', ch == '.', ch == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }

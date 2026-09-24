@@ -28,9 +28,11 @@ func CORS(allowOrigins []string, allowCredentials bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
 		originAllowed := origin != "" && containsOrigin(allowed, origin)
+		// 响应是否带 CORS 头取决于 Origin（含缺省），所有分支都要带 Vary，
+		// 否则共享缓存可能把"无 CORS 头"的响应发给合法来源。
+		c.Header("Vary", "Origin")
 		if originAllowed {
 			c.Header("Access-Control-Allow-Origin", origin)
-			c.Header("Vary", "Origin")
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 			c.Header("Access-Control-Allow-Headers", "Origin,Content-Type,Accept,Authorization,X-Request-ID")
 			if allowCredentials {

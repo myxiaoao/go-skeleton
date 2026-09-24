@@ -3,7 +3,7 @@
 # CMD_TARGET at build time, e.g.:
 #   docker build --build-arg CMD_TARGET=worker -t go-skeleton-worker .
 
-ARG GO_VERSION=1.26.3
+ARG GO_VERSION=1.27.1
 
 FROM golang:${GO_VERSION}-bookworm AS builder
 

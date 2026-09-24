@@ -4,7 +4,7 @@
 
 This is a Go service skeleton extracted from a real project. Business modules have been cleared out; only the `Example` flow is kept as a reference for the layered structure.
 
-**Requires Go 1.26+.**
+**Requires Go 1.27+.**
 
 ## Structure
 

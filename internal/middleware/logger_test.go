@@ -53,7 +53,7 @@ func TestTraceLoggerGeneratesWhenMissing(t *testing.T) {
 	if got == "" {
 		t.Fatal("response X-Request-ID is empty; middleware should generate one")
 	}
-	// uuid.NewString 返回 36 字符带短横线格式；这里做廉价的形状校验，免去
+	// uuid.New().String() 返回 36 字符带短横线格式；这里做廉价的形状校验，免去
 	// 为一条正则去 import uuid 包。
 	if len(got) != 36 {
 		t.Errorf("X-Request-ID = %q (len=%d), want a UUID-shaped value", got, len(got))

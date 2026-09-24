@@ -2,9 +2,9 @@ package middleware
 
 import (
 	"time"
+	"uuid"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	applog "go-skeleton/pkg/log"
@@ -34,7 +34,7 @@ func TraceLogger(auditEnabled bool, auditExcludes []string) gin.HandlerFunc {
 		// 路 trace 拼得起来；上游没传才自己生成。
 		traceID := c.GetHeader("X-Request-ID")
 		if !validRequestID(traceID) {
-			traceID = uuid.NewString()
+			traceID = uuid.New().String()
 		}
 		c.Set("trace_id", traceID)
 		c.Header("X-Request-ID", traceID)

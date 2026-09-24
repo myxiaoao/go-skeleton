@@ -31,14 +31,16 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -131,14 +133,12 @@ func main() {
 	}
 
 	// 按资源 → severity → message 排序输出，让 git-friendly diff 稳定。
-	sort.SliceStable(allFindings, func(i, j int) bool {
-		if allFindings[i].resource != allFindings[j].resource {
-			return allFindings[i].resource < allFindings[j].resource
-		}
-		if allFindings[i].severity != allFindings[j].severity {
-			return severityRank(allFindings[i].severity) < severityRank(allFindings[j].severity)
-		}
-		return allFindings[i].message < allFindings[j].message
+	slices.SortStableFunc(allFindings, func(a, b finding) int {
+		return cmp.Or(
+			cmp.Compare(a.resource, b.resource),
+			cmp.Compare(severityRank(a.severity), severityRank(b.severity)),
+			cmp.Compare(a.message, b.message),
+		)
 	})
 
 	fmt.Fprintf(os.Stderr, "new-endpoint-check: %d finding(s):\n", len(allFindings))
@@ -217,11 +217,8 @@ func collectByResource(nameFilter string) (map[string][]operation, error) {
 	}
 
 	for resource := range groups {
-		sort.Slice(groups[resource], func(i, j int) bool {
-			if groups[resource][i].Path != groups[resource][j].Path {
-				return groups[resource][i].Path < groups[resource][j].Path
-			}
-			return groups[resource][i].HTTPVerb < groups[resource][j].HTTPVerb
+		slices.SortFunc(groups[resource], func(a, b operation) int {
+			return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.HTTPVerb, b.HTTPVerb))
 		})
 	}
 	return groups, nil
@@ -279,16 +276,10 @@ func scanKnownResources() []string {
 			}
 		}
 	}
-	names := make([]string, 0, len(set))
-	for n := range set {
-		names = append(names, n)
-	}
-	sort.Slice(names, func(i, j int) bool {
+	names := slices.Collect(maps.Keys(set))
+	slices.SortFunc(names, func(a, b string) int {
 		// 长名优先（避免前缀复合资源被短名吞掉）。
-		if len(names[i]) != len(names[j]) {
-			return len(names[i]) > len(names[j])
-		}
-		return names[i] < names[j]
+		return cmp.Or(cmp.Compare(len(b), len(a)), cmp.Compare(a, b))
 	})
 	return names
 }
@@ -310,8 +301,8 @@ func scanHandlerTypeNames(file string) []string {
 		if _, ok := ts.Type.(*ast.StructType); !ok {
 			return true
 		}
-		if strings.HasSuffix(ts.Name.Name, "Handler") {
-			name := strings.TrimSuffix(ts.Name.Name, "Handler")
+		if before, ok0 := strings.CutSuffix(ts.Name.Name, "Handler"); ok0 {
+			name := before
 			if name != "" {
 				names = append(names, name)
 			}
@@ -842,20 +833,14 @@ func findResourcePrefix(ops []operation, _ string) string {
 	for _, op := range ops[1:] {
 		prefix = commonPrefix(prefix, op.Path)
 	}
-	if idx := strings.LastIndex(prefix, "/"); idx >= 0 && idx < len(prefix)-1 {
-		tail := prefix[idx+1:]
-		if strings.HasPrefix(tail, "{") {
-			prefix = prefix[:idx]
-		}
+	if before, tail, ok := strings.CutLast(prefix, "/"); ok && strings.HasPrefix(tail, "{") {
+		prefix = before
 	}
 	return strings.TrimRight(prefix, "/")
 }
 
 func commonPrefix(a, b string) string {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
+	n := min(len(b), len(a))
 	i := 0
 	for i < n && a[i] == b[i] {
 		i++
@@ -988,12 +973,7 @@ func pascalize(s string) string {
 // ---------------------------------------------------------------------------
 
 func sortedKeys(m map[string][]operation) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }
 
 func countNonBuiltin(m map[string][]operation) int {

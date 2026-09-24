@@ -22,6 +22,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -29,7 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -135,14 +136,8 @@ func main() {
 	}
 
 	// 按 rule → file → line 排序，输出稳定。
-	sort.SliceStable(all, func(i, j int) bool {
-		if all[i].rule != all[j].rule {
-			return all[i].rule < all[j].rule
-		}
-		if all[i].file != all[j].file {
-			return all[i].file < all[j].file
-		}
-		return all[i].line < all[j].line
+	slices.SortStableFunc(all, func(a, b violation) int {
+		return cmp.Or(cmp.Compare(a.rule, b.rule), cmp.Compare(a.file, b.file), cmp.Compare(a.line, b.line))
 	})
 
 	// 按 rule 分组打印。

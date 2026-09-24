@@ -24,7 +24,7 @@ func InitAPI(cfg *config.Config) (*Registry, error) {
 	// 支重复写一堆 closeQuiet 干净，也少漏关一个资源的风险。
 	var cleanups []func() error
 
-	dbMgr, err := initDatabase(cfg)
+	dbMgr, err := InitDatabase(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("init database: %w", err)
 	}

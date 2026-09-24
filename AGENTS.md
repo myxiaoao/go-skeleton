@@ -205,7 +205,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 ## 环境变量
 
 - **入库模板只有根目录 `.env.example` 一份**，所有进程共用。新增配置项必须同步更新它。
-- 运行时加载顺序（在 `cmd/<proc>/main.go` 里）：
+- 运行时加载顺序（`cmd/<proc>/main.go` 调 `bootstrap.LoadConfig("<proc>")` 统一完成）：
   ```
   真实环境变量 > cmd/<proc>/.env（如果存在） > 根目录 .env
   ```

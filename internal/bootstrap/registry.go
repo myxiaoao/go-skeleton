@@ -70,10 +70,10 @@ func (r *Registry) Close() error {
 	return errors.Join(errs...)
 }
 
-// initDatabase 从 cfg 翻译出 database.Config 后建 GORM 实例。DSN 为空时
-// database.Init 会返回带 nil DB 的 manager，由上层 InitAPI / InitWorker
-// 决定是否致命。
-func initDatabase(cfg *config.Config) (*database.DBManager, error) {
+// InitDatabase 从 cfg 翻译出 database.Config 后建 GORM 实例。DSN 为空时
+// database.Init 会返回带 nil DB 的 manager，由调用方（InitAPI / InitWorker /
+// cmd/migrate）决定是否致命。
+func InitDatabase(cfg *config.Config) (*database.DBManager, error) {
 	return database.Init(database.Config{
 		DSN:             cfg.Postgres.DSN,
 		LogLevel:        cfg.Postgres.LogLevel,

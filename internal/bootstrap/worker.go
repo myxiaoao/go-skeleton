@@ -39,7 +39,7 @@ func InitWorker(cfg *config.Config) (*Registry, error) {
 
 	var dbMgr *database.DBManager
 	if strings.TrimSpace(cfg.Postgres.DSN) != "" {
-		dbMgr, err = initDatabase(cfg)
+		dbMgr, err = InitDatabase(cfg)
 		if err != nil {
 			runCleanups(cleanups)
 			return nil, fmt.Errorf("init worker database: %w", err)

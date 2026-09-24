@@ -12,11 +12,9 @@ import (
 	"github.com/pressly/goose/v3/lock"
 	"go.uber.org/zap"
 
-	"go-skeleton/config"
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/migrations"
 	"go-skeleton/pkg/buildinfo"
-	appdb "go-skeleton/pkg/database"
 	applog "go-skeleton/pkg/log"
 )
 
@@ -50,26 +48,14 @@ func main() {
 		os.Exit(0)
 	}
 
-	config.LoadEnv("cmd/migrate/.env")
-	cfg, err := config.Load()
+	cfg, err := bootstrap.LoadConfig("migrate")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
-		os.Exit(1)
-	}
-	if err := bootstrap.InitRuntime(cfg, "migrate"); err != nil {
-		fmt.Fprintf(os.Stderr, "init runtime: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer func() { _ = applog.Sync() }()
 
-	dbMgr, err := appdb.Init(appdb.Config{
-		DSN:             cfg.Postgres.DSN,
-		LogLevel:        cfg.Postgres.LogLevel,
-		MaxIdleConns:    cfg.Postgres.MaxIdleConns,
-		MaxOpenConns:    cfg.Postgres.MaxOpenConns,
-		ConnMaxLifetime: cfg.Postgres.ConnMaxLifetime,
-		ConnMaxIdleTime: cfg.Postgres.ConnMaxIdleTime,
-	})
+	dbMgr, err := bootstrap.InitDatabase(cfg)
 	if err != nil {
 		applog.L().Fatal("initialize database", zap.Error(err))
 	}

@@ -182,15 +182,15 @@ curl -X POST http://127.0.0.1:3000/api/v1/examples/tasks \
 
 ```mermaid
 flowchart TD
-    API["cmd/api"] --> CFG["config.LoadEnv + config.Load"]
-    CFG --> BOOT["bootstrap.InitRuntime + bootstrap.InitAPI"]
+    API["cmd/api"] --> CFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
+    CFG --> BOOT["bootstrap.InitAPI"]
     BOOT --> REG["Registry: DB, Redis, JWT, Queue"]
     REG --> APP["app.NewServer"]
     APP --> ROUTER["router.RegisterRoutes"]
     ROUTER --> HTTP["/health, /api/v1/auth, /api/v1/examples"]
 
-    WORKER["cmd/worker"] --> WCFG["config.LoadEnv + config.Load"]
-    WCFG --> WBOOT["bootstrap.InitRuntime + bootstrap.InitWorker"]
+    WORKER["cmd/worker"] --> WCFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
+    WCFG --> WBOOT["bootstrap.InitWorker"]
     WBOOT --> WREG["Registry: Redis, optional DB, Queue"]
     WREG --> ASYNQ["app.NewWorker + Asynq handlers"]
 ```

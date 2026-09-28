@@ -34,6 +34,7 @@ GO_TEST_FLAGS ?=
 # 工具链版本固定。升级时改这里 + 跑 make init 重新装，让 CI / 队友复现一致。
 GOLANGCI_LINT_VERSION ?= v2.13.2
 OAPI_CODEGEN_VERSION  ?= v2.7.0
+SQLC_VERSION          ?= v1.31.1
 # 格式化工具：gofumpt 收紧 gofmt 风格细节（多余空行、struct 对齐等），
 # gci 用显式 sections 控制 import 分组（standard / default / prefix），
 # 避免短 module name（go-skeleton 不含 dot）被误判成 stdlib 的老坑。
@@ -59,6 +60,7 @@ help: ## 列出所有可用 target
 init: ## 安装/对齐辅助工具到 pin 版本（已是 pin 版本则跳过）
 	@$(MAKE) --no-print-directory _ensure-golangci-lint
 	@$(MAKE) --no-print-directory _ensure-oapi-codegen
+	@$(MAKE) --no-print-directory _ensure-sqlc
 	@$(MAKE) --no-print-directory _ensure-gci
 	@$(MAKE) --no-print-directory _ensure-gofumpt
 	@echo "init done."
@@ -98,6 +100,20 @@ _ensure-oapi-codegen:
 		echo "Installing oapi-codegen $$want..."; \
 	fi; \
 	$(GO) install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$$want
+
+.PHONY: _ensure-sqlc
+_ensure-sqlc:
+	@want="$(SQLC_VERSION)"; \
+	if command -v sqlc >/dev/null 2>&1; then \
+		got=$$(sqlc version 2>/dev/null); \
+		if [ "$$got" = "$$want" ]; then \
+			echo "sqlc $$got: ok"; exit 0; \
+		fi; \
+		echo "sqlc $$got != $$want, reinstalling..."; \
+	else \
+		echo "Installing sqlc $$want..."; \
+	fi; \
+	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@$$want
 
 # gci --version 输出形如 "gci version 0.14.0"，提取第三个字段并补回 v 前缀做比较。
 .PHONY: _ensure-gci
@@ -311,6 +327,28 @@ oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
 		exit 1; \
 	fi
 	@echo "oapi-verify: $(OAPI_OUTPUT) is in sync with $(OAPI_SPEC)."
+
+SQLC_OUTPUT := internal/repository/sqlcdb
+
+.PHONY: sqlc
+sqlc: ## 从 migrations/ + internal/repository/queries/ 生成 internal/repository/sqlcdb
+	@$(MAKE) --no-print-directory _ensure-sqlc
+	sqlc generate
+	@echo "generated: $(SQLC_OUTPUT)"
+
+.PHONY: sqlc-verify
+sqlc-verify: sqlc ## 校验 sqlc 生成产物与 SQL 同步且已提交（CI / 提交前用）
+	@untracked=$$(git ls-files --others --exclude-standard -- $(SQLC_OUTPUT)); \
+	if ! git diff --quiet -- $(SQLC_OUTPUT) || [ -n "$$untracked" ]; then \
+		echo ""; \
+		echo "ERROR: $(SQLC_OUTPUT) is out of sync with migrations/ + internal/repository/queries/."; \
+		echo "       Run 'make sqlc' and commit the result."; \
+		echo ""; \
+		git --no-pager diff -- $(SQLC_OUTPUT) | head -40; \
+		[ -z "$$untracked" ] || echo "untracked: $$untracked"; \
+		exit 1; \
+	fi
+	@echo "sqlc-verify: $(SQLC_OUTPUT) is in sync."
 
 .PHONY: tidy
 tidy: ## go mod tidy + verify
@@ -634,7 +672,7 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
+verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
 	@$(MAKE) --no-print-directory _verify-step STEP=fmt
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
@@ -643,6 +681,7 @@ verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-ver
 	@$(MAKE) --no-print-directory _verify-step STEP=env-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=tidy-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=oapi-verify
+	@$(MAKE) --no-print-directory _verify-step STEP=sqlc-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-deploy-check
 	@$(MAKE) --no-print-directory _verify-step STEP=docs-errcodes-verify

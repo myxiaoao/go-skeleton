@@ -1,0 +1,20 @@
+# sqlc config: migrations/ is the schema source of truth (goose annotations
+# are understood natively), queries live next to the repository layer.
+# Generated code is committed; `make sqlc-verify` guards drift.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/repository/queries
+    gen:
+      go:
+        package: sqlcdb
+        out: internal/repository/sqlcdb
+        sql_package: pgx/v5
+        overrides:
+          # pgx/v5 defaults to pgtype.Timestamp[tz]; plain time.Time keeps
+          # the model mapping trivial for NOT NULL columns.
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time

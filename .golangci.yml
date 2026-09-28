@@ -46,9 +46,10 @@ formatters:
       # Don't auto-rewrite import blanks/dot imports (e.g. _ "embed").
       custom-order: true
   exclusions:
-    # Generated code shouldn't be reformatted — `make oapi` owns it.
+    # Generated code shouldn't be reformatted — make oapi / make sqlc own it.
     paths:
       - internal/oapi
+      - internal/repository/sqlcdb
 
 linters:
   # 显式开 errcheck：v2 默认就包含，但显式 enable 在 lint 报告里更明确，且
@@ -71,3 +72,4 @@ linters:
   exclusions:
     paths:
       - internal/oapi
+      - internal/repository/sqlcdb

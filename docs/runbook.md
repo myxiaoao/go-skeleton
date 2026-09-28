@@ -150,7 +150,7 @@ DTO 反推（可选）：`make new-endpoint NAME=Order DTO=1`（或 `--dto`）�
 `var _ oapi.ServerInterface = (*APIServer)(nil)`，OpenAPI yaml 与 APIServer
 方法集漂移时 `go build` 直接失败，不依赖人 review。
 
-### 改 SQL / 新增查询
+## 改 SQL / 新增查询
 
 1. 表结构变更：`make migrate-create name=xxx` → 填 SQL（sqlc 也读这些文件作 schema）。
 2. 在 `internal/repository/queries/<资源>.sql` 写查询：`-- name: GetOrder :one` + SQL；可选条件用 `sqlc.narg(name)`，分页参数写 `sqlc.arg(lim)::bigint`。

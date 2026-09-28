@@ -480,7 +480,7 @@ go-example/
 ├── Dockerfile                  multi-stage 构建（默认 cmd/api）
 ├── docker-compose.yml          本地 Postgres + Redis
 ├── go.mod / go.sum             模块名 go-skeleton
-├── sqlc.yaml                    sqlc 配置（schema=migrations，queries=internal/repository/queries）
+├── sqlc.yaml                   sqlc 配置（schema=migrations，queries=internal/repository/queries）
 │
 ├── api/                        API 契约层
 │   ├── openapi.yaml            真相源：OpenAPI 3.1 spec
@@ -525,8 +525,8 @@ go-example/
 │   ├── repository/             数据访问层（唯一允许写 SQL）
 │   │   ├── example.go
 │   │   ├── tx.go               WithTx / InTx / InTxWithOptions / dbFromContext
-│   │   ├── queries/             sqlc 查询源文件（*.sql）
-│   │   └── sqlcdb/               sqlc 生成代码（DO NOT EDIT）
+│   │   ├── queries/            sqlc 查询源文件（*.sql）
+│   │   └── sqlcdb/             sqlc 生成代码（DO NOT EDIT）
 │   │
 │   ├── model/                  数据 struct
 │   │   └── example.go

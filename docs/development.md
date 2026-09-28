@@ -145,7 +145,7 @@ yaml 是真相源。按这个顺序：
 ## 九、提交前必跑
 
 ```sh
-make verify              # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅）
+make verify              # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅）
 ```
 
 红了看最后一个 `=== STEP FAILED: xxx ===` 横幅指向的步骤；详细排错见 [runbook §排错 cheat sheet](./runbook.md#排错-cheat-sheet)。

@@ -50,10 +50,12 @@ func main() {
 
 	must(deleteFiles(filesToDelete()), "delete layer files")
 	must(ensureMigrationsPlaceholder(), "leave migrations placeholder")
+	must(ensureQueriesPlaceholder(), "leave sqlc queries placeholder")
 	must(patchServerGo(), "patch internal/server.go")
 	must(patchRouterGo(), "patch internal/router/router.go")
 	must(patchWorkerGo(), "patch internal/worker.go")
 	must(rewriteWorkerHandler(), "rewrite internal/worker/handler.go")
+	must(rewriteWorkerTest(), "rewrite internal/worker_test.go")
 	must(patchOpenAPIHandler(), "patch internal/handler/openapi.go")
 	must(patchTxHelpers(), "silence unused tx helpers")
 	must(patchCrossPackageTests(), "patch cross-package tests")
@@ -64,6 +66,7 @@ func main() {
 		"internal/router/router.go",
 		"internal/worker.go",
 		"internal/worker/handler.go",
+		"internal/worker_test.go",
 		"internal/handler/openapi.go",
 		"internal/server_test.go",
 		"internal/router/router_test.go",
@@ -71,6 +74,7 @@ func main() {
 	}), "go syntax check")
 
 	must(runMake("oapi"), "make oapi")
+	must(regenerateSQLC(), "regenerate sqlc output")
 	must(gofmtAll(), "gofmt")
 	must(goImportsAll(), "goimports (best-effort)")
 	// 删 Example schemas 后 oapi.gen.go 可能不再 import 某些 runtime 包，
@@ -188,6 +192,47 @@ SELECT 1;
 	return nil
 }
 
+// ensureQueriesPlaceholder 给 internal/repository/queries/ 留一条占位查询。
+//
+// 缘由：sqlc 在 queries 目录找不到任何查询会直接报错，make sqlc /
+// sqlc-verify 随之失败。占位查询只 SELECT 1，不依赖任何表。
+func ensureQueriesPlaceholder() error {
+	const dir = "internal/repository/queries"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") {
+			return nil // 已有查询（重跑 / 用户手写过），不再插占位。
+		}
+	}
+	const path = dir + "/placeholder.sql"
+	const body = `-- 这是 drop-example 留下的占位查询：sqlc 在 queries/ 下找不到任何查询会报错，
+-- 导致 make sqlc / sqlc-verify 失败。
+-- 接入第一条真业务查询后删掉本文件并重跑 make sqlc。
+
+-- name: Placeholder :exec
+SELECT 1;
+`
+	if err := writeFile(path, body); err != nil {
+		return err
+	}
+	log.Printf("  ✓ left sqlc queries placeholder %s (接入真业务后删它)", path)
+	return nil
+}
+
+// regenerateSQLC 清空 sqlc 输出目录后重新生成：sqlc 不会删除已失效的
+// 生成文件（如 example.sql.go），不清空会留下引用已删表的代码。
+func regenerateSQLC() error {
+	const out = "internal/repository/sqlcdb"
+	if err := os.RemoveAll(out); err != nil {
+		return err
+	}
+	log.Printf("  ✓ cleared %s", out)
+	return runMake("sqlc")
+}
+
 func deleteFiles(paths []string) error {
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
@@ -210,10 +255,10 @@ func filesToDelete() []string {
 		"internal/repository/example_test.go",
 		"internal/repository/example_integration_test.go",
 		"internal/model/example.go",
-		"internal/model/example_test.go",
 		"internal/task/example.go",
 		"internal/worker/handler_test.go",
 		"migrations/20260521000001_create_examples_table.sql",
+		"internal/repository/queries/example.sql",
 	}
 }
 
@@ -311,20 +356,20 @@ func patchServerGo() error {
 				"\t}); err != nil {",
 		},
 		{
-			// `db := reg.DB.DB()` 在 newHTTPHandlers 里——示例装配是它的
+			// `db := reg.DB.Pool()` 在 newHTTPHandlers 里——示例装配是它的
 			// 唯一用户。删完 Example 后变成 "declared and not used"。改成
 			// 留 `db := ...` + `_ = db` 占位，让 new-endpoint 注入的
 			// repository.New<Name>Repository(db) 仍能拿到 db 句柄，无须
 			// 改脚手架脚本；新增模块后开发者可手动删 `_ = db`。
 			"silence unused db var after Example removal",
 			"func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {\n" +
-				"\tdb := reg.DB.DB()\n" +
+				"\tdb := reg.DB.Pool()\n" +
 				"\t// NEH handlers-deps",
 			"func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {\n" +
 				"\t// db 保留给 new-endpoint 注入的 repository.New<Name>Repository(db)；\n" +
 				"\t// 当前没有业务模块时用 _ = db 静音 \"declared and not used\"。\n" +
 				"\t// 新增模块后删掉下一行。\n" +
-				"\tdb := reg.DB.DB()\n" +
+				"\tdb := reg.DB.Pool()\n" +
 				"\t_ = db\n" +
 				"\t// NEH handlers-deps",
 		},
@@ -385,44 +430,55 @@ func patchRouterGo() error {
 
 func patchWorkerGo() error {
 	const path = "internal/worker.go"
-	const oldBlock = `// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。
+	content, err := readFile(path)
+	if err != nil {
+		return err
+	}
+	// 从文档注释一路匹配到 buildWorkerDeps 的闭合大括号，这样上游改注释
+	// 措辞也不会让本 patch 静默跳过（老版本按固定字符串匹配，与实际代码
+	// 漂移后被跳过，导致 drop 后 internal/worker.go 仍 import 已删除的
+	// example service）。
+	re := regexp.MustCompile(`(?s)// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。\n.*?\nfunc buildWorkerDeps\(reg \*bootstrap\.Registry\) \(\*worker\.Deps, error\) \{\n.*?\n\}\n`)
+	if !re.MatchString(content) {
+		return fmt.Errorf("%s: buildWorkerDeps block not found; update drop-example to match", path)
+	}
+	const newBlock = `// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。
+// 真实业务自行在这里把对应 service 注入 Deps 的具体字段。返回 error 让
+// caller 在依赖装配失败时 fail-fast——production 漏注入业务 processor
+// 比 panic 更危险（消息会被 noop ack 掉）。
 //
-// Example processor 走 typed contract：reg.DB 可用时注入真 ExampleService
-// （走 repository → gorm 落库），DB 不可用时让 RegisterHandlers 回填
-// noopExampleProcessor 兜底，便于无 DB 的 worker 部署形态（如只跑外部 API
-// 任务）也能起得来。worker 包本身不 import gorm，符合分层规则。
-//
-// 安全门槛：APP_ENV=production 下，如果真业务 processor 没注入（这里以
-// reg.DB == nil 为信号），直接 fail-fast 退出——production 漏注入意味着
-// 任务会被 noop 消费 + ack 掉，比 panic 更危险（消息消失但只打 warn 日志）。
-// dev / staging 仍然允许 noop，方便从模板态启动。
+// 安全门槛：APP_ENV=production 下调 deps.RequiredProcessors() 显式检查
+// 每个 task processor 是否真注入。任一 missing 就 fail-fast——production
+// 漏注入意味着任务会被 noop 消费 + ack 掉，比 panic 更危险（消息消失但
+// 只打 warn 日志）。dev / staging 仍然允许 noop，方便从模板态启动。骨架态
+// RequiredProcessors 返回空列表，本 guard 天然不会误报；接入第一个真业务
+// task 时记得在 worker.Deps.RequiredProcessors 里追加对应记录。
 func buildWorkerDeps(reg *bootstrap.Registry) (*worker.Deps, error) {
 	deps := &worker.Deps{
 		Cache: reg.Cache,
 		Queue: reg.Queue,
 	}
-	if reg.DB != nil {
-		repo := repository.NewExampleRepository(reg.DB.DB())
-		deps.Example = service.NewExampleService(repo, reg.Queue)
-	}
-	if deps.Example == nil && reg.Cfg != nil && reg.Cfg.Env.IsProduction() {
-		return nil, fmt.Errorf("worker: no ExampleProcessor wired in production (reg.DB is nil); refusing to start with noop fallback, tasks would be ack'd without side effects")
+	if reg.Cfg != nil && reg.Cfg.Env.IsProduction() {
+		var missing []string
+		for _, req := range deps.RequiredProcessors() {
+			if !req.Present {
+				missing = append(missing, req.Name)
+			}
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("worker: production refusing to start; missing real processors %v (tasks would be silently ack'd by noop fallback)", missing)
+		}
 	}
 	return deps, nil
 }
 `
-	const newBlock = `// buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。
-// 真实业务自行在这里把对应 service 注入 Deps 的具体字段。返回 error 让
-// caller 在依赖装配失败时 fail-fast——production 漏注入业务 processor
-// 比 panic 更危险（消息会被 noop ack 掉）。
-func buildWorkerDeps(reg *bootstrap.Registry) (*worker.Deps, error) {
-	return &worker.Deps{
-		Cache: reg.Cache,
-		Queue: reg.Queue,
-	}, nil
-}
-`
-	return replaceBlock(path, "drop buildWorkerDeps Example wiring", oldBlock, newBlock)
+	content = re.ReplaceAllLiteralString(content, newBlock)
+	content = strings.Replace(content, "\t\"go-skeleton/internal/repository\"\n\t\"go-skeleton/internal/service\"\n", "", 1)
+	if err := writeFile(path, content); err != nil {
+		return err
+	}
+	log.Printf("  ✓ patched %s (drop buildWorkerDeps Example wiring + imports)", path)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -442,9 +498,9 @@ import (
 
 // Deps 收拢所有异步任务 handler 共用的依赖。
 //
-// 故意**不**包含 *gorm.DB：repository 是项目里唯一允许 import gorm 的层
+// 故意**不**包含数据库连接：repository 是项目里唯一允许接触 pgx / sqlcdb 的层
 // （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
-// → repository → gorm，而不是在 worker 包内直接拿 *gorm.DB。
+// → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
 // Cache / RDB / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
 // 业务接入新任务时按 CLAUDE.md "异步队列" 段，在本 struct 上加 typed
@@ -453,6 +509,29 @@ type Deps struct {
 	Cache *cache.Client
 	RDB   *redis.Client
 	Queue *taskqueue.Queue
+}
+
+// ProcessorRequirement 描述一个 task processor 在装配链里的状态：
+// Name 用于错误信息（如 "XxxProcessor"），Present 表示**真业务**是否注入
+// （noop 兜底不算 present——production 下漏注入会被 noop 静默 ack 掉）。
+type ProcessorRequirement struct {
+	Name    string
+	Present bool
+}
+
+// RequiredProcessors 返回每个 task 类型对应的 processor 注入状态。
+// caller（如 internal/worker.go::buildWorkerDeps）在 APP_ENV=production 下
+// 调它，任一 Present=false 就 fail-fast 退出。
+//
+// 骨架态没有任何业务 task，返回空列表。**加新 task 类型的硬约束**：在 Deps
+// 上加新 processor 字段后，本方法必须同步追加一条记录；漏加 = production
+// 下静默 noop。这是 CLAUDE.md "异步队列" 段"production 漏注入 fail-fast"约束
+// 的强制执行点。
+func (d *Deps) RequiredProcessors() []ProcessorRequirement {
+	if d == nil {
+		return nil
+	}
+	return []ProcessorRequirement{}
 }
 
 // RegisterHandlers 把所有异步任务 handler 注册到 mux 上。注册 TraceMiddleware
@@ -475,6 +554,61 @@ func RegisterHandlers(mux *asynq.ServeMux, deps *Deps) {
 		return err
 	}
 	log.Printf("  ✓ rewrote %s (drop Example processor + handler)", path)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// internal/worker_test.go — 整文件重写
+//
+// 不直接删除：这是 production fail-fast guard（RequiredProcessors）的回归
+// 测试宿主，drop 掉 Example 具体业务后 guard 机制本身还在，得留通用测试
+// 盯住它，而不是让骨架态彻底没有测试覆盖。
+
+func rewriteWorkerTest() error {
+	const path = "internal/worker_test.go"
+	const body = `package app
+
+import (
+	"testing"
+
+	"go-skeleton/config"
+	"go-skeleton/internal/bootstrap"
+	"go-skeleton/internal/worker"
+)
+
+// TestBuildWorkerDeps_ProductionPassesWithNoRequiredProcessors 验证骨架态
+// （没有任何业务 task，RequiredProcessors 返回空列表）下 production guard
+// 不会误报——fail-fast 只应该在真的有 processor 缺注入时触发。
+func TestBuildWorkerDeps_ProductionPassesWithNoRequiredProcessors(t *testing.T) {
+	reg := &bootstrap.Registry{
+		Cfg: &config.Config{
+			Env:   config.EnvProduction,
+			Redis: config.RedisConfig{Addr: "127.0.0.1:6379"},
+		},
+	}
+
+	deps, err := buildWorkerDeps(reg)
+	if err != nil {
+		t.Fatalf("production with no required processors should not fail-fast, got error: %v", err)
+	}
+	if deps == nil {
+		t.Fatal("expected non-nil Deps")
+	}
+}
+
+// TestDepsRequiredProcessorsNilSafe 验证 nil *worker.Deps 调
+// RequiredProcessors 不 panic，返回空列表——防止未来重构把 nil 检查删掉。
+func TestDepsRequiredProcessorsNilSafe(t *testing.T) {
+	var deps *worker.Deps
+	if got := deps.RequiredProcessors(); len(got) != 0 {
+		t.Errorf("nil Deps.RequiredProcessors() should return empty, got %v", got)
+	}
+}
+`
+	if err := writeFile(path, body); err != nil {
+		return err
+	}
+	log.Printf("  ✓ rewrote %s (generic RequiredProcessors guard tests)", path)
 	return nil
 }
 
@@ -722,6 +856,7 @@ func gofmtAll() error {
 		"internal/router/router.go",
 		"internal/worker.go",
 		"internal/worker/handler.go",
+		"internal/worker_test.go",
 		"internal/handler/openapi.go",
 	}
 	args := append([]string{"-w"}, files...)

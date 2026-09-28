@@ -181,11 +181,16 @@ func main() {
 		fmt.Sprintf("internal/model/%s.go", lower):      renderModel(name, lower),
 		fmt.Sprintf("internal/task/%s.go", lower):       renderTask(name, lower),
 	}
+	// generatedPaths 收集新生成的文件路径，稍后和 patched 锚点文件一起跑 gofmt。
+	// 模板里手写的 //nolint 之类行内注释，对齐位置随方法名/路径参数名长度变化，
+	// 只有生成后统一跑一遍 gofmt 才能保证格式规范，不用在 Sprintf 模板里死抠对齐空格。
+	generatedPaths := make([]string, 0, len(files)+3)
 	for path, content := range files {
 		if err := writeFile(path, content); err != nil {
 			fatal(err)
 		}
 		fmt.Printf("✓ created %s\n", path)
+		generatedPaths = append(generatedPaths, path)
 	}
 
 	// ---- 4. 生成测试模板 ----
@@ -199,6 +204,7 @@ func main() {
 			fatal(err)
 		}
 		fmt.Printf("✓ created %s\n", path)
+		generatedPaths = append(generatedPaths, path)
 	}
 
 	// ---- 5. 注入 server.go ----
@@ -229,7 +235,7 @@ func main() {
 	if _, err := os.Stat("internal/router/router_test.go"); err == nil {
 		patched = append(patched, "internal/router/router_test.go")
 	}
-	if err := runGofmt(patched...); err != nil {
+	if err := runGofmt(append(generatedPaths, patched...)...); err != nil {
 		fatal(fmt.Errorf("gofmt: %w", err))
 	}
 	allMarkers := serverMarkers()
@@ -1008,8 +1014,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		response.WriteValidationError(c, err)
 		return
 	}
-	res, err := h.svc.%[3]s(c.Request.Context(), &req)
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context(), &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1019,8 +1025,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
-	res, err := h.svc.%[3]s(c.Request.Context())
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1036,8 +1042,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		response.WriteValidationError(c, err)
 		return
 	}
-	res, err := h.svc.%[3]s(c.Request.Context(), &req)
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context(), &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1047,8 +1053,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
-	res, err := h.svc.%[3]s(c.Request.Context())
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1059,8 +1065,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	%[7]s := c.Param(%[8]q)
-	res, err := h.svc.%[3]s(c.Request.Context()%[6]s)
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()%[6]s) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1077,8 +1083,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		response.WriteValidationError(c, err)
 		return
 	}
-	res, err := h.svc.%[3]s(c.Request.Context()%[6]s, &req)
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()%[6]s, &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1089,8 +1095,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	%[7]s := c.Param(%[8]q)
-	res, err := h.svc.%[3]s(c.Request.Context()%[6]s)
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()%[6]s) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1106,8 +1112,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		response.WriteValidationError(c, err)
 		return
 	}
-	res, err := h.svc.%[3]s(c.Request.Context(), &req)
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context(), &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1117,8 +1123,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		}
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s——把任务投到 Asynq 队列。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
-	res, err := h.svc.%[3]s(c.Request.Context())
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1130,8 +1136,8 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 // TODO: 按业务字段补 ShouldBind / 调 service / 响应。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
-	res, err := h.svc.%[3]s(c.Request.Context())
-	if err != nil {
+	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
+	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
 		response.WriteError(c, err)
 		return
 	}
@@ -1375,50 +1381,46 @@ func (s *%[1]sService) %[2]s(ctx context.Context) (any, error) {
 }
 
 // renderRepository 生成 internal/repository/<lower>.go。
-// 与 service 的 Repository 接口对应——但接口字段还没定，这里只给 struct +
-// New。新增方法由开发者按业务 SQL 自补，不强行预生成模板（OpenAPI 不知道
-// DB schema，生成的 GORM 调用一定要返工）。
+// 只给 struct + New：OpenAPI 不知道表结构，查询由开发者在
+// queries/<lower>.sql 里手写后 make sqlc 生成，再在这里调用。
 func renderRepository(name, lower string, _ []operation) string {
 	return fmt.Sprintf(`package repository
 
 // %[1]sRepository 由 make new-endpoint NAME=%[1]s 生成的骨架。
-// 唯一允许写 GORM 或原生 SQL 的层。
+// 唯一允许写 SQL 的层：SQL 写在 queries/*.sql，make sqlc 生成 sqlcdb 包。
 //
 // 加查询方法的步骤：
-//  1. 在 internal/service/%[2]s.go 的 %[1]sRepository 接口里加方法签名
-//  2. 在这里实现，使用 db.WithContext(ctx)；事务走 repository.InTx
-//  3. 在 service / handler 测试里通过 mock%[1]sRepo 给 stub
-
-import (
-	"gorm.io/gorm"
-)
+//  1. 在 internal/repository/queries/%[2]s.sql 写 "-- name: Xxx :one" 查询，跑 make sqlc
+//  2. 在 internal/service/%[2]s.go 的 %[1]sRepository 接口里加方法签名
+//  3. 在这里实现：sqlcdb.New(dbFromContext(ctx, r.db)).Xxx(ctx, ...)，把行映射成 model
+//  4. 跨 repository 事务由 service 用 Transactor.InTx 包，这里不自己开事务
 
 type %[1]sRepository struct {
-	db *gorm.DB
+	db DB
 }
 
-// New%[1]sRepository 构造 %[1]sRepository。
-func New%[1]sRepository(db *gorm.DB) *%[1]sRepository {
+// New%[1]sRepository 构造 %[1]sRepository。db 由 internal/server.go 装配（*pgxpool.Pool）。
+func New%[1]sRepository(db DB) *%[1]sRepository {
 	return &%[1]sRepository{db: db}
 }
 `, name, lower)
 }
 
-// renderModel 生成 internal/model/<lower>.go——纯 GORM struct 骨架。
+// renderModel 生成 internal/model/<lower>.go——普通数据 struct 骨架。
 func renderModel(name, lower string) string {
 	return fmt.Sprintf(`package model
 
-// %[1]s 是 %[2]s 资源的持久化结构。由 make new-endpoint NAME=%[1]s 生成。
-// GORM AutoMigrate 已废弃——表结构走 migrations/*.sql。这里只声明 Go 侧
-// 的字段映射，与迁移文件保持一致由开发者维护。
+// %[1]s 是 %[2]s 资源的数据结构。由 make new-endpoint NAME=%[1]s 生成。
+// 表结构真相源是 migrations/*.sql；repository 把 sqlc 行类型映射成本 struct，
+// 字段与迁移文件保持一致由开发者维护。
 
 import "time"
 
 // %[1]s TODO: 按业务字段补 columns。
 type %[1]s struct {
-	ID        uint      `+"`gorm:\"primaryKey\"`"+`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        int64     `+"`json:\"id\"`"+`
+	CreatedAt time.Time `+"`json:\"created_at\"`"+`
+	UpdatedAt time.Time `+"`json:\"updated_at\"`"+`
 }
 `, name, lower)
 }
@@ -1499,8 +1501,9 @@ func Test%[1]sServiceSmoke(t *testing.T) {
 func renderRepositoryTest(name, lower string, _ []operation) string {
 	return fmt.Sprintf(`package repository
 
-// %[1]sRepository smoke 测试：由 make new-endpoke NAME=%[1]s 生成。
-// 真实查询出现后按 example_test.go 风格用 GORM DryRun 捕 SQL 断言。
+// %[1]sRepository smoke 测试：由 make new-endpoint NAME=%[1]s 生成。
+// 真实查询出现后按 example_test.go 风格，用 tx_test.go 里的 mockDBTX /
+// mockTx 断言 SQL 与参数，不连真实 DB。
 
 import (
 	"testing"

@@ -138,7 +138,7 @@ func (s *ExampleService) ProcessExample(ctx context.Context, payload task.Exampl
 	}
 	applog.FromContext(ctx).Info("example task processed",
 		zap.String("name", payload.Name),
-		zap.Uint64("example_id", example.ID),
+		zap.Int64("example_id", example.ID),
 	)
 	return nil
 }

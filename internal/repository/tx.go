@@ -4,12 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5"
+
+	"go-skeleton/internal/repository/sqlcdb"
 )
 
-// txKey 是 context 里存放 GORM 事务实例的私有键。用自定义类型避免和别处
-// 的 context value 冲突——string key 容易被外包覆盖。
+// DB 是 repository 需要的数据库能力：跑查询（sqlc 的 DBTX）+ 开事务。
+// *pgxpool.Pool 直接满足这个接口。
+type DB interface {
+	sqlcdb.DBTX
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
+}
+
+// txKey 是 context 里存放活跃事务句柄的私有键。
 type txKey struct{}
 
 var (
@@ -17,62 +26,103 @@ var (
 	errNilTxFn = errors.New("repository: transaction callback is required")
 )
 
-// WithTx 把活跃的 GORM 事务实例挂到 ctx 上，供 dbFromContext 在同一逻辑事务
-// 里跨多个 repository 调用复用。一般由 InTx 内部使用，业务代码很少直接调。
-func WithTx(ctx context.Context, tx *gorm.DB) context.Context {
+// WithTx 把活跃事务挂到 ctx 上，供 dbFromContext 在同一逻辑事务里跨多个
+// repository 调用复用。一般只由 InTx 内部调用。
+func WithTx(ctx context.Context, tx sqlcdb.DBTX) context.Context {
 	return context.WithValue(normalizeContext(ctx), txKey{}, tx)
 }
 
-// InTx 在事务里执行 fn，用 GORM 默认 isolation（Postgres 下是
-// READ COMMITTED）。如果 ctx 已经携带活跃事务（嵌套调用），直接复用
-// 不再开新事务——避免内嵌 SAVEPOINT 让回滚语义变复杂。
+// InTx 在事务里执行 fn，用默认 isolation（Postgres 下是 READ COMMITTED）。
+// 如果 ctx 已经携带活跃事务（嵌套调用），直接复用不再开新事务——避免
+// 嵌套开 SAVEPOINT 让语义变复杂。
 //
-// 用法：service 层用 InTx 包多个 repository 调用形成逻辑事务；repository
-// 本身不调 InTx，只通过 dbFromContext 取当前事务句柄。
-//
-// 需要更强的 isolation（REPEATABLE READ / SERIALIZABLE）或只读事务，
-// 用 InTxWithOptions。
-func InTx(ctx context.Context, db *gorm.DB, fn func(context.Context) error) error {
+// service 层用 InTx 包多个 repository 调用形成跨 repository 事务；
+// repository 本身不调 InTx，只通过 dbFromContext 取当前事务句柄。
+func InTx(ctx context.Context, db DB, fn func(context.Context) error) error {
 	return InTxWithOptions(ctx, db, nil, fn)
 }
 
-// InTxWithOptions 在事务里执行 fn，opts 透传给 *sql.DB.BeginTx——支持
-// 自定义 isolation（如 sql.LevelRepeatableRead / sql.LevelSerializable）
-// 和 ReadOnly。opts 为 nil 时等价于 InTx。
+// InTxWithOptions 在事务里执行 fn，opts 支持自定义 isolation
+// （如 sql.LevelRepeatableRead / sql.LevelSerializable）和 ReadOnly。
+// opts 为 nil 时等价于 InTx。
 //
-// 嵌套行为：如果 ctx 已经携带活跃事务，**忽略 opts** 直接复用——子事务
-// 改 isolation/readonly 在 SQL 里不是合法操作（要在 BEGIN 时定），让父
-// 事务的设定生效是唯一正确语义。调用方决定隔离级别时必须在最外层 InTx
-// 调用点决定，不要指望嵌套调用能"加强"或"放松"isolation。
+// 嵌套行为：如果 ctx 已经携带活跃事务，**忽略 opts** 直接复用——isolation
+// 只能在 BEGIN 时决定，子调用改不了，调用方要决定隔离级别必须在最外层
+// InTx/InTxWithOptions 调用点决定。
 //
-// ReadOnly=true 时 fn 内不允许写——驱动会在 commit 前报错。把只读查询
-// 包进 ReadOnly 事务能让 Postgres 跳过 WAL 写、避免 snapshot 不一致，
-// 是分页 / 聚合统计的常用做法。
-func InTxWithOptions(ctx context.Context, db *gorm.DB, opts *sql.TxOptions, fn func(context.Context) error) error {
+// commit / rollback 走 pgx.BeginTxFunc：fn 返回 nil 提交，返回 error 回滚
+// 并原样透传，panic 会回滚并重新 panic——不要在 fn 外面自己加 recover
+// 绕过这个语义。
+func InTxWithOptions(ctx context.Context, db DB, opts *sql.TxOptions, fn func(context.Context) error) error {
 	if fn == nil {
 		return errNilTxFn
 	}
-	if tx := txFromContext(ctx); tx != nil {
-		return fn(normalizeContext(ctx))
+	ctx = normalizeContext(ctx)
+	if txFromContext(ctx) != nil {
+		return fn(ctx)
 	}
 	if db == nil {
 		return errNilDB
 	}
-
-	baseCtx := normalizeContext(ctx)
-	wrapped := func(tx *gorm.DB) error {
-		return fn(WithTx(baseCtx, tx))
+	txOpts, err := toPgxTxOptions(opts)
+	if err != nil {
+		return err
 	}
-	if opts == nil {
-		return db.WithContext(baseCtx).Transaction(wrapped)
-	}
-	return db.WithContext(baseCtx).Transaction(wrapped, opts)
+	return pgx.BeginTxFunc(ctx, db, txOpts, func(tx pgx.Tx) error {
+		return fn(WithTx(ctx, tx))
+	})
 }
 
-// dbFromContext 返回当前应该用的 *gorm.DB 实例：ctx 里有事务就用事务句柄，
-// 没有就用 repository 持有的默认连接。所有 repository 方法都该走这一层，
-// 否则在 InTx 包住的调用链里会用错连接、绕过事务。
-func dbFromContext(ctx context.Context, db *gorm.DB) *gorm.DB {
+// TxManager 把 InTx / InTxWithOptions 绑定到一个 DB 上，让 service 依赖
+// service.Transactor 接口而不是直接依赖连接池。
+type TxManager struct {
+	db DB
+}
+
+// NewTxManager 构造 TxManager；由 internal/server.go 装配。
+func NewTxManager(db DB) *TxManager {
+	return &TxManager{db: db}
+}
+
+// InTx 在事务里执行 fn；语义同包级 InTx。
+func (m *TxManager) InTx(ctx context.Context, fn func(context.Context) error) error {
+	return InTx(ctx, m.db, fn)
+}
+
+// InTxWithOptions 用自定义 isolation 执行 fn；语义同包级 InTxWithOptions。
+func (m *TxManager) InTxWithOptions(ctx context.Context, opts *sql.TxOptions, fn func(context.Context) error) error {
+	return InTxWithOptions(ctx, m.db, opts, fn)
+}
+
+// toPgxTxOptions 把 database/sql 的选项映射成 pgx 的选项。Postgres 不支持
+// 的 isolation level 直接报错，而不是悄悄降级成别的语义。
+func toPgxTxOptions(opts *sql.TxOptions) (pgx.TxOptions, error) {
+	var out pgx.TxOptions
+	if opts == nil {
+		return out, nil
+	}
+	if opts.ReadOnly {
+		out.AccessMode = pgx.ReadOnly
+	}
+	switch opts.Isolation {
+	case sql.LevelDefault:
+	case sql.LevelReadUncommitted:
+		out.IsoLevel = pgx.ReadUncommitted
+	case sql.LevelReadCommitted:
+		out.IsoLevel = pgx.ReadCommitted
+	case sql.LevelRepeatableRead:
+		out.IsoLevel = pgx.RepeatableRead
+	case sql.LevelSerializable:
+		out.IsoLevel = pgx.Serializable
+	default:
+		return pgx.TxOptions{}, fmt.Errorf("repository: unsupported isolation level %s", opts.Isolation)
+	}
+	return out, nil
+}
+
+// dbFromContext 返回 ctx 里挂的事务句柄，没有就返回 db。所有 repository
+// 方法都必须走这一层，否则 InTx 包住的调用链会绕过事务，用错连接。
+func dbFromContext(ctx context.Context, db DB) sqlcdb.DBTX {
 	if tx := txFromContext(ctx); tx != nil {
 		return tx
 	}
@@ -80,16 +130,16 @@ func dbFromContext(ctx context.Context, db *gorm.DB) *gorm.DB {
 }
 
 // txFromContext 从 ctx 里取活跃事务句柄；没有返回 nil。
-func txFromContext(ctx context.Context) *gorm.DB {
+func txFromContext(ctx context.Context) sqlcdb.DBTX {
 	if ctx == nil {
 		return nil
 	}
-	tx, _ := ctx.Value(txKey{}).(*gorm.DB)
+	tx, _ := ctx.Value(txKey{}).(sqlcdb.DBTX)
 	return tx
 }
 
-// normalizeContext 把 nil ctx 兜底成 context.Background。GORM API 接到 nil
-// ctx 会 panic，这层防御让上游万一传 nil 时不至于炸到 DB 层。
+// normalizeContext 把 nil ctx 兜底成 context.Background，防止上游误传 nil
+// 直接炸到驱动层。
 func normalizeContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()

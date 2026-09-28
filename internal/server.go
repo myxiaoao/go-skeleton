@@ -246,6 +246,10 @@ func (s *Server) Close() error {
 	return nil
 }
 
+// repository.TxManager 是生产环境的 service.Transactor 实现；需要跨
+// repository 事务的 service 时用 repository.NewTxManager(db) 注入即可。
+var _ service.Transactor = (*repository.TxManager)(nil)
+
 // validateHTTPRegistry 校验 HTTP 装配需要的 Registry 字段都齐了。失败的细
 // 分错误便于上层日志定位是哪个组件没装配。
 func validateHTTPRegistry(reg *bootstrap.Registry) error {
@@ -254,7 +258,7 @@ func validateHTTPRegistry(reg *bootstrap.Registry) error {
 		return errNilRegistry
 	case reg.Cfg == nil:
 		return errNilConfig
-	case reg.DB == nil || reg.DB.DB() == nil:
+	case reg.DB == nil || reg.DB.Pool() == nil:
 		return errMissingDB
 	default:
 		return nil
@@ -265,7 +269,7 @@ func validateHTTPRegistry(reg *bootstrap.Registry) error {
 // repository → service → handler 整条链 new 出来。新增模块时在这里加 4 行
 // （repo / service / handler / 挂进 HTTPHandlers）。
 func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
-	db := reg.DB.DB()
+	db := reg.DB.Pool()
 	exampleRepository := repository.NewExampleRepository(db)
 	exampleService := service.NewExampleService(exampleRepository, reg.Queue)
 	// NEH handlers-deps

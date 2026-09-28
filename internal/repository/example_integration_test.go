@@ -1,6 +1,6 @@
 //go:build integration
 
-// 集成测试示例：连真实 Postgres，验证 GORM 查询行为。
+// 集成测试示例：连真实 Postgres，验证 sqlc 查询行为。
 //
 // 触发方式：
 //
@@ -19,30 +19,31 @@ import (
 	"testing"
 	"time"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"go-skeleton/internal/model"
 	"go-skeleton/internal/repository"
 )
 
-// 从 POSTGRES env 取 DSN；没配就跳过，避免 CI / 本地误触发时直接 fail。
-func openTestDB(t *testing.T) *gorm.DB {
+// openTestPool 从 POSTGRES env 取 DSN；没配就跳过，避免 CI / 本地误触发时
+// 直接 fail。
+func openTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("POSTGRES")
 	if dsn == "" {
 		t.Skip("POSTGRES env not set; skipping integration test")
 	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
-		t.Fatalf("open db: %v", err)
+		t.Fatalf("open pool: %v", err)
 	}
-	return db
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 func TestExampleRepositoryIntegration_CreateThenList(t *testing.T) {
-	db := openTestDB(t)
-	repo := repository.NewExampleRepository(db)
+	pool := openTestPool(t)
+	repo := repository.NewExampleRepository(pool)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

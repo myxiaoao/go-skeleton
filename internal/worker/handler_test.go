@@ -47,7 +47,7 @@ func TestHandleExampleTaskDispatchesToProcessor(t *testing.T) {
 		Name:   "hello",
 	})
 
-	if err := deps.HandleExampleTask(context.Background(),
+	if err := deps.HandleExampleTask(t.Context(),
 		asynq.NewTask(task.TypeExampleTask, body)); err != nil {
 		t.Fatalf("HandleExampleTask: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestHandleExampleTaskPropagatesProcessorError(t *testing.T) {
 		Name:   "fail",
 	})
 
-	err := deps.HandleExampleTask(context.Background(),
+	err := deps.HandleExampleTask(t.Context(),
 		asynq.NewTask(task.TypeExampleTask, body))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want %v", err, wantErr)
@@ -104,10 +104,9 @@ func TestHandleExampleTaskRejectsUnsupportedVersion(t *testing.T) {
 			deps := &Deps{Example: proc}
 			body := makeExampleTaskBytes(t, tc.payload)
 
-			err := deps.HandleExampleTask(context.Background(),
+			err := deps.HandleExampleTask(t.Context(),
 				asynq.NewTask(task.TypeExampleTask, body))
-			var verErr task.ErrUnsupportedPayloadVersion
-			if !errors.As(err, &verErr) {
+			if _, ok := errors.AsType[task.ErrUnsupportedPayloadVersion](err); !ok {
 				t.Fatalf("err = %v, want ErrUnsupportedPayloadVersion", err)
 			}
 			if proc.called != 0 {
@@ -121,7 +120,7 @@ func TestHandleExampleTaskRejectsUnsupportedVersion(t *testing.T) {
 // error；这是 unmarshal 错（payload 数据本身坏），不该静默放过。
 func TestHandleExampleTaskRejectsMalformedPayload(t *testing.T) {
 	deps := &Deps{Example: &mockExampleProcessor{}}
-	err := deps.HandleExampleTask(context.Background(),
+	err := deps.HandleExampleTask(t.Context(),
 		asynq.NewTask(task.TypeExampleTask, []byte("not-json")))
 	if err == nil {
 		t.Fatal("want unmarshal error, got nil")
@@ -148,7 +147,7 @@ func TestRegisterHandlersFillsNoopProcessor(t *testing.T) {
 		Header: task.NewHeader(""),
 		Name:   "noop",
 	})
-	if err := deps.HandleExampleTask(context.Background(),
+	if err := deps.HandleExampleTask(t.Context(),
 		asynq.NewTask(task.TypeExampleTask, body)); err != nil {
 		t.Fatalf("noop processor returned err = %v, want nil", err)
 	}

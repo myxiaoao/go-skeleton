@@ -100,12 +100,10 @@ func (l *IPRateLimiter) allow(ip string) bool {
 func (l *IPRateLimiter) cleanupLoop() {
 	defer close(l.done)
 
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
+	tick := time.Tick(time.Minute)
 	for {
 		select {
-		case <-ticker.C:
+		case <-tick:
 			l.cleanup(time.Now().Add(-3 * time.Minute))
 		case <-l.stop:
 			return

@@ -32,7 +32,7 @@ func TestIPRateLimiterAllowsWithinBurstThenBlocks(t *testing.T) {
 	router := buildRateLimitRouter(limiter)
 
 	// 前 burst 个请求应该全 200 + code=0。
-	for i := 0; i < burst; i++ {
+	for i := range burst {
 		w := serve(router, "1.2.3.4:5000")
 		if w.Code != http.StatusOK {
 			t.Fatalf("request %d: status = %d, want 200", i, w.Code)
@@ -60,7 +60,7 @@ func TestIPRateLimiterIsolatesByIP(t *testing.T) {
 	router := buildRateLimitRouter(limiter)
 
 	// IP A 用满 burst。
-	for i := 0; i < burst; i++ {
+	for i := range burst {
 		if w := serve(router, "10.0.0.1:1"); decodeCode(t, w) != 0 {
 			t.Fatalf("A req %d unexpectedly blocked", i)
 		}
@@ -70,7 +70,7 @@ func TestIPRateLimiterIsolatesByIP(t *testing.T) {
 		t.Errorf("A burst+1: code = %d, want %d", code, errcode.TooManyRequests.Code())
 	}
 	// 同时 IP B 仍能正常通过 burst 个请求。
-	for i := 0; i < burst; i++ {
+	for i := range burst {
 		if w := serve(router, "10.0.0.2:1"); decodeCode(t, w) != 0 {
 			t.Fatalf("B req %d unexpectedly blocked by A's exhaustion", i)
 		}

@@ -64,7 +64,7 @@ func TestCreateSuccess(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	example, err := svc.Create(context.Background(), &CreateExampleReq{Name: "test"})
+	example, err := svc.Create(t.Context(), &CreateExampleReq{Name: "test"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestEnqueueTaskSuccess(t *testing.T) {
 	}
 	svc := NewExampleService(&mockExampleRepo{}, queue)
 
-	res, err := svc.EnqueueTask(applog.WithTraceID(context.Background(), "trace-1"), &EnqueueExampleTaskReq{Name: "test"})
+	res, err := svc.EnqueueTask(applog.WithTraceID(t.Context(), "trace-1"), &EnqueueExampleTaskReq{Name: "test"})
 	if err != nil {
 		t.Fatalf("EnqueueTask: %v", err)
 	}
@@ -103,13 +103,13 @@ func TestEnqueueTaskQueueUnavailable(t *testing.T) {
 	queue := &mockExampleQueue{available: false}
 	svc := NewExampleService(&mockExampleRepo{}, queue)
 
-	_, err := svc.EnqueueTask(context.Background(), &EnqueueExampleTaskReq{Name: "test"})
+	_, err := svc.EnqueueTask(t.Context(), &EnqueueExampleTaskReq{Name: "test"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	var ec errcode.Error
-	if !errors.As(err, &ec) {
+	ec, ok := errors.AsType[errcode.Error](err)
+	if !ok {
 		t.Fatalf("expected errcode.Error, got %T", err)
 	}
 	if ec.Code() != errcode.QueueUnavailable.Code() {
@@ -130,7 +130,7 @@ func TestProcessExampleSuccess(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	err := svc.ProcessExample(applog.WithTraceID(context.Background(), "trace-x"),
+	err := svc.ProcessExample(applog.WithTraceID(t.Context(), "trace-x"),
 		taskExamplePayload("queued-job"))
 	if err != nil {
 		t.Fatalf("ProcessExample: %v", err)
@@ -150,7 +150,7 @@ func TestProcessExampleRepoError(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	err := svc.ProcessExample(context.Background(), taskExamplePayload("x"))
+	err := svc.ProcessExample(t.Context(), taskExamplePayload("x"))
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
 	}
@@ -164,13 +164,13 @@ func TestCreateDatabaseError(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	_, err := svc.Create(context.Background(), &CreateExampleReq{Name: "test"})
+	_, err := svc.Create(t.Context(), &CreateExampleReq{Name: "test"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	var ec errcode.Error
-	if !errors.As(err, &ec) {
+	ec, ok := errors.AsType[errcode.Error](err)
+	if !ok {
 		t.Fatalf("expected errcode.Error, got %T", err)
 	}
 	if ec.Code() != errcode.DatabaseError.Code() {
@@ -190,7 +190,7 @@ func TestListSuccess(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	res, err := svc.List(context.Background(), &ListExamplesReq{Limit: 10, Offset: 0})
+	res, err := svc.List(t.Context(), &ListExamplesReq{Limit: 10, Offset: 0})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestListDefaultLimit(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	_, err := svc.List(context.Background(), &ListExamplesReq{Limit: 0})
+	_, err := svc.List(t.Context(), &ListExamplesReq{Limit: 0})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -229,13 +229,13 @@ func TestListDatabaseError(t *testing.T) {
 	}
 	svc := NewExampleService(repo, nil)
 
-	_, err := svc.List(context.Background(), &ListExamplesReq{Limit: 10})
+	_, err := svc.List(t.Context(), &ListExamplesReq{Limit: 10})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	var ec errcode.Error
-	if !errors.As(err, &ec) {
+	ec, ok := errors.AsType[errcode.Error](err)
+	if !ok {
 		t.Fatalf("expected errcode.Error, got %T", err)
 	}
 	if ec.Code() != errcode.DatabaseError.Code() {

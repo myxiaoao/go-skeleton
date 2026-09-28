@@ -71,8 +71,8 @@ func TestCheckHeader(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := CheckHeader(Header{Version: tc.version}, supported)
 			if tc.wantErr {
-				var verErr ErrUnsupportedPayloadVersion
-				if !errors.As(err, &verErr) {
+				verErr, ok := errors.AsType[ErrUnsupportedPayloadVersion](err)
+				if !ok {
 					t.Fatalf("err = %v, want ErrUnsupportedPayloadVersion", err)
 				}
 				if verErr.Got != tc.version {

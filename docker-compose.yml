@@ -43,7 +43,7 @@ services:
   # 然后访问 http://127.0.0.1:8980 。
   # 生产**绝对不要**暴露这个端口；它没有内置鉴权。
   asynqmon:
-    image: hibiken/asynqmon:latest
+    image: hibiken/asynqmon:0.7.2
     container_name: go-skeleton-asynqmon
     restart: unless-stopped
     profiles: ["debug"]

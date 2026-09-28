@@ -10,7 +10,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"go-skeleton/config"
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/pkg/buildinfo"
@@ -26,14 +25,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	config.LoadEnv("cmd/worker/.env")
-	cfg, err := config.Load()
+	cfg, err := bootstrap.LoadConfig("worker")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
-		os.Exit(1)
-	}
-	if err := bootstrap.InitRuntime(cfg, "worker"); err != nil {
-		fmt.Fprintf(os.Stderr, "init runtime: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer func() { _ = applog.Sync() }()

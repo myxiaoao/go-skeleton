@@ -1,6 +1,7 @@
 package log
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -24,6 +25,24 @@ type Config struct {
 // ctxKey 是 context 里存放 trace_id 的私有键，用空 struct 类型避免和外部
 // context value 撞 key。
 type ctxKey struct{}
+
+// traceEntry 是 ctxKey 对应的值：trace_id 加上预绑好 trace_id 字段的 logger。
+// FromContext 是每条业务日志的入口，缓存 logger 能省掉每次 With() 的克隆分配；
+// base 记录构建时的全局 logger，全局 logger 被替换后缓存自动失效。
+type traceEntry struct {
+	traceID string
+	base    *zap.Logger
+	logger  *zap.Logger
+}
+
+func newTraceEntry(traceID string) *traceEntry {
+	base := defaultLogger.Load()
+	return &traceEntry{
+		traceID: traceID,
+		base:    base,
+		logger:  base.With(zap.String("trace_id", traceID)),
+	}
+}
 
 // defaultLogger 用 atomic.Pointer 保护并发读写——Init / SetLogger 可能在测试
 // 期间替换全局 logger，避免和业务代码竞争。
@@ -118,7 +137,7 @@ func WithTraceID(ctx context.Context, traceID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, ctxKey{}, traceID)
+	return context.WithValue(ctx, ctxKey{}, newTraceEntry(traceID))
 }
 
 // TraceIDFrom 从 ctx 取 trace_id；没有返空串。让 service / repository 在
@@ -127,8 +146,8 @@ func TraceIDFrom(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	if v, ok := ctx.Value(ctxKey{}).(string); ok {
-		return v
+	if e, ok := ctx.Value(ctxKey{}).(*traceEntry); ok {
+		return e.traceID
 	}
 	return ""
 }
@@ -166,11 +185,18 @@ func NewTraceID(parts ...string) string {
 // （service / repository / handler）打日志都应该走这条，免去每条手动加
 // trace_id 字段。
 func FromContext(ctx context.Context) *zap.Logger {
-	entry := defaultLogger.Load()
-	if traceID := TraceIDFrom(ctx); traceID != "" {
-		entry = entry.With(zap.String("trace_id", traceID))
+	base := defaultLogger.Load()
+	if ctx == nil {
+		return base
 	}
-	return entry
+	e, ok := ctx.Value(ctxKey{}).(*traceEntry)
+	if !ok || e.traceID == "" {
+		return base
+	}
+	if e.base == base {
+		return e.logger
+	}
+	return base.With(zap.String("trace_id", e.traceID))
 }
 
 // Error 是 zap.Error 的薄重导出，让调用方少 import 一个包名。
@@ -181,9 +207,7 @@ func Error(err error) zap.Field {
 // parseLevel 把字符串 level 翻译成 zapcore.Level。空串当 "info" 处理。
 func parseLevel(level string) (zapcore.Level, error) {
 	var parsed zapcore.Level
-	if level == "" {
-		level = "info"
-	}
+	level = cmp.Or(level, "info")
 	if err := parsed.Set(level); err != nil {
 		return zapcore.InfoLevel, fmt.Errorf("parse log level %q: %w", level, err)
 	}

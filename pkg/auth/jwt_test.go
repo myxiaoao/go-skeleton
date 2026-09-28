@@ -80,7 +80,7 @@ func TestJWTManagerRejectsNonHS256(t *testing.T) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodNone, Claims{
-		RegisteredClaims: jwt.RegisteredClaims{Subject: "account-1"},
+		Subject: "account-1",
 	})
 	signed, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
 	if err != nil {
@@ -108,10 +108,8 @@ func TestJWTManagerRejectsTokenWithoutExp(t *testing.T) {
 	// 绕过 GenerateToken 的本地保护，手工签一个无 exp 的合法 HS256 token，
 	// 模拟攻击者拿到 secret 后签 long-lived token 的场景。
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject: "account-1",
-			Issuer:  "go-skeleton",
-		},
+		Subject: "account-1",
+		Issuer:  "go-skeleton",
 	})
 	signed, err := token.SignedString([]byte("test-secret"))
 	if err != nil {
@@ -165,7 +163,7 @@ func TestJWTManagerRejectsZeroTTL(t *testing.T) {
 
 	// GenerateTokenWithClaims 也要拒：caller 自己手工拼 claims 但没填 exp。
 	if _, err := manager.GenerateTokenWithClaims(Claims{
-		RegisteredClaims: jwt.RegisteredClaims{Subject: "account-1"},
+		Subject: "account-1",
 	}); !errors.Is(err, ErrMissingTTL) {
 		t.Fatalf("GenerateTokenWithClaims expected ErrMissingTTL, got %v", err)
 	}

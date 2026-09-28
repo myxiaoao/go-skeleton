@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"go-skeleton/config"
@@ -24,7 +25,7 @@ func InitAPI(cfg *config.Config) (*Registry, error) {
 	// 支重复写一堆 closeQuiet 干净，也少漏关一个资源的风险。
 	var cleanups []func() error
 
-	dbMgr, err := initDatabase(cfg)
+	dbMgr, err := InitDatabase(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("init database: %w", err)
 	}
@@ -111,9 +112,9 @@ type cachePinger interface {
 // 释放已开资源，nil 元素与单次失败都被静默吞掉——这是 init 失败兜底，
 // 不需要再传播。
 func runCleanups(cleanups []func() error) {
-	for i := len(cleanups) - 1; i >= 0; i-- {
-		if cleanups[i] != nil {
-			_ = cleanups[i]()
+	for _, cleanup := range slices.Backward(cleanups) {
+		if cleanup != nil {
+			_ = cleanup()
 		}
 	}
 }

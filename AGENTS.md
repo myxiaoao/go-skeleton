@@ -25,7 +25,7 @@ Go 1.27+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 | `internal/taskqueue/` | Asynq client 的薄封装 | service 通过 `ExampleQueue` 这种接口依赖它，不直接 import asynq |
 | `pkg/` | 跟业务无关的通用工具 | 严禁 import `internal/` 任何包 |
 
-数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——`AutoMigrate` 已移除，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`cmd/migrate` 用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
+数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——不用 GORM `AutoMigrate`，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`cmd/migrate` 用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
 
 迁移文件 lint 由 `migrations/migrations_test.go` 在 `make verify` 链里执行，强制三道门：(1) 文件名严格 `<14位时间戳>_<snake_case>.sql`；(2) 必须含 `-- +goose Up` 与 `-- +goose Down` 注解；(3) Up 段里 `DROP TABLE/COLUMN/CONSTRAINT`、`ALTER COLUMN TYPE/SET NOT NULL`、`RENAME COLUMN/TO`、`TRUNCATE` 这类破坏性 DDL 必须配 `-- breaking: <reason>`（或 `-- +breaking <reason>`）显式标注。新增危险 DDL 形态时同步更新 `migrations_test.go::dangerousDDL`。
 
@@ -102,7 +102,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 ## 依赖装配（手写 DI）
 
 - 不引入 Wire / Dig / Fx。装配集中写在 `internal/server.go` 的 `newHTTPHandlers` / `newEngine` 里。
-- `bootstrap.Registry` 持有跨进程共享资源：`Cfg`、`DB`、`Cache`、`Auth`、`Queue`。新增基础依赖时挂到 `Registry`，并在 `Close()` 里补关闭逻辑。
+- `bootstrap.Registry` 持有跨进程共享资源：`Cfg`、`DB`、`Cache`、`Auth`、`Queue`、`Inspector`，以及 API 优雅停机用的 `Draining` 标记。新增基础依赖时挂到 `Registry`，并在 `Close()` 里补关闭逻辑。
 - handler / service / repository **声明依赖、不构造依赖**。新增模块的标准动作：
   1. 在对应分层包里加 `NewXxx(...)` 构造器；
   2. 在 `internal/server.go` 的 `newHTTPHandlers` 里组装；
@@ -200,12 +200,12 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 
 请求级 `context.Context` 从 handler 一路传到 repository，**业务层禁止用 `context.Background()` 替换**。它带着 `trace_id`、超时、取消信号，断了会导致：HTTP 已超时但 DB 查询还在傻跑。
 
-写测试可以用 `context.Background()`，业务代码不行。
+测试里用 `t.Context()`（随测试结束自动取消），业务代码禁止用 `context.Background()` 替换。
 
 ## 环境变量
 
 - **入库模板只有根目录 `.env.example` 一份**，所有进程共用。新增配置项必须同步更新它。
-- 运行时加载顺序（在 `cmd/<proc>/main.go` 里）：
+- 运行时加载顺序（`cmd/<proc>/main.go` 调 `bootstrap.LoadConfig("<proc>")` 统一完成）：
   ```
   真实环境变量 > cmd/<proc>/.env（如果存在） > 根目录 .env
   ```
@@ -223,20 +223,21 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 
 ## pkg/ 边界
 
-`pkg/{auth,cache,database,errcode,log,response,validator}` 是通用工具。改这些包之前确认：
+`pkg/` 下的包（auth / buildinfo / cache / database / errcode / log / metrics / response / sdnotify / validator）是通用工具。改这些包之前确认：
 
 - **严禁** import `internal/` 下任何包。`pkg` 内部互相 import 合法（`pkg/response` 依赖 `pkg/errcode` 就是这样）。
 - 接口稳定优先于功能堆叠，因为理论上可以被其他项目复用。
 
-## AI 助手提示（最高频违反，每次进项目先扫这段）
+## AI 助手提示
 
-下面这些规则**写得很明白，但 AI 助手仍然会犯**。开始任何写代码任务前先内化这几条，可以省下大量返工：
+以下是本项目返工最多的几条约定（正文各节有完整说明），写代码前先对照：
 
+- **写现代 Go（目标 Go 1.27）**：遵循 [JetBrains go-modern-guidelines](https://github.com/JetBrains/go-modern-guidelines)（Claude Code 已在 `.claude/settings.json` 启用该插件），如 `errors.AsType`、`cmp.Or`、`for i := range n`、`t.Context()`、标准库 `uuid`。改代码后可跑 `go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -test ./...` 自查。
 - **不要修改 `internal/oapi/oapi.gen.go`**。它顶部标了 DO NOT EDIT，唯一改它的方式是改 `api/openapi.yaml` 然后 `make oapi`。哪怕只是改一行 import / 注释 / 字段名都会被 oapi-verify 抓出来。
 - **`oapi.Example`、`oapi.CreateExampleReq` 等业务实体类型不要 import**。业务结构以 `internal/service` 包为准（如 `service.CreateExampleReq`）；只有协议层 schema（`oapi.HealthResponse` / `oapi.LivenessResponse` / `oapi.ListExamplesParams` 等）可以直接用。
 - **service 入参永远是 `context.Context`，不是 `*gin.Context`**。Worker 也消费 service，绑死 gin 会让 Worker 跑不通。需要 trace_id / auth subject 这种字段，由 handler 提前从 `*gin.Context` 取出来，作为 primitive 传给 service。
 - **测试不要引入 testify / gomock / mockery / sqlmock / testcontainers**。本项目坚持标准库 `testing` + 手写 mock，参考 `internal/service/example_test.go`。
-- **响应字段是 `message`，不是 `msg`**（早期用过 `msg`，已经统一改成 `message` 这种完整单词；不要又退回简写）。
+- **响应字段是 `message`，不是 `msg`**：响应协议的字段名一律用完整单词（见"统一响应协议"）。
 - **错误返回值用 `pkg/errcode` 里的常量**，不要 `fmt.Errorf("...")` 字符串拼接。底层错误用 `applog.FromContext(ctx).Error(..., zap.Error(err))` 单独记日志。
 
 ## 写代码时常犯的错（已知会触发返工）
@@ -245,7 +246,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 - ❌ service 收 `*gin.Context` → ✅ 收 `context.Context`，需要的字段由 handler 传 primitive。
 - ❌ repository 之外的层 import `gorm.io/gorm` → ✅ 通过 service 包里定义的接口隔离。
 - ❌ 用 `fmt.Errorf("xxx")` 直接返 → ✅ 返 `errcode.XxxError`；底层错误 `applog.FromContext(ctx).Error(..., zap.Error(err))` 记进日志。
-- ❌ 在 service 里 `context.Background()` 起新 ctx 调 DB → ✅ 传原 ctx；只有 fire-and-forget 后台任务才允许，且必须独立带超时。
+- ❌ 在 service / handler 里 `context.Background()` 起新 ctx → ✅ 传原 ctx（`make architecture-verify` 规则 4 会拦）。需要脱离请求生命周期的后台 goroutine 放在 `internal/bootstrap` / `internal/server.go`，并独立带超时。
 - ❌ 给 Worker 复制一份和 API 不同的业务逻辑 → ✅ 共享 service。
 
 ## API 契约：OpenAPI 3.1
@@ -354,7 +355,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 
 ### 工具栈
 
-- ✅ 用 `testing`、`net/http/httptest`、`errors.As`、`gorm.io/gorm` 的 `DryRun`。
+- ✅ 用 `testing`、`net/http/httptest`、`errors.AsType`、`gorm.io/gorm` 的 `DryRun`。
 - ❌ **不引入 testify / gomock / mockery / sqlmock / testcontainers**。如果觉得不够用，先在 PR 描述里说服别人，再加依赖。
 
 ### 测试文件位置
@@ -374,7 +375,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 ### 必须遵守的细节
 
 - **测试里的日志静音**：在 `init()` 调 `applog.SetLogger(zap.NewNop())`。否则跑 `go test ./...` 会刷一堆 audit log。handler 测试还要 `validator.InitValidator()`，否则 binding 校验报错文案是空的。
-- **错误断言走 `errcode`**：用 `errors.As(err, &ec)` 拿 `errcode.Error`，比对 `ec.Code() == errcode.XxxError.Code()`。**不要**用 `err.Error() == "..."` 比较字符串。
+- **错误断言走 `errcode`**：用 `ec, ok := errors.AsType[errcode.Error](err)` 拿 `errcode.Error`，比对 `ec.Code() == errcode.XxxError.Code()`。**不要**用 `err.Error() == "..."` 比较字符串。
 - **mock 命名**：包内未导出，`mockXxx` 驼峰；持 func 字段而不是写一堆条件分支：
 
   ```go
@@ -387,7 +388,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
   ```
 
 - **trace_id 注入**：handler 测试如果要验证 `metadata.trace_id`，用一个 `gin.HandlerFunc` 提前 `c.Set("trace_id", "test-trace")`，别去 mock 整套 TraceLogger。
-- **`context.Background()` 在测试里允许**，业务代码里不行（见上文 context 传递）。
+- **测试里的 ctx 用 `t.Context()`**，不要 `context.Background()`：它随测试结束自动取消，能暴露泄漏的 goroutine。业务代码同样禁止 `context.Background()`（见上文 context 传递）。
 - **表驱动**：测试用例多于 3 个时用 `t.Run(name, ...)` + 切片表。同一个行为正反两面的 case 用独立 `TestXxx` 函数也可以，本项目两种都有，按可读性挑。
 
 ### 跑测试
@@ -490,7 +491,8 @@ go-example/
 ├── config/                     配置加载 + 类型定义
 │   ├── config.go
 │   ├── runtime.go              进程级运行时初始化(logger 等)
-│   └── types.go
+│   ├── types.go
+│   └── validate.go             启动期配置校验 + ProductionWarnings
 │
 ├── internal/                   business code（Go internal 约束）
 │   ├── server.go               package app: HTTP 装配入口 (NewServer)
@@ -522,13 +524,15 @@ go-example/
 │   │
 │   ├── middleware/             Gin 中间件
 │   │   ├── auth.go             BearerAuth + AuthSubject
+│   │   ├── body_limit.go       MaxBodyBytes
 │   │   ├── cors.go
 │   │   ├── logger.go           TraceLogger（审计日志 + 脱敏 + X-Request-ID）
 │   │   ├── rate_limit.go       IPRateLimiter
 │   │   ├── recovery.go
+│   │   ├── security_headers.go SecurityHeaders
 │   │   └── timeout.go
 │   │
-│   ├── task/                   Asynq 任务类型定义（API 和 Worker 共享）
+│   ├── task/                   Asynq 任务类型 + payload Header（API 和 Worker 共享）
 │   ├── taskqueue/              Asynq client 薄封装
 │   │   └── taskqueue.go        Queue.Available / Enqueue
 │   ├── worker/                 Asynq 消费端
@@ -540,11 +544,14 @@ go-example/
 │
 └── pkg/                        通用工具（严禁 import internal/）
     ├── auth/jwt.go             JWTManager（Layer 1）
+    ├── buildinfo/              构建期版本 / commit / 构建时间
     ├── cache/                  Redis client 封装
-    ├── database/               GORM 初始化 + 健康检查
+    ├── database/               GORM 初始化 + 健康检查 + zap SQL 日志
     ├── errcode/                业务错误码集中地（type.go + common.go）
     ├── log/                    zap logger + trace_id ctx helper
+    ├── metrics/                Prometheus 指标收集与暴露
     ├── response/response.go    统一响应 (code/message/reason/data/metadata)
+    ├── sdnotify/               systemd READY / WATCHDOG 通知
     └── validator/              binding 错误翻译
 ```
 

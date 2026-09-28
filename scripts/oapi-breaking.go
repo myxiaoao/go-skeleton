@@ -103,8 +103,8 @@ func main() {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintln(os.Stderr)
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		exitErr, isExitErr := errors.AsType[*exec.ExitError](err)
+		if isExitErr {
 			fmt.Fprintf(os.Stderr,
 				"oapi-breaking: ERR-level breaking changes detected (exit=%d).\n",
 				exitErr.ExitCode())
@@ -116,7 +116,7 @@ func main() {
 		fmt.Fprintln(os.Stderr,
 			"              re-run with OAPI_ALLOW_BREAKING=1 and document it in the PR.")
 		// 优先透传 oasdiff 的 exit code，找不到就用 1。
-		if exitErr != nil {
+		if isExitErr {
 			os.Exit(exitErr.ExitCode())
 		}
 		os.Exit(1)

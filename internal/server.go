@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -139,12 +140,7 @@ func queueNames(queues map[string]int) []string {
 	if len(queues) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(queues))
-	for name := range queues {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(queues))
 }
 
 // Run 开始监听并接 HTTP 请求，直到 Shutdown 被调。屏蔽

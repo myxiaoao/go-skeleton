@@ -21,12 +21,13 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -51,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Code < entries[j].Code })
+	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.Code, b.Code) })
 
 	var b strings.Builder
 	b.WriteString("# Error Codes\n\n")

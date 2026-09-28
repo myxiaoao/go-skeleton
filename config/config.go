@@ -147,7 +147,7 @@ func queueWeightsEnv(key string, fallback map[string]int) (map[string]int, error
 		return fallback, nil
 	}
 	out := map[string]int{}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

@@ -70,8 +70,7 @@ func (r *Registry) StartAsynqCollector(ctx context.Context, inspector asyncQueue
 	}
 
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		tick := time.Tick(interval)
 
 		// 起步先抓一次，让首次 scrape 不至于是空数据。
 		r.collectAsynq(inspector, queues, logger)
@@ -79,7 +78,7 @@ func (r *Registry) StartAsynqCollector(ctx context.Context, inspector asyncQueue
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-tick:
 				r.collectAsynq(inspector, queues, logger)
 			}
 		}

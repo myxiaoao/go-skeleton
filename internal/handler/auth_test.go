@@ -124,3 +124,43 @@ func TestAuthHandlerCreateTokenReturnsServiceDisabledWhenGated(t *testing.T) {
 		t.Fatalf("reason = %q, want %q", body.Reason, errcode.ServiceDisabled.Reason())
 	}
 }
+
+func TestAuthHandlerCreateTokenErrorMapping(t *testing.T) {
+	validator.InitValidator()
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name       string
+		ttl        time.Duration
+		body       string
+		wantStatus int
+		wantCode   int
+	}{
+		// ttl<=0 是服务端错配，不能报成客户端参数错误。
+		{"misconfigured ttl", 0, `{"subject":"subject-1"}`, http.StatusInternalServerError, errcode.InternalError.Code()},
+		{"blank subject", time.Hour, `{"subject":"   "}`, http.StatusBadRequest, errcode.InvalidParams.Code()},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			manager, err := auth.NewJWTManager(auth.JWTConfig{Secret: "test-secret", Issuer: "test", TTL: c.ttl})
+			if err != nil {
+				t.Fatalf("NewJWTManager: %v", err)
+			}
+			router := gin.New()
+			router.POST("/auth/token", NewAuthHandler(manager, true).CreateToken)
+
+			req := httptest.NewRequest(http.MethodPost, "/auth/token", strings.NewReader(c.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			var body response.Response
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if rec.Code != c.wantStatus || body.Code != c.wantCode {
+				t.Errorf("got (status %d, code %d), want (%d, %d)", rec.Code, body.Code, c.wantStatus, c.wantCode)
+			}
+		})
+	}
+}

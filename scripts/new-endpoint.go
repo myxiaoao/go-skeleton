@@ -40,15 +40,17 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -314,11 +316,8 @@ func collectOperations(name string, dtoMode bool) ([]operation, string, error) {
 
 	// 按 (path, verb) 稳定排序：让生成的 router 注册 / APIServer 方法顺序可
 	// 预测，避免 map 迭代非确定性导致 git diff 抖动。
-	sort.Slice(ops, func(i, j int) bool {
-		if ops[i].Path != ops[j].Path {
-			return ops[i].Path < ops[j].Path
-		}
-		return verbRank(ops[i].HTTPVerb) < verbRank(ops[j].HTTPVerb)
+	slices.SortFunc(ops, func(a, b operation) int {
+		return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(verbRank(a.HTTPVerb), verbRank(b.HTTPVerb)))
 	})
 
 	// 计算每条 op 的 GinPath（去掉资源前缀后剩下的部分）。例：
@@ -610,12 +609,7 @@ func extractDTOFromSchema(ref *openapi3.SchemaRef, dtoName string) *dto {
 		required[r] = true
 	}
 	// properties map 顺序不定——按 key 排序，让生成 diff 稳定。
-	keys := make([]string, 0, len(s.Properties))
-	for k := range s.Properties {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(s.Properties)) {
 		field, reason := extractScalarField(k, s.Properties[k], required[k])
 		if reason != "" {
 			out.Fields = nil
@@ -777,12 +771,9 @@ func findResourcePrefix(ops []operation, name string) string {
 	}
 	// 截到末尾完整 segment：避免 "/api/v1/orders" 与 "/api/v1/order_items"
 	// 公共前缀 "/api/v1/order" 这种情况（虽然命名习惯里 _ 少见）。
-	if idx := strings.LastIndex(prefix, "/"); idx >= 0 && idx < len(prefix)-1 {
-		// 末尾段如果是 {var}，回退一级让 group 路径更稳。
-		tail := prefix[idx+1:]
-		if strings.HasPrefix(tail, "{") {
-			prefix = prefix[:idx]
-		}
+	// 末尾段如果是 {var}，回退一级让 group 路径更稳。
+	if before, tail, ok := strings.CutLast(prefix, "/"); ok && strings.HasPrefix(tail, "{") {
+		prefix = before
 	}
 	// 去末尾斜杠。
 	prefix = strings.TrimRight(prefix, "/")
@@ -790,10 +781,7 @@ func findResourcePrefix(ops []operation, name string) string {
 }
 
 func commonPrefix(a, b string) string {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
+	n := min(len(b), len(a))
 	i := 0
 	for i < n && a[i] == b[i] {
 		i++
@@ -1488,7 +1476,7 @@ func renderServiceTest(name, lower string, _ []operation) string {
 
 // %[1]sService smoke 测试：由 make new-endpoint NAME=%[1]s 生成。
 // 业务实现填上后按 example_test.go 风格补真实用例（errcode 断言走
-// errors.As(err, &ec) + ec.Code() 比较）。
+// errors.AsType[errcode.Error](err) + ec.Code() 比较）。
 
 import (
 	"testing"

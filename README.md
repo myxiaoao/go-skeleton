@@ -227,7 +227,7 @@ make oapi-verify   # 生成产物与 yaml 不一致时失败（make verify 会�
 - [ ] **warn** `METRICS_ADDR` 设置成独立地址（如 `127.0.0.1:9090`），让 `/metrics` 与业务 API 在 L4 层就隔离。空值时 `/metrics` 挂在业务端口，公网暴露会顺带泄露指标。
 - [ ] **warn** `PPROF_ENABLED=true` 时 `PPROF_ADDR` 必须绑 loopback（`127.0.0.1` / `::1` / `localhost`）。pprof 端点暴露 heap / goroutine / profile，公网可访问 = 信息泄露 + DoS 向量。默认 false，排障时打开 + SSH 隧道访问。
 - [ ] K8s liveness 接 `/livez`，readiness 接 `/health`。**不要**把 liveness 指向 `/health`——DB 抖一下会把健康 Pod 杀掉重启。
-- [ ] 根据实例规格和 Postgres `max_connections` 调 `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME`，默认值（30 / 15 / 30m）是开发档位，不是生产档位。
+- [ ] 根据实例规格和 Postgres `max_connections` 调 `DB_MAX_CONNS` / `DB_MIN_CONNS` / `DB_CONN_MAX_LIFETIME`，默认值（30 / 0 / 30m）是开发档位，不是生产档位。
 - [ ] API 启动前先跑 `go run ./cmd/migrate`（goose up，应用 `migrations/` 待执行迁移）。
 - [ ] 想清楚是否部署 worker 进程：有 `*/tasks` 接口暴露但没消费者，任务会越堆越多。
 - [ ] **拦** Worker 进程的业务 processor 必须真注入。`APP_ENV=production` 下没真业务 processor（如 `internal/worker.go::buildWorkerDeps` 里 `reg.DB == nil`）会 fail-fast，避免任务被 noop 静默 ack 掉只剩 warn 日志。

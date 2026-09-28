@@ -230,7 +230,7 @@ Tick these off before pointing real traffic at this service:
 - [ ] **warn** Set `METRICS_ADDR` to a separate address (e.g. `127.0.0.1:9090`) so `/metrics` is isolated from the business API at L4. Empty means `/metrics` is served on the business port; exposing it publicly leaks metrics along with it.
 - [ ] **warn** When `PPROF_ENABLED=true`, `PPROF_ADDR` must bind to loopback (`127.0.0.1` / `::1` / `localhost`). The pprof endpoint exposes heap / goroutine / profile data — public reachability is both an info-leak and a DoS vector. Off by default; turn it on for incident response and reach it through an SSH tunnel.
 - [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do **not** point liveness at `/health` — a DB blip would restart healthy pods.
-- [ ] Tune `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections`. The defaults (30 / 15 / 30m) are development-tier, not production-tier.
+- [ ] Tune `DB_MAX_CONNS` / `DB_MIN_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections`. The defaults (30 / 0 / 30m) are development-tier, not production-tier.
 - [ ] Run `go run ./cmd/migrate` (goose up, applies pending `migrations/`) before the API process starts.
 - [ ] Decide on the worker process: if any `*/tasks` endpoints are reachable but no consumer is deployed, queued tasks pile up indefinitely.
 - [ ] **block** Wire real business processors into the worker. Under `APP_ENV=production`, if no real processor is injected (e.g. `internal/worker.go::buildWorkerDeps` sees `reg.DB == nil`), the worker fails to start — preventing the noop fallback from silently `ack`-ing tasks with only a warn log.

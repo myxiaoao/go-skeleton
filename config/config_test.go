@@ -20,8 +20,8 @@ func TestLoadAllDefaults(t *testing.T) {
 	for _, k := range []string{
 		"APP_ENV",
 		"SERVER_PORT", "GIN_MODE", "REQUEST_TIMEOUT",
-		"POSTGRES", "GORM_LOG_LEVEL",
-		"DB_MAX_IDLE_CONNS", "DB_MAX_OPEN_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
+		"POSTGRES", "DB_LOG_LEVEL",
+		"DB_MAX_CONNS", "DB_MIN_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 		"REDIS_ADDR", "REDIS_PASSWORD", "REDIS_CACHE_DB", "REDIS_QUEUE_DB",
 		"JWT_SECRET", "JWT_ISSUER", "JWT_TTL", "AUTH_DEV_TOKEN_ENABLED",
 		"LOG_LEVEL", "LOG_FORMAT", "LOG_STACKTRACE_LEVEL", "AUDIT_LOG_ENABLED", "AUDIT_LOG_EXCLUDE_PATHS",
@@ -46,8 +46,9 @@ func TestLoadAllDefaults(t *testing.T) {
 		{"Server.Port", cfg.Server.Port, ":3000"},
 		{"Server.GinMode", cfg.Server.GinMode, "release"},
 		{"Server.RequestTimeout", cfg.Server.RequestTimeout, 30 * time.Second},
-		{"Postgres.MaxIdleConns", cfg.Postgres.MaxIdleConns, 15},
-		{"Postgres.MaxOpenConns", cfg.Postgres.MaxOpenConns, 30},
+		{"Postgres.LogLevel", cfg.Postgres.LogLevel, "warn"},
+		{"Postgres.MaxConns", cfg.Postgres.MaxConns, 30},
+		{"Postgres.MinConns", cfg.Postgres.MinConns, 0},
 		{"Postgres.ConnMaxLifetime", cfg.Postgres.ConnMaxLifetime, 30 * time.Minute},
 		{"Postgres.ConnMaxIdleTime", cfg.Postgres.ConnMaxIdleTime, 5 * time.Minute},
 		{"Redis.CacheDB", cfg.Redis.CacheDB, 0},
@@ -90,7 +91,7 @@ func TestLoadHonorsOverrides(t *testing.T) {
 	envSet(t, map[string]string{
 		"SERVER_PORT":             ":8080",
 		"REQUEST_TIMEOUT":         "45s",
-		"DB_MAX_OPEN_CONNS":       "100",
+		"DB_MAX_CONNS":            "100",
 		"REDIS_QUEUE_DB":          "9",
 		"JWT_TTL":                 "2h",
 		"AUDIT_LOG_ENABLED":       "false",
@@ -110,8 +111,8 @@ func TestLoadHonorsOverrides(t *testing.T) {
 	if cfg.Server.RequestTimeout != 45*time.Second {
 		t.Errorf("RequestTimeout = %v, want 45s", cfg.Server.RequestTimeout)
 	}
-	if cfg.Postgres.MaxOpenConns != 100 {
-		t.Errorf("MaxOpenConns = %d, want 100", cfg.Postgres.MaxOpenConns)
+	if cfg.Postgres.MaxConns != 100 {
+		t.Errorf("MaxConns = %d, want 100", cfg.Postgres.MaxConns)
 	}
 	if cfg.Redis.QueueDB != 9 {
 		t.Errorf("QueueDB = %d, want 9", cfg.Redis.QueueDB)
@@ -135,7 +136,7 @@ func TestLoadHonorsOverrides(t *testing.T) {
 
 func TestLoadReturnsErrorOnGarbageInput(t *testing.T) {
 	envSet(t, map[string]string{
-		"DB_MAX_OPEN_CONNS": "abc",   // 整数解析失败
+		"DB_MAX_CONNS":      "abc",   // 整数解析失败
 		"REQUEST_TIMEOUT":   "30",    // 缺单位 → ParseDuration 失败
 		"AUDIT_LOG_ENABLED": "maybe", // bool 解析失败
 	})
@@ -146,7 +147,7 @@ func TestLoadReturnsErrorOnGarbageInput(t *testing.T) {
 	}
 
 	msg := err.Error()
-	for _, want := range []string{"DB_MAX_OPEN_CONNS", "REQUEST_TIMEOUT", "AUDIT_LOG_ENABLED"} {
+	for _, want := range []string{"DB_MAX_CONNS", "REQUEST_TIMEOUT", "AUDIT_LOG_ENABLED"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q missing key %s", msg, want)
 		}
@@ -157,7 +158,7 @@ func TestLoadStillReturnsConfigOnError(t *testing.T) {
 	// 即使遇到坏 env，Load 也会返回部分填好的 *Config，让 caller 在 fail-fast
 	// 退出前先 log / 调试。这里验证坏 key 对应字段已经回落到默认值。
 	envSet(t, map[string]string{
-		"DB_MAX_OPEN_CONNS": "abc",
+		"DB_MAX_CONNS": "abc",
 	})
 
 	cfg, err := Load()
@@ -167,8 +168,8 @@ func TestLoadStillReturnsConfigOnError(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected non-nil cfg even on error")
 	}
-	if cfg.Postgres.MaxOpenConns != 30 {
-		t.Errorf("MaxOpenConns = %d, want 30 (fallback)", cfg.Postgres.MaxOpenConns)
+	if cfg.Postgres.MaxConns != 30 {
+		t.Errorf("MaxConns = %d, want 30 (fallback)", cfg.Postgres.MaxConns)
 	}
 }
 

@@ -38,7 +38,7 @@ func Load() (*Config, error) {
 		},
 		Postgres: PostgresConfig{
 			DSN:      os.Getenv("POSTGRES"),
-			LogLevel: os.Getenv("GORM_LOG_LEVEL"),
+			LogLevel: getEnvOrDefault("DB_LOG_LEVEL", "warn"),
 		},
 		Redis: RedisConfig{
 			Addr:     os.Getenv("REDIS_ADDR"),
@@ -86,9 +86,9 @@ func Load() (*Config, error) {
 	cfg.Docs.HideSchemas, err = boolEnv("DOCS_HIDE_SCHEMAS", false)
 	collect(err)
 
-	cfg.Postgres.MaxIdleConns, err = intEnv("DB_MAX_IDLE_CONNS", 15)
+	cfg.Postgres.MaxConns, err = intEnv("DB_MAX_CONNS", 30)
 	collect(err)
-	cfg.Postgres.MaxOpenConns, err = intEnv("DB_MAX_OPEN_CONNS", 30)
+	cfg.Postgres.MinConns, err = intEnv("DB_MIN_CONNS", 0)
 	collect(err)
 	cfg.Postgres.ConnMaxLifetime, err = durationEnv("DB_CONN_MAX_LIFETIME", 30*time.Minute)
 	collect(err)

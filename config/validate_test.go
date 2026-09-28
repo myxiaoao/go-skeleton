@@ -52,26 +52,50 @@ func TestValidateTableDriven(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Postgres DSN 非空时 MaxOpenConns 必须正",
+			name: "Postgres DSN 非空时 MaxConns 必须正",
 			mutate: func(c *Config) {
-				c.Postgres.MaxOpenConns = 0
+				c.Postgres.MaxConns = 0
 			},
 			wantErr:     true,
-			wantInclude: "DB_MAX_OPEN_CONNS",
+			wantInclude: "DB_MAX_CONNS",
 		},
 		{
-			name: "Postgres DSN 非空时 MaxIdleConns 不能为负",
+			name: "Postgres DSN 非空时 MinConns 不能为负",
 			mutate: func(c *Config) {
-				c.Postgres.MaxIdleConns = -1
+				c.Postgres.MinConns = -1
 			},
 			wantErr:     true,
-			wantInclude: "DB_MAX_IDLE_CONNS",
+			wantInclude: "DB_MIN_CONNS",
+		},
+		{
+			name: "Postgres MinConns 不能超过 MaxConns",
+			mutate: func(c *Config) {
+				c.Postgres.MinConns = 31
+			},
+			wantErr:     true,
+			wantInclude: "DB_MIN_CONNS",
+		},
+		{
+			name: "Postgres LogLevel 非法",
+			mutate: func(c *Config) {
+				c.Postgres.LogLevel = "verbose"
+			},
+			wantErr:     true,
+			wantInclude: "DB_LOG_LEVEL",
+		},
+		{
+			name: "Postgres LogLevel 大小写不敏感",
+			mutate: func(c *Config) {
+				c.Postgres.LogLevel = "INFO"
+			},
+			wantErr: false,
 		},
 		{
 			name: "Postgres DSN 为空时连接池约束跳过",
 			mutate: func(c *Config) {
 				c.Postgres.DSN = ""
-				c.Postgres.MaxOpenConns = 0 // 本应非法，但 DSN 空时不校验
+				c.Postgres.MaxConns = 0 // invalid, but skipped when DSN is empty
+				c.Postgres.LogLevel = "verbose"
 			},
 			wantErr: false,
 		},
@@ -275,9 +299,9 @@ func defaultValidConfig() *Config {
 			Layout: "sidebar",
 		},
 		Postgres: PostgresConfig{
-			DSN:          "postgres://x:y@localhost/db",
-			MaxOpenConns: 30,
-			MaxIdleConns: 15,
+			DSN:      "postgres://x:y@localhost/db",
+			LogLevel: "warn",
+			MaxConns: 30,
 		},
 		Log: LogConfig{
 			Format: "json",

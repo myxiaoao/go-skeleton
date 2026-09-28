@@ -77,8 +77,8 @@ func InitDatabase(cfg *config.Config) (*database.DBManager, error) {
 	return database.Init(database.Config{
 		DSN:             cfg.Postgres.DSN,
 		LogLevel:        cfg.Postgres.LogLevel,
-		MaxIdleConns:    cfg.Postgres.MaxIdleConns,
-		MaxOpenConns:    cfg.Postgres.MaxOpenConns,
+		MaxIdleConns:    cfg.Postgres.MinConns,
+		MaxOpenConns:    cfg.Postgres.MaxConns,
 		ConnMaxLifetime: cfg.Postgres.ConnMaxLifetime,
 		ConnMaxIdleTime: cfg.Postgres.ConnMaxIdleTime,
 	})

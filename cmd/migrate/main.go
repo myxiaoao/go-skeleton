@@ -68,8 +68,8 @@ func main() {
 	if sqlDB == nil {
 		applog.L().Fatal("database is not configured")
 	}
-	// sqlDB is a database/sql view over the shared pgx pool; goose reuses it
-	// instead of opening its own connections.
+	// sqlDB 是共享 pgx pool 之上的 database/sql 视图，goose 复用它，
+	// 不另开自己的连接。
 
 	// Postgres session-level advisory lock：多实例并发跑 migrate 时串行化，只有
 	// 持锁者执行、其余阻塞等待（默认重试 5s × 60 = 最多 5min），杜绝并发 DDL /

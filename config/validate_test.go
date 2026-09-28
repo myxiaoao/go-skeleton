@@ -94,7 +94,7 @@ func TestValidateTableDriven(t *testing.T) {
 			name: "Postgres DSN 为空时连接池约束跳过",
 			mutate: func(c *Config) {
 				c.Postgres.DSN = ""
-				c.Postgres.MaxConns = 0 // invalid, but skipped when DSN is empty
+				c.Postgres.MaxConns = 0 // 本应非法，但 DSN 空时不校验
 				c.Postgres.LogLevel = "verbose"
 			},
 			wantErr: false,

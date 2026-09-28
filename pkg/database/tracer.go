@@ -14,10 +14,10 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// slowQueryThreshold marks queries slower than this as warn.
+// slowQueryThreshold 是慢查询阈值，超过它的查询按 warn 级别记录。
 const slowQueryThreshold = 200 * time.Millisecond
 
-// logLevel mirrors DB_LOG_LEVEL; higher values log more.
+// logLevel 对应 DB_LOG_LEVEL；数值越大记录得越多。
 type logLevel int
 
 const (
@@ -27,9 +27,9 @@ const (
 	logInfo
 )
 
-// parseLogLevel maps DB_LOG_LEVEL to logLevel. Empty means warn. Unknown
-// values are rejected here as well as in config.validate, so callers that
-// bypass config still fail loudly.
+// parseLogLevel 把 DB_LOG_LEVEL 映射成 logLevel。空值等同 warn。未知
+// 取值这里和 config.validate 都会拒绝，让绕开 config 直接调用的
+// caller 也能明确报错，而不是静默降级。
 func parseLogLevel(level string) (logLevel, error) {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "silent":
@@ -52,9 +52,9 @@ type traceData struct {
 	sql   string
 }
 
-// queryTracer implements pgx.QueryTracer and routes SQL logs through
-// applog.FromContext so they carry trace_id. Only the SQL template is
-// logged, never argument values, to keep sensitive data out of logs.
+// queryTracer 实现 pgx.QueryTracer，把 SQL 日志经 applog.FromContext
+// 输出，让日志带上 trace_id。只记录 SQL 模板本身、绝不记录参数值，
+// 避免敏感数据落进日志。
 type queryTracer struct {
 	level logLevel
 }
@@ -83,7 +83,7 @@ func (t *queryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.T
 	)
 	switch {
 	case errors.Is(data.Err, context.Canceled):
-		// Client went away; not a database fault.
+		// 客户端主动断开，不算数据库故障。
 		need, level, msg, extra = logWarn, zapcore.WarnLevel, "db query canceled", zap.Error(data.Err)
 	case data.Err != nil:
 		need, level, msg, extra = logError, zapcore.ErrorLevel, "db query failed", zap.Error(data.Err)

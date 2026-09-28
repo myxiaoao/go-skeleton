@@ -46,7 +46,7 @@ formatters:
       # Don't auto-rewrite import blanks/dot imports (e.g. _ "embed").
       custom-order: true
   exclusions:
-    # Generated code shouldn't be reformatted — make oapi / make sqlc own it.
+    # 生成代码不应被重新格式化 —— make oapi / make sqlc 各自负责自己的产物。
     paths:
       - internal/oapi
       - internal/repository/sqlcdb

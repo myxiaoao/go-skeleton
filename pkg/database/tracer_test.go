@@ -62,7 +62,7 @@ func TestQueryTracerEnd(t *testing.T) {
 		start     time.Time
 		err       error
 		wantLevel zapcore.Level
-		wantMsg   string // empty means nothing should be logged
+		wantMsg   string // 空字符串表示预期不打任何日志
 	}{
 		{"error logged at warn", logWarn, fast, boom, zapcore.ErrorLevel, "db query failed"},
 		{"error logged at error", logError, fast, boom, zapcore.ErrorLevel, "db query failed"},

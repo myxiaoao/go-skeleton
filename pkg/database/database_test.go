@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// unreachableDSN points at a closed port: pgxpool connects lazily, so
-// constructing a pool against it must still succeed.
+// unreachableDSN 指向一个关闭的端口：pgxpool 惰性建连，所以针对它
+// 构造 pool 仍然应该成功。
 const unreachableDSN = "postgres://u:p@127.0.0.1:1/db?sslmode=disable"
 
 func TestNormalizePoolSettings(t *testing.T) {

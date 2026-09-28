@@ -1,6 +1,6 @@
-# sqlc config: migrations/ is the schema source of truth (goose annotations
-# are understood natively), queries live next to the repository layer.
-# Generated code is committed; `make sqlc-verify` guards drift.
+# sqlc 配置：migrations/ 是 schema 真相源（原生识别 goose 注解），
+# queries 就近放在 repository 层旁边。
+# 生成代码入库；`make sqlc-verify` 负责校验漂移。
 version: "2"
 sql:
   - engine: postgresql
@@ -12,8 +12,8 @@ sql:
         out: internal/repository/sqlcdb
         sql_package: pgx/v5
         overrides:
-          # pgx/v5 defaults to pgtype.Timestamp[tz]; plain time.Time keeps
-          # the model mapping trivial for NOT NULL columns.
+          # pgx/v5 默认映射成 pgtype.Timestamp[tz]；对 NOT NULL 列直接用
+          # 原生 time.Time 能让 model 映射更简单。
           - db_type: pg_catalog.timestamp
             go_type: time.Time
           - db_type: pg_catalog.timestamptz

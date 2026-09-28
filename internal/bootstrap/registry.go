@@ -71,9 +71,9 @@ func (r *Registry) Close() error {
 	return errors.Join(errs...)
 }
 
-// InitDatabase translates cfg into database.Config and builds the pgx pool.
-// An empty DSN yields a manager with a nil pool; callers (InitAPI /
-// InitWorker / cmd/migrate) decide whether that is fatal.
+// InitDatabase 从 cfg 翻译出 database.Config 后建 pgx pool。DSN 为空时
+// 返回带 nil pool 的 manager，由调用方（InitAPI / InitWorker /
+// cmd/migrate）决定是否致命。
 func InitDatabase(cfg *config.Config) (*database.DBManager, error) {
 	return database.Init(context.Background(), database.Config{
 		DSN:             cfg.Postgres.DSN,

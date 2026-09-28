@@ -20,18 +20,18 @@ import (
 
 var errNotConfigured = errors.New("database is not configured")
 
-// DBManager owns the Postgres connection pool. pool is the only real pool;
-// sqlDB is a database/sql view over the same pool for libraries that need
-// *sql.DB (goose).
+// DBManager 持有 Postgres 连接池。pool 是唯一真正的连接池；
+// sqlDB 是同一个 pool 之上的 database/sql 视图，给需要 *sql.DB
+// 的库（如 goose）用。
 type DBManager struct {
 	pool  *pgxpool.Pool
 	sqlDB *sql.DB
-	// gorm is a temporary bridge sharing sqlDB until repositories move to
-	// sqlc; it is removed afterwards.
+	// gorm 是共享 sqlDB 的临时桥接层，等 repository 迁到 sqlc
+	// 之后会被移除。
 	gorm *gorm.DB
 }
 
-// Config is the database connection config: DSN + pool settings.
+// Config 是数据库连接配置：DSN + 连接池参数。
 type Config struct {
 	DSN             string
 	LogLevel        string
@@ -41,7 +41,7 @@ type Config struct {
 	ConnMaxIdleTime time.Duration
 }
 
-// poolSettings is Config after defaults are applied.
+// poolSettings 是连接池参数补完默认值之后的 Config。
 type poolSettings struct {
 	maxConns        int32
 	minConns        int32
@@ -49,12 +49,12 @@ type poolSettings struct {
 	connMaxIdleTime time.Duration
 }
 
-// Init builds the pool. An empty DSN yields an empty manager (no error) so
-// InitAPI / InitWorker decide whether the database is required.
+// Init 建连接池。DSN 为空时返回空 manager（不报错），让
+// InitAPI / InitWorker 决定数据库是否必需。
 //
-// pgxpool connects lazily and Init does not ping: startup fail-fast is
-// covered by bootstrap.probeDependencies (API / Worker) and the explicit
-// ping in cmd/migrate.
+// pgxpool 惰性建连，Init 本身不 ping：启动期 fail-fast 由
+// bootstrap.probeDependencies（API / Worker）和 cmd/migrate 里
+// 显式的 ping 各自覆盖。
 func Init(ctx context.Context, cfg Config) (*DBManager, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return &DBManager{}, nil
@@ -76,12 +76,12 @@ func Init(ctx context.Context, cfg Config) (*DBManager, error) {
 	return m, nil
 }
 
-// NewManager wraps an existing pool. Tests can pass a pool pointing at an
-// unreachable address because pgxpool does not connect until first use.
+// NewManager 包装一个已有的 pool。测试可以传一个指向不可达地址的 pool，
+// 因为 pgxpool 在首次使用前不会真正建连。
 func NewManager(pool *pgxpool.Pool) (*DBManager, error) {
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	gdb, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
-		Logger:               logger.Discard, // SQL is logged by queryTracer
+		Logger:               logger.Discard, // SQL 已由 queryTracer 记录
 		DisableAutomaticPing: true,
 	})
 	if err != nil {
@@ -91,7 +91,7 @@ func NewManager(pool *pgxpool.Pool) (*DBManager, error) {
 	return &DBManager{pool: pool, sqlDB: sqlDB, gorm: gdb}, nil
 }
 
-// Pool returns the pgx pool. Only repository wiring should use it.
+// Pool 返回 pgx pool。只有 repository 装配层应该用它。
 func (m *DBManager) Pool() *pgxpool.Pool {
 	if m == nil {
 		return nil
@@ -99,7 +99,7 @@ func (m *DBManager) Pool() *pgxpool.Pool {
 	return m.pool
 }
 
-// SQLDB returns a database/sql handle backed by the same pool.
+// SQLDB 返回同一个 pool 之上的 database/sql 句柄。
 func (m *DBManager) SQLDB() *sql.DB {
 	if m == nil {
 		return nil
@@ -107,7 +107,7 @@ func (m *DBManager) SQLDB() *sql.DB {
 	return m.sqlDB
 }
 
-// DB returns the temporary GORM bridge.
+// DB 返回临时的 GORM 桥接层。
 func (m *DBManager) DB() *gorm.DB {
 	if m == nil {
 		return nil
@@ -115,7 +115,7 @@ func (m *DBManager) DB() *gorm.DB {
 	return m.gorm
 }
 
-// Ping checks reachability; /health calls it with a short-timeout ctx.
+// Ping 探测数据库是否可达；/health 会带短超时 ctx 调它。
 func (m *DBManager) Ping(ctx context.Context) error {
 	if m == nil || m.pool == nil {
 		return errNotConfigured
@@ -126,8 +126,8 @@ func (m *DBManager) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Close closes sqlDB first (it does not own the pool), then the pool.
-// nil-safe; bootstrap.Registry.Close calls it.
+// Close 先关 sqlDB（它不拥有 pool），再关 pool。
+// nil-safe，bootstrap.Registry.Close 会调它。
 func (m *DBManager) Close() error {
 	if m == nil || m.pool == nil {
 		return nil
@@ -155,8 +155,8 @@ func newPoolConfig(cfg Config) (*pgxpool.Config, error) {
 	return poolCfg, nil
 }
 
-// normalizePoolSettings applies defaults for zero / out-of-range values so
-// callers need not fill every field.
+// normalizePoolSettings 给零值 / 越界值补上默认值，这样 caller
+// 不必填满每个字段。
 func normalizePoolSettings(cfg Config) poolSettings {
 	s := poolSettings{
 		maxConns:        30,

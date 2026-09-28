@@ -196,8 +196,8 @@ func isInsecureJWTSecret(secret string) bool {
 	return ok
 }
 
-// validatePostgres checks pool and log settings only when a DSN is set;
-// an empty DSN means the database module is disabled.
+// validatePostgres 仅在 DSN 非空时校验连接池和日志级别设置；
+// DSN 为空表示数据库模块未启用。
 func validatePostgres(pg PostgresConfig, add func(string)) {
 	if strings.TrimSpace(pg.DSN) == "" {
 		return

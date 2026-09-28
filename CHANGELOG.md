@@ -14,6 +14,16 @@ Commit prefixes follow the convention in `CLAUDE.md`
 
 ### Changed
 
+- **数据访问从 GORM 迁移到 sqlc（pgx/v5）**: 查询写在
+  `internal/repository/queries/*.sql`，`make sqlc` 生成
+  `internal/repository/sqlcdb`（`make verify` 新增 `sqlc-verify` 校验产物已提交）。
+  `pkg/database` 改为 pgxpool + pgx QueryTracer（只记 SQL 模板）；repository
+  事务改用 `pgx.BeginTxFunc`，新增 `repository.TxManager` / `service.Transactor`；
+  `model.Example.ID` 改为 `int64`。配置项改名：`GORM_LOG_LEVEL` → `DB_LOG_LEVEL`、
+  `DB_MAX_OPEN_CONNS` → `DB_MAX_CONNS`、`DB_MAX_IDLE_CONNS` → `DB_MIN_CONNS`。
+  architecture-verify 规则 2 改为限制 pgx / sqlcdb，新增规则 5 全仓禁止 gorm。
+  `CLAUDE.md` / `AGENTS.md` 同步新增"代码注释统一用简体中文"约定。
+
 - **`api/openapi.yaml` 全量加中文 `summary` / `description`**:
   Stoplight Elements 渲染 description 走 Markdown 原生支持中文，团队 review
   /docs 更顺。覆盖：4 个 tag（health/auth/example/meta）、8 个 endpoint 的

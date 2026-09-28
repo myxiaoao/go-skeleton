@@ -6,7 +6,7 @@
 
 ## 技术栈
 
-Go 1.27+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
+Go 1.27+ + Gin + sqlc（pgx/v5）+ PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 
 ## 顶层目录
 
@@ -18,6 +18,7 @@ Go 1.27+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 | `internal/` (package `app`) | `server.go` / `worker.go` 把 `Registry` 装配成完整调用链 | 所有 handler/service/repository 的 `new` 集中在这里 |
 | `internal/router/` | URL → handler 映射 | 不构造依赖、不做初始化 |
 | `internal/handler/` `service/` `repository/` `model/` | 分层业务代码 | 见下文"分层规则" |
+| `internal/repository/queries/` `internal/repository/sqlcdb/` | SQL 查询 / sqlc 生成代码 | 查询只写在 `queries/*.sql`；`sqlcdb/` 由 `make sqlc` 生成、入库、**禁止手改** |
 | `internal/middleware/` | Gin 中间件 | 错误响应走 `response.ErrorResponse` |
 | `pkg/errcode/` | 业务错误码 | 只在这里定义新错误，不在 service/handler 内联构造 |
 | `internal/task/` | Asynq 任务类型定义 | API 和 Worker 共享 |
@@ -25,9 +26,11 @@ Go 1.27+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 | `internal/taskqueue/` | Asynq client 的薄封装 | service 通过 `ExampleQueue` 这种接口依赖它，不直接 import asynq |
 | `pkg/` | 跟业务无关的通用工具 | 严禁 import `internal/` 任何包 |
 
-数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——不用 GORM `AutoMigrate`，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`cmd/migrate` 用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
+数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——sqlc 也直接以 migrations/ 为 schema 输入，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`cmd/migrate` 用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
 
 迁移文件 lint 由 `migrations/migrations_test.go` 在 `make verify` 链里执行，强制三道门：(1) 文件名严格 `<14位时间戳>_<snake_case>.sql`；(2) 必须含 `-- +goose Up` 与 `-- +goose Down` 注解；(3) Up 段里 `DROP TABLE/COLUMN/CONSTRAINT`、`ALTER COLUMN TYPE/SET NOT NULL`、`RENAME COLUMN/TO`、`TRUNCATE` 这类破坏性 DDL 必须配 `-- breaking: <reason>`（或 `-- +breaking <reason>`）显式标注。新增危险 DDL 形态时同步更新 `migrations_test.go::dangerousDDL`。
+
+查询用 [sqlc](https://sqlc.dev)（`sqlc.yaml`，pgx/v5）：在 `internal/repository/queries/<资源>.sql` 写 `-- name: Xxx :one|:many|:exec` 查询 → `make sqlc` 生成 `internal/repository/sqlcdb` → repository 调生成方法并把行类型映射成 `model`。`make verify` 里的 `sqlc-verify` 会重新生成并 `git diff` 校验产物已提交。可选条件优先用 `sqlc.narg()`；确实写不出的动态查询允许在 repository 内用 pgx 手写参数化 SQL，**不引入** query builder。`LIMIT` / `OFFSET` 参数写 `sqlc.arg(lim)::bigint` 让生成类型为 int64。
 
 ## 分层规则：handler → service → repository
 
@@ -42,17 +45,18 @@ Go 1.27+ + Gin + GORM + PostgreSQL + Redis + Asynq。模块名 `go-skeleton`。
 ### service
 - 入参用 `context.Context`，**禁止用 `*gin.Context`**。Worker 也消费 service，绑死 gin 会让 Worker 跑不通。
 - 返回 `errcode` 包里的错误值（如 `errcode.DatabaseError`），不要返回拼接字符串、不要在 service 里调 `c.JSON`。
-- 业务流程编排可以跨多个 repository / queue / cache；不能直接写 GORM 链式调用。
+- 业务流程编排可以跨多个 repository / queue / cache；不能直接写 SQL、不能 import pgx / sqlcdb。
 - 依赖通过构造函数注入，**不要在 service 内部 `new` 其他 service / repository**。
 - 依赖接口（如 `ExampleRepository`、`ExampleQueue`）就近定义在 service 包里，方便测试 mock。
 
-**跨 repository 事务编排（标准范式）**：当一次业务操作需要在原子事务内调用两个及以上 repository 时，**只能** 在 service 层用 `repository.InTx` 包起来，repository 内部不要自己开事务（否则嵌套调用会撞 SAVEPOINT 语义）。模板：
+**跨 repository 事务编排（标准范式）**：当一次业务操作需要在原子事务内调用两个及以上 repository 时，**只能** 在 service 层用注入的 service.Transactor（生产实现 repository.TxManager）包起来，repository 内部不要自己开事务（否则嵌套调用会撞 SAVEPOINT 语义）。模板：
 
 ```go
 // service 层：跨 OrderRepository + InventoryRepository 的下单流程
+// s.tx 是 service.Transactor，由 internal/server.go 注入 repository.NewTxManager(db)
 func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, error) {
     var created *Order
-    err := repository.InTx(ctx, s.db, func(txCtx context.Context) error {
+    err := s.tx.InTx(ctx, func(txCtx context.Context) error {
         // 1) 扣减库存（库存不足 repo 返业务错，整事务回滚）
         if err := s.inventory.Reserve(txCtx, req.SkuID, req.Qty); err != nil {
             return err  // 透传 errcode.Error，InTx 不会包装
@@ -75,17 +79,17 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 要点：
 - **`txCtx` 必须传给 repository**，不要在 fn 里继续用外层 `ctx`——否则 repository 内 `dbFromContext` 取不到事务句柄，会从 base db 起新连接绕过事务。
 - repository 接口直接收 `context.Context`，**不**给事务版另写一套方法签名（`CreateInTx` 这种风格禁止）。事务上下文通过 ctx 传，业务接口形状只有一种。
-- fn 返 error → GORM rollback；返 nil → commit。中途 panic 也会 rollback（GORM 默认行为，不要写自己的 recover 绕过）。
-- 需要强 isolation（分页 total 强一致、批量入账 + count）走 `repository.InTxWithOptions(ctx, db, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn)`；嵌套调用 opts 会被忽略，isolation 必须在最外层定。
+- fn 返 error → rollback；返 nil → commit。中途 panic 也会 rollback 后继续上抛（pgx.BeginTxFunc 行为，不要写自己的 recover 绕过）。
+- 需要强 isolation（分页 total 强一致、批量入账 + count）走 `s.tx.InTxWithOptions(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn)`；嵌套调用 opts 会被忽略，isolation 必须在最外层定。Postgres 不支持的隔离级别（如 LevelSnapshot）直接返 error。
 - **不要** 把队列投递（`taskqueue.Queue.Enqueue`）放进 InTx fn——Redis / Asynq 不参与 PG 事务，事务回滚队列消息也不会回滚。先 commit DB 再投队列；若必须同步走 outbox pattern（PG 表存待发消息 + 独立 worker 扫描），不在本骨架范围内。
 
 ### repository
-- **唯一允许写 GORM 或原生 SQL 的层**。其他层禁止 import `gorm.io/gorm`。
-- 所有查询都用 `db.WithContext(ctx)`，禁止 `context.Background()` 替换。
-- 走事务时用 `repository.InTx(ctx, db, fn)` + `dbFromContext(ctx, r.db)`，让上层组合事务。需要自定义隔离级别 / 只读事务用 `repository.InTxWithOptions(ctx, db, *sql.TxOptions, fn)`（如分页强一致 total 走 `sql.LevelRepeatableRead` + `ReadOnly`）；嵌套调用 opts 会被忽略，isolation 必须在最外层定。
+- **唯一允许写 SQL、import pgx / sqlcdb 的层**（`make architecture-verify` 规则 2 拦截越界，规则 5 全仓禁止 gorm）。
+- 查询写 `queries/*.sql` 走 sqlc 生成，调用统一 `sqlcdb.New(dbFromContext(ctx, r.db)).Xxx(ctx, ...)`；ctx 一路透传，禁止 `context.Background()` 替换。sqlcdb 行类型不出 repository，映射成 `model` 再返回。
+- repository 依赖 `repository.DB` 接口（`*pgxpool.Pool` 满足）。单 repository 内的读一致性可以自己用 `InTxWithOptions`（如分页 total 走 `sql.LevelRepeatableRead` + `ReadOnly`）；跨 repository 事务由 service 通过 `Transactor` 决定。嵌套调用 opts 会被忽略，isolation 必须在最外层定。
 
 ### model
-- 纯 GORM 数据结构，不挂带业务规则的方法。复杂行为放 service。
+- 普通数据 struct（只有 json tag），不挂带业务规则的方法。复杂行为放 service。
 
 ### 何时引入 usecase 层
 不要预先架空。只有当一次操作要协调 ≥3 个 service / 跨领域时再考虑加 `usecase`。当前骨架不需要。
@@ -230,12 +234,14 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 - **测试不要引入 testify / gomock / mockery / sqlmock / testcontainers**。本项目坚持标准库 `testing` + 手写 mock，参考 `internal/service/example_test.go`。
 - **响应字段是 `message`，不是 `msg`**：响应协议的字段名一律用完整单词（见"统一响应协议"）。
 - **错误返回值用 `pkg/errcode` 里的常量**，不要 `fmt.Errorf("...")` 字符串拼接。底层错误用 `applog.FromContext(ctx).Error(..., zap.Error(err))` 单独记日志。
+- **代码注释用简体中文**（技术术语与标识符保持英文）；生成代码（internal/oapi、internal/repository/sqlcdb）不改。
+- **不要修改 `internal/repository/sqlcdb/`**。改 `internal/repository/queries/*.sql` 或 `migrations/*.sql` 后跑 `make sqlc`；`modernize` 对该目录报的 `interface{}` 属生成代码，忽略。
 
 ## 写代码时常犯的错（已知会触发返工）
 
 - ❌ 在 handler 写业务规则 → ✅ 挪到 service。
 - ❌ service 收 `*gin.Context` → ✅ 收 `context.Context`，需要的字段由 handler 传 primitive。
-- ❌ repository 之外的层 import `gorm.io/gorm` → ✅ 通过 service 包里定义的接口隔离。
+- ❌ repository 之外的层 import pgx / sqlcdb 或手写 SQL → ✅ 通过 service 包里定义的接口隔离。
 - ❌ 用 `fmt.Errorf("xxx")` 直接返 → ✅ 返 `errcode.XxxError`；底层错误 `applog.FromContext(ctx).Error(..., zap.Error(err))` 记进日志。
 - ❌ 在 service / handler 里 `context.Background()` 起新 ctx → ✅ 传原 ctx（`make architecture-verify` 规则 4 会拦）。需要脱离请求生命周期的后台 goroutine 放在 `internal/bootstrap` / `internal/server.go`，并独立带超时。
 - ❌ 给 Worker 复制一份和 API 不同的业务逻辑 → ✅ 共享 service。
@@ -331,7 +337,7 @@ oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。
 声明任务完成前必须跑过：
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅，便于定位失败）
+make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅，便于定位失败）
 ```
 
 需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
@@ -346,7 +352,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 
 ### 工具栈
 
-- ✅ 用 `testing`、`net/http/httptest`、`errors.AsType`、`gorm.io/gorm` 的 `DryRun`。
+- ✅ 用 `testing`、`net/http/httptest`、`errors.AsType`、repository 包 tx_test.go 里的手写 mockDBTX / mockTx / mockRows。
 - ❌ **不引入 testify / gomock / mockery / sqlmock / testcontainers**。如果觉得不够用，先在 PR 描述里说服别人，再加依赖。
 
 ### 测试文件位置
@@ -359,7 +365,7 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 | --- | --- | --- |
 | `service` | inline struct + func 字段实现依赖接口，注入 `NewXxxService(...)` | `internal/service/example_test.go` |
 | `handler` | `gin.SetMode(gin.TestMode)` + `httptest.NewRecorder`，反序列化 `response.Response` 断言字段 | `internal/handler/example_test.go` |
-| `repository` | `gorm.Open(postgres.Open(...), &gorm.Config{DryRun: true, DisableAutomaticPing: true})` + GORM callback 捕获 SQL，**不连真实 DB** | `internal/repository/example_test.go` |
+| `repository` | 手写 `mockDBTX`（Exec / Query / QueryRow func 字段）+ `mockTx`（内嵌 `pgx.Tx`，只覆盖用到的方法）断言 SQL 片段与参数，**不连真实 DB** | `internal/repository/example_test.go`、`internal/repository/tx_test.go` |
 | `middleware` | 同 handler，构造 `gin.Engine` + 单条路由 | `internal/middleware/auth_test.go` |
 | `pkg/auth` 等基础包 | 纯单元测试，覆盖正反两面 | `pkg/auth/jwt_test.go` |
 
@@ -436,7 +442,7 @@ feat(service): example 新增分页参数校验
 每次 commit 前一条命令搞定：
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
 ```
 
 任意一项挂了**不要 `--no-verify` 跳过**——按通用规则，hook 失败先修问题再重新 commit，不要 amend。
@@ -466,6 +472,7 @@ go-example/
 ├── Dockerfile                  multi-stage 构建（默认 cmd/api）
 ├── docker-compose.yml          本地 Postgres + Redis
 ├── go.mod / go.sum             模块名 go-skeleton
+├── sqlc.yaml                    sqlc 配置（schema=migrations，queries=internal/repository/queries）
 │
 ├── api/                        API 契约层
 │   ├── openapi.yaml            真相源：OpenAPI 3.1 spec
@@ -507,11 +514,13 @@ go-example/
 │   ├── service/                业务逻辑层（context.Context 入参）
 │   │   └── example.go
 │   │
-│   ├── repository/             数据访问层（唯一允许写 GORM）
+│   ├── repository/             数据访问层（唯一允许写 SQL）
 │   │   ├── example.go
-│   │   └── tx.go               WithTx / InTx / InTxWithOptions / dbFromContext
+│   │   ├── tx.go               WithTx / InTx / InTxWithOptions / dbFromContext
+│   │   ├── queries/             sqlc 查询源文件（*.sql）
+│   │   └── sqlcdb/               sqlc 生成代码（DO NOT EDIT）
 │   │
-│   ├── model/                  GORM 数据结构
+│   ├── model/                  数据 struct
 │   │   └── example.go
 │   │
 │   ├── middleware/             Gin 中间件
@@ -538,7 +547,7 @@ go-example/
     ├── auth/jwt.go             JWTManager（Layer 1）
     ├── buildinfo/              构建期版本 / commit / 构建时间
     ├── cache/                  Redis client 封装
-    ├── database/               GORM 初始化 + 健康检查 + zap SQL 日志
+    ├── database/               pgxpool 初始化 + 健康检查 + pgx tracer SQL 日志
     ├── errcode/                业务错误码集中地（type.go + common.go）
     ├── log/                    zap logger + trace_id ctx helper
     ├── metrics/                Prometheus 指标收集与暴露

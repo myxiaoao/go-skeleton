@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"go-skeleton/config"
 	"go-skeleton/internal/bootstrap"
@@ -42,14 +41,15 @@ func TestServerMetricsFailedState(t *testing.T) {
 func testRegistryForServer(t *testing.T, metricsAddr string) *bootstrap.Registry {
 	t.Helper()
 
-	db, err := gorm.Open(postgres.Open("postgres://u:p@127.0.0.1:5432/db?sslmode=disable"), &gorm.Config{
-		DryRun:                 true,
-		DisableAutomaticPing:   true,
-		SkipDefaultTransaction: true,
-	})
+	pool, err := pgxpool.New(t.Context(), "postgres://u:p@127.0.0.1:5432/db?sslmode=disable")
 	if err != nil {
-		t.Fatalf("gorm.Open dry run: %v", err)
+		t.Fatalf("pgxpool.New: %v", err)
 	}
+	dbMgr, err := database.NewManager(pool)
+	if err != nil {
+		t.Fatalf("database.NewManager: %v", err)
+	}
+	t.Cleanup(func() { _ = dbMgr.Close() })
 
 	return &bootstrap.Registry{
 		Cfg: &config.Config{
@@ -69,7 +69,7 @@ func testRegistryForServer(t *testing.T, metricsAddr string) *bootstrap.Registry
 				AuditEnabled: false,
 			},
 		},
-		DB:       database.NewTestManager(db),
+		DB:       dbMgr,
 		Draining: &atomic.Bool{},
 	}
 }

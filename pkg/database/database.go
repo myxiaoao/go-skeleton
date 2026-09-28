@@ -2,11 +2,15 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -14,148 +18,162 @@ import (
 	applog "go-skeleton/pkg/log"
 )
 
-// DBManager 持有主数据库连接（*gorm.DB）。预留 primary 字段名是为了将来要
-// 加只读副本时不破坏 API。
+var errNotConfigured = errors.New("database is not configured")
+
+// DBManager 持有 Postgres 连接池。pool 是唯一真正的连接池；
+// sqlDB 是同一个 pool 之上的 database/sql 视图，给需要 *sql.DB
+// 的库（如 goose）用。
 type DBManager struct {
-	primary *gorm.DB
+	pool  *pgxpool.Pool
+	sqlDB *sql.DB
+	// gorm 是共享 sqlDB 的临时桥接层，等 repository 迁到 sqlc
+	// 之后会被移除。
+	gorm *gorm.DB
 }
 
 // Config 是数据库连接配置：DSN + 连接池参数。
 type Config struct {
 	DSN             string
 	LogLevel        string
-	MaxIdleConns    int
-	MaxOpenConns    int
+	MaxConns        int
+	MinConns        int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
 }
 
-// poolSettings 是连接池经过 normalize（兜底默认值）后的最终配置。
+// poolSettings 是连接池参数补完默认值之后的 Config。
 type poolSettings struct {
-	maxIdleConns    int
-	maxOpenConns    int
+	maxConns        int32
+	minConns        int32
 	connMaxLifetime time.Duration
 	connMaxIdleTime time.Duration
 }
 
-// Init 打开主数据库连接。
+// Init 建连接池。DSN 为空时返回空 manager（不报错），让
+// InitAPI / InitWorker 决定数据库是否必需。
 //
-// DSN 为空时返回**带 nil DB 的空 manager**（不报错），让上层 InitAPI /
-// InitWorker 决定 DB 是必需还是可选（Worker 进程可以没 DB）。
-func Init(cfg Config) (*DBManager, error) {
+// pgxpool 惰性建连，Init 本身不 ping：启动期 fail-fast 由
+// bootstrap.probeDependencies（API / Worker）和 cmd/migrate 里
+// 显式的 ping 各自覆盖。
+func Init(ctx context.Context, cfg Config) (*DBManager, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return &DBManager{}, nil
 	}
-
-	pool := normalizePoolSettings(cfg)
-	primary, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
-		Logger:                                   newGormLogger(cfg.LogLevel),
-		DisableForeignKeyConstraintWhenMigrating: true,
-	})
+	poolCfg, err := newPoolConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("connect to postgres: %w", err)
-	}
-	if err := tunePool(primary, pool); err != nil {
 		return nil, err
 	}
-
-	applog.L().Info("postgres connected")
-	return &DBManager{primary: primary}, nil
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("create postgres pool: %w", err)
+	}
+	m, err := NewManager(pool)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	applog.L().Info("postgres pool created")
+	return m, nil
 }
 
-// DB 返回底层 *gorm.DB。仅 repository 层应该调它；其他层通过 service 包里
-// 的接口隔离，不直接拿 *gorm.DB（见 CLAUDE.md 分层规则）。
+// NewManager 包装一个已有的 pool。测试可以传一个指向不可达地址的 pool，
+// 因为 pgxpool 在首次使用前不会真正建连。
+func NewManager(pool *pgxpool.Pool) (*DBManager, error) {
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	gdb, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
+		Logger:               logger.Discard, // SQL 已由 queryTracer 记录
+		DisableAutomaticPing: true,
+	})
+	if err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("open gorm on shared pool: %w", err)
+	}
+	return &DBManager{pool: pool, sqlDB: sqlDB, gorm: gdb}, nil
+}
+
+// Pool 返回 pgx pool。只有 repository 装配层应该用它。
+func (m *DBManager) Pool() *pgxpool.Pool {
+	if m == nil {
+		return nil
+	}
+	return m.pool
+}
+
+// SQLDB 返回同一个 pool 之上的 database/sql 句柄。
+func (m *DBManager) SQLDB() *sql.DB {
+	if m == nil {
+		return nil
+	}
+	return m.sqlDB
+}
+
+// DB 返回临时的 GORM 桥接层。
 func (m *DBManager) DB() *gorm.DB {
 	if m == nil {
 		return nil
 	}
-	return m.primary
+	return m.gorm
 }
 
-// Ping 探测数据库是否可达。/health 探针会调它，所以 ctx 应该带短超时。
+// Ping 探测数据库是否可达；/health 会带短超时 ctx 调它。
 func (m *DBManager) Ping(ctx context.Context) error {
-	if m == nil || m.primary == nil {
-		return fmt.Errorf("database is not configured")
+	if m == nil || m.pool == nil {
+		return errNotConfigured
 	}
-	sqlDB, err := m.primary.DB()
-	if err != nil {
-		return fmt.Errorf("get sql.DB: %w", err)
-	}
-	if err := sqlDB.PingContext(ctx); err != nil {
+	if err := m.pool.Ping(ctx); err != nil {
 		return fmt.Errorf("ping database: %w", err)
 	}
 	return nil
 }
 
-// Close 关闭连接池。nil-safe，bootstrap.Registry.Close 会调它。
+// Close 先关 sqlDB（它不拥有 pool），再关 pool。
+// nil-safe，bootstrap.Registry.Close 会调它。
 func (m *DBManager) Close() error {
-	if m == nil || m.primary == nil {
+	if m == nil || m.pool == nil {
 		return nil
 	}
-	sqlDB, err := m.primary.DB()
+	err := m.sqlDB.Close()
+	m.pool.Close()
+	return err
+}
+
+func newPoolConfig(cfg Config) (*pgxpool.Config, error) {
+	level, err := parseLogLevel(cfg.LogLevel)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return sqlDB.Close()
-}
-
-// NewTestManager 从已有的 *gorm.DB（例如 DryRun 模式）构造 manager，给测试用。
-func NewTestManager(db *gorm.DB) *DBManager {
-	return &DBManager{primary: db}
-}
-
-// tunePool 把连接池参数挂到底层 sql.DB 上。GORM 不直接暴露这些 setter，
-// 必须取出 sql.DB 后设置。
-func tunePool(db *gorm.DB, pool poolSettings) error {
-	sqlDB, err := db.DB()
+	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
-		return fmt.Errorf("get sql.DB: %w", err)
+		return nil, fmt.Errorf("parse postgres dsn: %w", err)
 	}
-	sqlDB.SetMaxIdleConns(pool.maxIdleConns)
-	sqlDB.SetMaxOpenConns(pool.maxOpenConns)
-	sqlDB.SetConnMaxLifetime(pool.connMaxLifetime)
-	sqlDB.SetConnMaxIdleTime(pool.connMaxIdleTime)
-	return nil
+	s := normalizePoolSettings(cfg)
+	poolCfg.MaxConns = s.maxConns
+	poolCfg.MinConns = s.minConns
+	poolCfg.MaxConnLifetime = s.connMaxLifetime
+	poolCfg.MaxConnIdleTime = s.connMaxIdleTime
+	poolCfg.ConnConfig.Tracer = &queryTracer{level: level}
+	return poolCfg, nil
 }
 
-// normalizePoolSettings 给连接池参数补兜底默认值。零 / 负值替换成合理默认，
-// 这样 Config 的字段可以不强制要求 caller 都填。
+// normalizePoolSettings 给零值 / 越界值补上默认值，这样 caller
+// 不必填满每个字段。
 func normalizePoolSettings(cfg Config) poolSettings {
-	settings := poolSettings{
-		maxIdleConns:    cfg.MaxIdleConns,
-		maxOpenConns:    cfg.MaxOpenConns,
-		connMaxLifetime: cfg.ConnMaxLifetime,
-		connMaxIdleTime: cfg.ConnMaxIdleTime,
+	s := poolSettings{
+		maxConns:        30,
+		connMaxLifetime: 30 * time.Minute,
+		connMaxIdleTime: 5 * time.Minute,
 	}
-	if settings.maxIdleConns <= 0 {
-		settings.maxIdleConns = 15
+	if cfg.MaxConns > 0 && cfg.MaxConns <= math.MaxInt32 {
+		s.maxConns = int32(cfg.MaxConns)
 	}
-	if settings.maxOpenConns <= 0 {
-		settings.maxOpenConns = 30
+	if cfg.MinConns > 0 && cfg.MinConns <= math.MaxInt32 && int32(cfg.MinConns) <= s.maxConns {
+		s.minConns = int32(cfg.MinConns)
 	}
-	if settings.connMaxLifetime <= 0 {
-		settings.connMaxLifetime = 30 * time.Minute
+	if cfg.ConnMaxLifetime > 0 {
+		s.connMaxLifetime = cfg.ConnMaxLifetime
 	}
-	if settings.connMaxIdleTime <= 0 {
-		settings.connMaxIdleTime = 5 * time.Minute
+	if cfg.ConnMaxIdleTime > 0 {
+		s.connMaxIdleTime = cfg.ConnMaxIdleTime
 	}
-	return settings
-}
-
-// parseLogLevel 把字符串 log 级别（环境变量来）翻译成 GORM 的 logger.LogLevel。
-// 默认 warn；未知值打告警日志后也回退到 warn，避免误关错误日志。
-func parseLogLevel(level string) logger.LogLevel {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "silent":
-		return logger.Silent
-	case "error":
-		return logger.Error
-	case "info":
-		return logger.Info
-	case "warn", "warning", "":
-		return logger.Warn
-	default:
-		applog.L().Warn("unknown gorm log level; falling back to warn", zap.String("level", level))
-		return logger.Warn
-	}
+	return s
 }

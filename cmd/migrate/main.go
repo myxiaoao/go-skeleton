@@ -64,15 +64,12 @@ func main() {
 			applog.L().Warn("close database", zap.Error(err))
 		}
 	}()
-	if dbMgr.DB() == nil {
+	sqlDB := dbMgr.SQLDB()
+	if sqlDB == nil {
 		applog.L().Fatal("database is not configured")
 	}
-
-	// 从 *gorm.DB 取底层 *sql.DB 喂给 goose，复用现有连接池，不另开连接。
-	sqlDB, err := dbMgr.DB().DB()
-	if err != nil {
-		applog.L().Fatal("get sql.DB from gorm", zap.Error(err))
-	}
+	// sqlDB 是共享 pgx pool 之上的 database/sql 视图，goose 复用它，
+	// 不另开自己的连接。
 
 	// Postgres session-level advisory lock：多实例并发跑 migrate 时串行化，只有
 	// 持锁者执行、其余阻塞等待（默认重试 5s × 60 = 最多 5min），杜绝并发 DDL /

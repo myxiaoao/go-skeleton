@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -70,15 +71,15 @@ func (r *Registry) Close() error {
 	return errors.Join(errs...)
 }
 
-// InitDatabase 从 cfg 翻译出 database.Config 后建 GORM 实例。DSN 为空时
-// database.Init 会返回带 nil DB 的 manager，由调用方（InitAPI / InitWorker /
+// InitDatabase 从 cfg 翻译出 database.Config 后建 pgx pool。DSN 为空时
+// 返回带 nil pool 的 manager，由调用方（InitAPI / InitWorker /
 // cmd/migrate）决定是否致命。
 func InitDatabase(cfg *config.Config) (*database.DBManager, error) {
-	return database.Init(database.Config{
+	return database.Init(context.Background(), database.Config{
 		DSN:             cfg.Postgres.DSN,
 		LogLevel:        cfg.Postgres.LogLevel,
-		MaxIdleConns:    cfg.Postgres.MaxIdleConns,
-		MaxOpenConns:    cfg.Postgres.MaxOpenConns,
+		MaxConns:        cfg.Postgres.MaxConns,
+		MinConns:        cfg.Postgres.MinConns,
 		ConnMaxLifetime: cfg.Postgres.ConnMaxLifetime,
 		ConnMaxIdleTime: cfg.Postgres.ConnMaxIdleTime,
 	})

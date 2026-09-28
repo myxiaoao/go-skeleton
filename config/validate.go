@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strings"
 )
@@ -29,14 +30,7 @@ func validate(cfg *Config) error {
 		add(fmt.Sprintf("GRACEFUL_DRAIN must be >= 0, got %s", cfg.Server.GracefulDrain))
 	}
 
-	if strings.TrimSpace(cfg.Postgres.DSN) != "" {
-		if cfg.Postgres.MaxOpenConns <= 0 {
-			add(fmt.Sprintf("DB_MAX_OPEN_CONNS must be > 0, got %d", cfg.Postgres.MaxOpenConns))
-		}
-		if cfg.Postgres.MaxIdleConns < 0 {
-			add(fmt.Sprintf("DB_MAX_IDLE_CONNS must be >= 0, got %d", cfg.Postgres.MaxIdleConns))
-		}
-	}
+	validatePostgres(cfg.Postgres, add)
 
 	if len(cfg.Worker.Queues) > 0 {
 		if cfg.Worker.Concurrency <= 0 {
@@ -200,4 +194,23 @@ func isLoopbackAddr(addr string) bool {
 func isInsecureJWTSecret(secret string) bool {
 	_, ok := insecureJWTSecrets[strings.ToLower(secret)]
 	return ok
+}
+
+// validatePostgres 仅在 DSN 非空时校验连接池和日志级别设置；
+// DSN 为空表示数据库模块未启用。
+func validatePostgres(pg PostgresConfig, add func(string)) {
+	if strings.TrimSpace(pg.DSN) == "" {
+		return
+	}
+	if pg.MaxConns <= 0 || pg.MaxConns > math.MaxInt32 {
+		add(fmt.Sprintf("DB_MAX_CONNS must be in [1, %d], got %d", math.MaxInt32, pg.MaxConns))
+	}
+	if pg.MinConns < 0 || pg.MinConns > pg.MaxConns {
+		add(fmt.Sprintf("DB_MIN_CONNS must be in [0, DB_MAX_CONNS], got %d", pg.MinConns))
+	}
+	switch strings.ToLower(strings.TrimSpace(pg.LogLevel)) {
+	case "silent", "error", "warn", "info":
+	default:
+		add(fmt.Sprintf("DB_LOG_LEVEL must be one of silent/error/warn/info, got %q", pg.LogLevel))
+	}
 }

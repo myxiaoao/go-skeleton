@@ -95,8 +95,8 @@ type DocsConfig struct {
 type PostgresConfig struct {
 	DSN             string
 	LogLevel        string
-	MaxIdleConns    int
-	MaxOpenConns    int
+	MaxConns        int
+	MinConns        int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
 }

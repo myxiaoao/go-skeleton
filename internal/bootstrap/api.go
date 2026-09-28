@@ -29,7 +29,7 @@ func InitAPI(cfg *config.Config) (*Registry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init database: %w", err)
 	}
-	if dbMgr.DB() == nil {
+	if dbMgr.Pool() == nil {
 		return nil, errors.New("postgres dsn is required for api")
 	}
 	cleanups = append(cleanups, dbMgr.Close)

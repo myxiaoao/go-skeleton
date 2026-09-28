@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- 回复 / 文档用简体中文；**代码注释一律英文**（既有中文注释的文件，新增注释也用英文）。
+- 回复 / 文档用简体中文；**代码注释用简体中文**（技术术语与标识符保持英文；用户 2026-09-28 明确要求，覆盖全局"注释用英文"规则）。下文 Task 代码块里的英文注释在落地时一律译成中文，生成代码（`internal/oapi`、`internal/repository/sqlcdb`）不动。
 - 测试只用标准库 `testing` + 手写 mock；**禁止** testify / gomock / mockery / sqlmock / testcontainers。测试 ctx 用 `t.Context()`；错误断言用 `errors.Is` / `errors.AsType`。
 - service / handler 禁止 `context.Background()`；repository 所有调用透传 ctx。
 - sqlc 版本固定 `v1.31.1`；`sql_package: pgx/v5`；生成目录 `internal/repository/sqlcdb`（DO NOT EDIT，入库）。

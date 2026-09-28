@@ -103,6 +103,28 @@ var _ = gorm.DB{}
 	}
 }
 
+func TestArchitectureVerify_SkipsClaudeWorktrees(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// .claude/worktrees/ 是本地 agent 起的嵌套 git worktree，不属于本仓库
+	// 源码——walkGoFiles 应当整目录跳过，规则 2/5 都不该扫进去误报。
+	writeFile(t, filepath.Join(dir, ".claude", "worktrees", "x", "internal", "handler", "x.go"), `package handler
+
+import "gorm.io/gorm"
+
+var _ = gorm.DB{}
+`)
+
+	code, out := runScript(t, dir, "architecture-verify.go")
+	if code != 0 {
+		t.Fatalf("architecture-verify should ignore .claude/worktrees, got exit=%d\n%s", code, out)
+	}
+	if strings.Contains(out, ".claude") {
+		t.Errorf("expected no mention of .claude path, got:\n%s", out)
+	}
+}
+
 func TestArchitectureVerify_Clean(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)

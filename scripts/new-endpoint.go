@@ -1015,7 +1015,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return
 	}
 	res, err := h.svc.%[3]s(c.Request.Context(), &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1026,7 +1026,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1043,7 +1043,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return
 	}
 	res, err := h.svc.%[3]s(c.Request.Context(), &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1054,7 +1054,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1066,7 +1066,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	%[7]s := c.Param(%[8]q)
 	res, err := h.svc.%[3]s(c.Request.Context()%[6]s) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1084,7 +1084,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return
 	}
 	res, err := h.svc.%[3]s(c.Request.Context()%[6]s, &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1096,7 +1096,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	%[7]s := c.Param(%[8]q)
 	res, err := h.svc.%[3]s(c.Request.Context()%[6]s) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1113,7 +1113,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return
 	}
 	res, err := h.svc.%[3]s(c.Request.Context(), &req) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1124,7 +1124,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 		return fmt.Sprintf(`// %[3]s 处理 %[5]s %[4]s——把任务投到 Asynq 队列。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1137,7 +1137,7 @@ func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 // TODO: 按业务字段补 ShouldBind / 调 service / 响应。
 func (h *%[1]sHandler) %[3]s(c *gin.Context) {
 	res, err := h.svc.%[3]s(c.Request.Context()) //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet
-	if err != nil { //nolint:staticcheck // 骨架占位：service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本行
+	if err != nil { //nolint:staticcheck // SA4023：骨架占位，service 目前恒返 errcode.NotImplementedYet，业务实现后该判断才会分支，届时删除本条 nolint 注释
 		response.WriteError(c, err)
 		return
 	}
@@ -1936,7 +1936,8 @@ func renderNextSteps(name, lower string, ops []operation, groupPath string) stri
 落地业务的步骤：
   1. internal/service/%[2]s.go：补 %[1]sRepository / %[1]sQueue 接口签名 +
      方法入参/返回类型，去掉 errcode.NotImplementedYet
-  2. internal/repository/%[2]s.go：实现 service 里加的接口方法（GORM/原生 SQL）
+  2. internal/repository/queries/%[2]s.sql：写 sqlc 查询 → make sqlc →
+     internal/repository/%[2]s.go 调 sqlcdb 生成的方法实现 service 里加的接口
   3. internal/model/%[2]s.go：按真实表结构补字段
   4. internal/handler/%[2]s.go：补 c.ShouldBindJSON / Query 把 req 传给 service
   5. internal/task/%[2]s.go：如果有异步任务，补 payload struct + NewXxxTask 工厂

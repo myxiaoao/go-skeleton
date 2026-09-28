@@ -193,7 +193,7 @@ paths:
       summary: 创建一个示例
       description: |
         在 `examples` 表插入一条记录。`name` 字段在 binding 阶段做校验
-        （长度 1-255，与 GORM `varchar(255)` 字段对齐），超长直接返
+        （长度 1-255，与 examples.name 列 `varchar(255)` 对齐），超长直接返
         `INVALID_PARAMS`，不会到 DB 层。
       requestBody:
         required: true

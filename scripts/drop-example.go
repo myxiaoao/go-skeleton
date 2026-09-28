@@ -10,8 +10,7 @@
 // 跑完后仓库里**不再有** Example 业务模块（handler / service / repository /
 // model / task / 装配 / 路由 / openapi 契约 / 数据库迁移），但骨架机制
 // （bootstrap / oapi-codegen / 锚点 / verify 链）全保留——可以直接
-// `make new-endpoint NAME=<Name>` 起真业务（注意 new-endpoint 模板依赖
-// example.go，drop 后要先 git checkout 历史版本恢复模板，或先 git revert）。
+// `make new-endpoint NAME=<Name>` 起真业务，无需额外恢复步骤。
 //
 // 实现要点：
 //   - Go AST 删字段需引入 dave/dst 才能保留注释 / 空行，引第三方依赖只为
@@ -104,8 +103,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, `
 drop-example: make %s 失败。最常见的剩余清理：
   - 还有 _test.go 引用了已删的 Example 类型（grep -rn ExampleHandler internal/）
-  - new-endpoint 模板依赖已删 example.go——要新增模块需从 git 历史恢复模板
-    或先 git revert drop-example。
 `, t)
 			os.Exit(1)
 		}
@@ -119,9 +116,7 @@ drop-example: make %s 失败。最常见的剩余清理：
    3. git add -A && git commit
    4. commit 后再跑一次 make verify：oapi-verify / docs-deploy-check /
       docs-errcodes-verify 比对工作树和 HEAD，要等本次改动入库后才会绿。
-   5. 起真业务：make new-endpoint NAME=<Name>
-      （drop-example 跑过后 new-endpoint 模板依赖的 example.go 已不存在，
-      需从 git 历史 checkout 模板，或先 git revert 本次提交。）`)
+   5. 起真业务：make new-endpoint NAME=<Name>`)
 }
 
 // ---------------------------------------------------------------------------

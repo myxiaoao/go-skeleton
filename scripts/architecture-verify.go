@@ -326,9 +326,11 @@ func walkGoFiles(dir string, visit func(path string, f *ast.File)) error {
 			return err
 		}
 		if d.IsDir() {
-			// 跳掉 vendor / .git / dist 等明显非源码目录。
+			// 跳掉 vendor / .git / dist 等明显非源码目录；.claude 下是本地
+			// agent worktree（.claude/worktrees/），不属于本仓库源码，扫到
+			// 会被规则 2/5 误报。
 			name := d.Name()
-			if name == "vendor" || name == ".git" || name == "dist" || name == "bin" || name == "node_modules" {
+			if name == "vendor" || name == ".git" || name == "dist" || name == "bin" || name == "node_modules" || name == ".claude" {
 				return filepath.SkipDir
 			}
 			return nil

@@ -43,7 +43,7 @@ var (
 
 	// InternalError 是所有未识别 server 侧错误的兜底。
 	InternalError = newError(9001, "INTERNAL_ERROR")
-	// DatabaseError 包裹 service 层暴露的持久化失败（GORM 错误透传给客户端
+	// DatabaseError 包裹 service 层暴露的持久化失败（数据库错误透传给客户端
 	// 会泄漏 schema，所以统一压成这一个码）。
 	DatabaseError = newError(9002, "DATABASE_ERROR")
 	// QueueUnavailable 表示请求要投异步任务，但队列未配置或不可用。

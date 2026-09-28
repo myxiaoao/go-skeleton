@@ -7,8 +7,8 @@ package service
 //     接口隔离，方便测试（参见 example_test.go 的 inline mock 写法）。
 //   - 错误统一返 errcode.XxxError，配合 applog.FromContext(ctx).Error(..., zap.Error(err))
 //     把底层错误写日志，不要返 fmt.Errorf 字符串。
-//   - 业务流程可以跨多个 repository / queue，但**不要**直接调用 GORM 链式 API
-//     （那是 repository 的活）。
+//   - 业务流程可以跨多个 repository / queue，但**不要**直接写 SQL、不要
+//     import pgx / sqlcdb（那是 repository 的活）。
 //
 // 加新错误码：去 pkg/errcode/common.go 加变量 + 在 pkg/response.MessageFor 加 case +
 // 跑 make docs-errcodes 重新生成 docs/errcodes.md。
@@ -57,15 +57,15 @@ func NewExampleService(repo ExampleRepository, queue ExampleQueue) *ExampleServi
 	return &ExampleService{repo: repo, queue: queue}
 }
 
-// CreateExampleReq 是创建 example 的请求体。Name 长度上限对齐 GORM 字段
-// （varchar(255)），让超长输入在 binding 阶段就返 INVALID_PARAMS，不是等
-// DB 抛 SQL 错。
+// CreateExampleReq 是创建 example 的请求体。Name 长度上限对齐
+// examples.name 列（varchar(255)），让超长输入在 binding 阶段就返
+// INVALID_PARAMS，不是等 DB 抛 SQL 错。
 type CreateExampleReq struct {
 	Name string `json:"name" binding:"required,max=255"`
 }
 
 // Create 落一条 example。底层错误统一记日志 + 返 errcode.DatabaseError，
-// 不把 GORM 内部错误字符串透给客户端（信息泄漏 + 协议不稳定）。
+// 不把数据库驱动错误字符串透给客户端（信息泄漏 + 协议不稳定）。
 func (s *ExampleService) Create(ctx context.Context, req *CreateExampleReq) (*model.Example, error) {
 	example := model.Example{Name: req.Name}
 	if err := s.repo.Create(ctx, &example); err != nil {

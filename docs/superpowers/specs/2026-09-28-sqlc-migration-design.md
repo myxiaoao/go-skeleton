@@ -96,7 +96,7 @@ func (r *ExampleRepository) Create(ctx context.Context, e *model.Example) error 
 | `sqlDB *sql.DB` | `stdlib.OpenDBFromPool(pool)`，给 goose（及 PR1 的 GORM）用 |
 | `gorm *gorm.DB` | **仅 PR1**：`gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{Logger: logger.Discard})`，PR2 删除 |
 | `NewManager(pool)` | 导出构造器，`Init` 内部复用；测试可直接传入未连接的 pool |
-| `Init(ctx, cfg)` | DSN 为空返回空 manager；`pgxpool.NewWithConfig` 后显式 `Ping`，保持启动期 fail-fast |
+| `Init(ctx, cfg)` | DSN 为空返回空 manager；`pgxpool.NewWithConfig` 不连库、不 Ping——启动期 fail-fast 由已有探活保证（API / Worker 走 `probeDependencies`，migrate 自带 Ping），不重复 |
 | `Pool()` / `SQLDB()` / `DB()`（仅 PR1） | 访问器 |
 | `Ping(ctx)` | `pool.Ping` |
 | `Close()` | 先关 `sqlDB`，再关 `pool`（`OpenDBFromPool` 关闭时不会关 pool） |
@@ -145,7 +145,7 @@ func (r *ExampleRepository) Create(ctx context.Context, e *model.Example) error 
   - `_ensure-sqlc`：与其他工具一致，`go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1`；
   - `sqlc`：`sqlc generate`；
   - `sqlc-verify`：生成后 `git diff --quiet -- internal/repository/sqlcdb`，并检查该目录无未跟踪文件；并入 `verify`。
-- lint：生成文件带 `Code generated ... DO NOT EDIT` 头，golangci / modernize 默认跳过；若实测未跳过，在 `.golangci.yml` exclusions.paths 加 `internal/repository/sqlcdb`。
+- lint：`.golangci.yml` 的 formatters / linters 两处 exclusions.paths 都加 `internal/repository/sqlcdb`（与 `internal/oapi` 同待遇）——`make fmt`（gofumpt + gci）不能改写生成代码，否则 `sqlc-verify` 必然 diff。
 
 ## 7. 脚手架
 
@@ -156,6 +156,7 @@ func (r *ExampleRepository) Create(ctx context.Context, e *model.Example) error 
   - **不生成 queries 文件**（此时还没有表，生成的 SQL 无法通过 sqlc 编译）。
 - **new-endpoint-check**：当前不依赖 GORM，只随模板字符串同步调整。
 - **drop-example**：删除列表增加 `internal/repository/queries/example.sql` 与 sqlcdb 中 example 对应生成文件；仿照迁移占位，留下 `internal/repository/queries/placeholder.sql`（`-- name: Placeholder :exec` + `SELECT 1;`）后重跑 `sqlc generate`，避免空查询目录导致 sqlc 报错、`sqlc-verify` 失败；相关注释去掉 gorm 字样。
+- **drop-example 既有缺陷一并修复**（master 上实测 `make drop-example` 后 `go vet` 失败）：`patchWorkerGo` 的 oldBlock 与当前 `buildWorkerDeps` 已漂移、被静默跳过，改为按函数头正则整体替换并删掉 `repository` / `service` import；`internal/worker_test.go` 全是 Example 用例，加入删除列表。
 - **scaffold-verify**：fixture 随新模板更新。
 
 ## 8. architecture-verify 规则 2

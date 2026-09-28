@@ -251,7 +251,7 @@ oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
 	@echo "generated: $(OAPI_OUTPUT)"
 
 .PHONY: architecture-verify
-architecture-verify: ## 校验分层 import 边界（gin / gorm 包外溢、pkg→internal 反向依赖、service/handler 误用 context.Background）
+architecture-verify: ## 校验分层 import 边界（gin 外溢、pgx / sqlcdb 外溢、禁 gorm、pkg→internal 反向依赖、service/handler 误用 context.Background）
 	$(GO) run scripts/architecture-verify.go
 
 .PHONY: env-verify

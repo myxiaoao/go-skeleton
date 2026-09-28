@@ -11,9 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	applog "go-skeleton/pkg/log"
 )
@@ -26,9 +23,6 @@ var errNotConfigured = errors.New("database is not configured")
 type DBManager struct {
 	pool  *pgxpool.Pool
 	sqlDB *sql.DB
-	// gorm 是共享 sqlDB 的临时桥接层，等 repository 迁到 sqlc
-	// 之后会被移除。
-	gorm *gorm.DB
 }
 
 // Config 是数据库连接配置：DSN + 连接池参数。
@@ -67,28 +61,14 @@ func Init(ctx context.Context, cfg Config) (*DBManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create postgres pool: %w", err)
 	}
-	m, err := NewManager(pool)
-	if err != nil {
-		pool.Close()
-		return nil, err
-	}
 	applog.L().Info("postgres pool created")
-	return m, nil
+	return NewManager(pool), nil
 }
 
 // NewManager 包装一个已有的 pool。测试可以传一个指向不可达地址的 pool，
 // 因为 pgxpool 在首次使用前不会真正建连。
-func NewManager(pool *pgxpool.Pool) (*DBManager, error) {
-	sqlDB := stdlib.OpenDBFromPool(pool)
-	gdb, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
-		Logger:               logger.Discard, // SQL 已由 queryTracer 记录
-		DisableAutomaticPing: true,
-	})
-	if err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("open gorm on shared pool: %w", err)
-	}
-	return &DBManager{pool: pool, sqlDB: sqlDB, gorm: gdb}, nil
+func NewManager(pool *pgxpool.Pool) *DBManager {
+	return &DBManager{pool: pool, sqlDB: stdlib.OpenDBFromPool(pool)}
 }
 
 // Pool 返回 pgx pool。只有 repository 装配层应该用它。
@@ -105,14 +85,6 @@ func (m *DBManager) SQLDB() *sql.DB {
 		return nil
 	}
 	return m.sqlDB
-}
-
-// DB 返回临时的 GORM 桥接层。
-func (m *DBManager) DB() *gorm.DB {
-	if m == nil {
-		return nil
-	}
-	return m.gorm
 }
 
 // Ping 探测数据库是否可达；/health 会带短超时 ctx 调它。

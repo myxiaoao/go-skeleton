@@ -166,7 +166,7 @@ func normalizePoolSettings(cfg Config) poolSettings {
 	if cfg.MaxConns > 0 && cfg.MaxConns <= math.MaxInt32 {
 		s.maxConns = int32(cfg.MaxConns)
 	}
-	if cfg.MinConns > 0 && cfg.MinConns <= int(s.maxConns) {
+	if cfg.MinConns > 0 && cfg.MinConns <= math.MaxInt32 && int32(cfg.MinConns) <= s.maxConns {
 		s.minConns = int32(cfg.MinConns)
 	}
 	if cfg.ConnMaxLifetime > 0 {

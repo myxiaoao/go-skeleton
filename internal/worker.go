@@ -95,9 +95,9 @@ func validateWorkerRegistry(reg *bootstrap.Registry) error {
 // buildWorkerDeps 把 Registry 翻译成 worker handler 用的 Deps。
 //
 // Example processor 走 typed contract：reg.DB 可用时注入真 ExampleService
-// （走 repository → gorm 落库），DB 不可用时让 RegisterHandlers 回填
+// （走 repository → sqlc 落库），DB 不可用时让 RegisterHandlers 回填
 // noopExampleProcessor 兜底，便于无 DB 的 worker 部署形态（如只跑外部 API
-// 任务）也能起得来。worker 包本身不 import gorm，符合分层规则。
+// 任务）也能起得来。worker 包本身不 import pgx / sqlcdb，符合分层规则。
 //
 // 安全门槛：APP_ENV=production 下调 deps.RequiredProcessors() 显式检查
 // 每个 task processor 是否真注入。任一 missing 就 fail-fast——production
@@ -114,7 +114,7 @@ func buildWorkerDeps(reg *bootstrap.Registry) (*worker.Deps, error) {
 		Queue: reg.Queue,
 	}
 	if reg.DB != nil {
-		repo := repository.NewExampleRepository(reg.DB.DB())
+		repo := repository.NewExampleRepository(reg.DB.Pool())
 		deps.Example = service.NewExampleService(repo, reg.Queue)
 	}
 	if reg.Cfg != nil && reg.Cfg.Env.IsProduction() {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,14 @@ func TestValidateTableDriven(t *testing.T) {
 			},
 			wantErr:     true,
 			wantInclude: "DB_MIN_CONNS",
+		},
+		{
+			name: "Postgres MaxConns 超过 int32 上限",
+			mutate: func(c *Config) {
+				c.Postgres.MaxConns = math.MaxInt32 + 1
+			},
+			wantErr:     true,
+			wantInclude: "DB_MAX_CONNS",
 		},
 		{
 			name: "Postgres LogLevel 非法",

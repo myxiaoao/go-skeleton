@@ -79,15 +79,14 @@ func main() {
 				"internal/taskqueue",
 			),
 		},
-		// 规则 2：gorm.io/gorm 仅允许 repository / model / bootstrap / pkg/database。
-		// 把"允许列表外的全部目录"翻译成具体路径前缀，比"扫全仓再排除"更清晰。
+		// 规则 2：pgx 与 sqlc 生成包仅允许 repository / bootstrap / pkg/database。
+		// 其他层通过 service 包里的接口隔离，不直接接触驱动或生成代码。
 		{
 			id:   2,
-			desc: "gorm.io/gorm 仅允许 internal/{repository,model,bootstrap} 与 pkg/database 使用",
-			check: importExcept(
-				"gorm.io/gorm",
+			desc: "github.com/jackc/pgx 与 internal/repository/sqlcdb 仅允许 internal/{repository,bootstrap} 与 pkg/database 使用",
+			check: importPrefixesExcept(
+				[]string{"github.com/jackc/pgx/", modulePath + "/internal/repository/sqlcdb"},
 				"internal/repository",
-				"internal/model",
 				"internal/bootstrap",
 				"pkg/database",
 			),
@@ -114,6 +113,12 @@ func main() {
 				"internal/handler",
 			),
 		},
+		// 规则 5：数据访问已迁移到 sqlc + pgx，全仓禁止重新引入 GORM。
+		{
+			id:    5,
+			desc:  "禁止 import gorm.io/*（数据访问统一走 sqlc + pgx）",
+			check: importPrefixInDirs("gorm.io/", "."),
+		},
 	}
 
 	var all []violation
@@ -131,7 +136,7 @@ func main() {
 	}
 
 	if len(all) == 0 {
-		fmt.Println("architecture-verify: 4 import / context rules clean.")
+		fmt.Println("architecture-verify: 5 import / context rules clean.")
 		return
 	}
 
@@ -195,12 +200,13 @@ func importInDirs(imp string, dirs ...string) func() ([]violation, error) {
 	}
 }
 
-// importExcept 在仓库根下扫所有 .go，import path == imp 且文件不在 allow
-// 任一前缀下视为违规。
-func importExcept(imp string, allow ...string) func() ([]violation, error) {
+// importPrefixesExcept 在仓库根下扫所有 .go，import path 以 prefixes 中任一
+// 前缀开头、且文件不在 allow 任一目录下时视为违规。
+func importPrefixesExcept(prefixes []string, allow ...string) func() ([]violation, error) {
 	return func() ([]violation, error) {
 		return walkImports(".", func(file string, spec *ast.ImportSpec) *violation {
-			if importPath(spec) != imp {
+			p := importPath(spec)
+			if !slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(p, prefix) }) {
 				return nil
 			}
 			for _, a := range allow {
@@ -211,7 +217,7 @@ func importExcept(imp string, allow ...string) func() ([]violation, error) {
 			return &violation{
 				file: file,
 				line: lineOf(spec.Pos()),
-				note: fmt.Sprintf(`import %q`, imp),
+				note: fmt.Sprintf(`import %q`, p),
 			}
 		})
 	}
@@ -320,9 +326,11 @@ func walkGoFiles(dir string, visit func(path string, f *ast.File)) error {
 			return err
 		}
 		if d.IsDir() {
-			// 跳掉 vendor / .git / dist 等明显非源码目录。
+			// 跳掉 vendor / .git / dist 等明显非源码目录；.claude 下是本地
+			// agent worktree（.claude/worktrees/），不属于本仓库源码，扫到
+			// 会被规则 2/5 误报。
 			name := d.Name()
-			if name == "vendor" || name == ".git" || name == "dist" || name == "bin" || name == "node_modules" {
+			if name == "vendor" || name == ".git" || name == "dist" || name == "bin" || name == "node_modules" || name == ".claude" {
 				return filepath.SkipDir
 			}
 			return nil

@@ -103,6 +103,9 @@ func TestNewEndpoint_DTORequestBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// gofmt 会按 block 里最长字段名/类型对齐列宽，"Name string" / "Qty int" 这类裸
+	// 字段行的内部空格数不固定，比较前折叠连续空白成单个空格。
+	normalizedService := strings.Join(strings.Fields(string(service)), " ")
 	want := []string{
 		"type CreateOrderReq struct",
 		"Name string",
@@ -112,7 +115,7 @@ func TestNewEndpoint_DTORequestBody(t *testing.T) {
 		"func (s *OrderService) Create(ctx context.Context, req *CreateOrderReq)",
 	}
 	for _, w := range want {
-		if !strings.Contains(string(service), w) {
+		if !strings.Contains(normalizedService, w) {
 			t.Errorf("service should contain %q, got:\n%s", w, service)
 		}
 	}
@@ -286,13 +289,16 @@ type ServerInterface interface {
 		t.Fatal(err)
 	}
 	got := string(service)
+	// generatedPaths 现在会跑 gofmt，struct 字段的 name/type/tag 列会按同 block 里最长字段对齐，
+	// 空格宽度因而不固定；比较前把连续空白折叠成单个空格，只校验字段名/类型/tag 本身。
+	normalized := strings.Join(strings.Fields(got), " ")
 	want := []string{
 		"OrderId string `json:\"order_id\"`",
 		"Field2faEnabled bool `json:\"2fa-enabled\"`",
 		"XRequestId string `form:\"x-request-id\"`",
 	}
 	for _, w := range want {
-		if !strings.Contains(got, w) {
+		if !strings.Contains(normalized, w) {
 			t.Errorf("service should contain %q, got:\n%s", w, got)
 		}
 	}

@@ -45,10 +45,7 @@ func testRegistryForServer(t *testing.T, metricsAddr string) *bootstrap.Registry
 	if err != nil {
 		t.Fatalf("pgxpool.New: %v", err)
 	}
-	dbMgr, err := database.NewManager(pool)
-	if err != nil {
-		t.Fatalf("database.NewManager: %v", err)
-	}
+	dbMgr := database.NewManager(pool)
 	t.Cleanup(func() { _ = dbMgr.Close() })
 
 	return &bootstrap.Registry{

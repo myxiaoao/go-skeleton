@@ -16,8 +16,8 @@ import (
 )
 
 // ExampleProcessor 是 example 异步任务的业务处理契约——给 worker handler
-// 提供一个 "有名有姓" 的方法签名而不是空 interface。worker 不直接持
-// *gorm.DB——那是 repository 的事；业务逻辑挂在 service / usecase 上，通过
+// 提供一个 "有名有姓" 的方法签名而不是空 interface。worker 不直接持数据库
+// 连接——那是 repository 的事；业务逻辑挂在 service / usecase 上，通过
 // 本地接口隔离引入。
 //
 // 接入新业务任务时，按这个模板做：
@@ -50,9 +50,9 @@ func (noopExampleProcessor) ProcessExample(ctx context.Context, payload task.Exa
 
 // Deps 收拢所有异步任务 handler 共用的依赖。
 //
-// 故意**不**包含 *gorm.DB：repository 是项目里唯一允许 import gorm 的层
+// 故意**不**包含数据库连接：repository 是项目里唯一允许接触 pgx / sqlcdb 的层
 // （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
-// → repository → gorm，而不是在 worker 包内直接拿 *gorm.DB。
+// → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
 // Cache / RDB / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
 type Deps struct {

@@ -1,6 +1,6 @@
 // architecture_verify_test.go 覆盖 architecture-verify.go 的分层依赖规则:
-// 规则 1 service 不 import gin、规则 2 gorm 限定到 repository / model /
-// bootstrap / pkg/database 子集。
+// 规则 1 service 不 import gin、规则 2 pgx / sqlcdb 限定到 repository /
+// bootstrap / pkg/database、规则 5 全仓禁止 gorm。
 package scripts
 
 import (
@@ -33,20 +33,61 @@ var _ = gin.Default
 	}
 }
 
-func TestArchitectureVerify_GormOutsideAllowList(t *testing.T) {
+func TestArchitectureVerify_PgxOutsideAllowList(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 
-	// 规则 2 的命中：handler 包不能 import gorm（只允许 repository / model /
-	// bootstrap / pkg/database）。
+	// 规则 2 的命中：handler 包不能 import pgx 或 sqlc 生成包。
 	writeFile(t, filepath.Join(dir, "internal", "handler", "x.go"), `package handler
 
-import "gorm.io/gorm"
+import (
+	"github.com/jackc/pgx/v5/pgxpool"
 
-var _ = gorm.DB{}
+	"go-skeleton/internal/repository/sqlcdb"
+)
+
+var (
+	_ *pgxpool.Pool
+	_ sqlcdb.DBTX
+)
 `)
-	// 反例：repository 包 import gorm，不应被告警。
+	// 允许列表：repository 与 pkg/database。
 	writeFile(t, filepath.Join(dir, "internal", "repository", "ok.go"), `package repository
+
+import "github.com/jackc/pgx/v5"
+
+var _ pgx.Tx
+`)
+	writeFile(t, filepath.Join(dir, "pkg", "database", "ok.go"), `package database
+
+import "github.com/jackc/pgx/v5/pgxpool"
+
+var _ *pgxpool.Pool
+`)
+
+	code, out := runScript(t, dir, "architecture-verify.go")
+	if code == 0 {
+		t.Fatalf("architecture-verify should fail when handler imports pgx\n%s", out)
+	}
+	if !strings.Contains(out, "rule 2") || !strings.Contains(out, "internal/handler/x.go") {
+		t.Errorf("expected rule 2 + handler/x.go, got:\n%s", out)
+	}
+	if !strings.Contains(out, "go-skeleton/internal/repository/sqlcdb") {
+		t.Errorf("expected sqlcdb import flagged, got:\n%s", out)
+	}
+	for _, ok := range []string{"internal/repository/ok.go", "pkg/database/ok.go"} {
+		if strings.Contains(out, ok) {
+			t.Errorf("%s is in allow list, should not be flagged:\n%s", ok, out)
+		}
+	}
+}
+
+func TestArchitectureVerify_GormForbidden(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// 规则 5：gorm 已彻底移除，即使 repository 也不允许 import。
+	writeFile(t, filepath.Join(dir, "internal", "repository", "x.go"), `package repository
 
 import "gorm.io/gorm"
 
@@ -55,16 +96,32 @@ var _ = gorm.DB{}
 
 	code, out := runScript(t, dir, "architecture-verify.go")
 	if code == 0 {
-		t.Fatalf("architecture-verify should fail when handler imports gorm\n%s", out)
+		t.Fatalf("architecture-verify should fail when anything imports gorm\n%s", out)
 	}
-	if !strings.Contains(out, "rule 2") {
-		t.Errorf("expected rule 2 in diagnostic, got:\n%s", out)
+	if !strings.Contains(out, "rule 5") || !strings.Contains(out, "internal/repository/x.go") {
+		t.Errorf("expected rule 5 + repository/x.go, got:\n%s", out)
 	}
-	if !strings.Contains(out, "internal/handler/x.go") {
-		t.Errorf("expected handler/x.go violation, got:\n%s", out)
+}
+
+func TestArchitectureVerify_SkipsClaudeWorktrees(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// .claude/worktrees/ 是本地 agent 起的嵌套 git worktree，不属于本仓库
+	// 源码——walkGoFiles 应当整目录跳过，规则 2/5 都不该扫进去误报。
+	writeFile(t, filepath.Join(dir, ".claude", "worktrees", "x", "internal", "handler", "x.go"), `package handler
+
+import "gorm.io/gorm"
+
+var _ = gorm.DB{}
+`)
+
+	code, out := runScript(t, dir, "architecture-verify.go")
+	if code != 0 {
+		t.Fatalf("architecture-verify should ignore .claude/worktrees, got exit=%d\n%s", code, out)
 	}
-	if strings.Contains(out, "internal/repository/ok.go") {
-		t.Errorf("repository/ok.go is in allow list, should not be flagged:\n%s", out)
+	if strings.Contains(out, ".claude") {
+		t.Errorf("expected no mention of .claude path, got:\n%s", out)
 	}
 }
 
@@ -72,7 +129,7 @@ func TestArchitectureVerify_Clean(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 
-	// 空仓库：service / repository / pkg 都没文件，4 条规则都应通过。
+	// 空仓库：service / repository / pkg 都没文件，5 条规则都应通过。
 	code, out := runScript(t, dir, "architecture-verify.go")
 	if code != 0 {
 		t.Fatalf("architecture-verify exit=%d on empty repo, expected 0\n%s", code, out)

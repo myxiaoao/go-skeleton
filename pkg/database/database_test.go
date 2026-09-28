@@ -3,6 +3,8 @@ package database
 import (
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // unreachableDSN 指向一个关闭的端口：pgxpool 惰性建连，所以针对它
@@ -67,6 +69,44 @@ func TestInitBuildsLazyPool(t *testing.T) {
 	}
 	if m.SQLDB() == nil {
 		t.Error("SQLDB should share the pool")
+	}
+}
+
+func TestNewManagerWrapsPool(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), unreachableDSN)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	m := NewManager(pool)
+	t.Cleanup(func() { _ = m.Close() })
+
+	if m.Pool() != pool {
+		t.Error("Pool() should return the exact pool passed in")
+	}
+	if m.SQLDB() == nil {
+		t.Error("SQLDB() should not be nil")
+	}
+}
+
+func TestInitRejectsInvalidDSN(t *testing.T) {
+	if _, err := Init(t.Context(), Config{DSN: "://bad"}); err == nil {
+		t.Fatal("expected error for invalid DSN")
+	}
+}
+
+func TestCloseReleasesPoolAndSQLDB(t *testing.T) {
+	m, err := Init(t.Context(), Config{DSN: unreachableDSN})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Close 先关 sqlDB 再关 pool；sqlDB 关闭后 PingContext 必须报错，
+	// 用它作为"确实释放了资源"的确定性信号（pool 关闭后的行为依赖内部
+	// 实现细节，不作为断言点）。
+	if err := m.SQLDB().PingContext(t.Context()); err == nil {
+		t.Fatal("PingContext after Close should error")
 	}
 }
 

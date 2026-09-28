@@ -70,7 +70,7 @@ yaml 是真相源。按这个顺序：
 **禁忌**：
 - handler 写业务规则 → 挪到 service
 - service 收 `*gin.Context` → 改成 `context.Context`
-- service / handler 直接 import `gorm.io/gorm` → 通过 service 包里的 repository 接口隔离
+- service / handler 直接 import pgx / sqlcdb 或手写 SQL → 通过 service 包里的 repository 接口隔离
 - 手改 `make new-endpoint` 生成的注入区（`// NEH ...` 锚点）→ 改 yaml 重跑
 
 **资源识别**：优先看 yaml 的 `x-resource`（operation 级 > path 级），未声明时 fallback 到"operationId 大小写不敏感包含 NAME"。`NAME=Order` 走 fallback 时会命中 `listOrders / createOrder / getOrder / enqueueOrderTask`，但同时误命中 `listOrderPayments`——歧义场景请直接在 yaml 写 `x-resource: Order` / `x-resource: OrderPayment` 显式归属。
@@ -135,7 +135,7 @@ yaml 是真相源。按这个顺序：
 
 1. `make migrate-create name=add_xxx` 生成时间戳前缀的空迁移文件
 2. 在该文件里填 `-- +goose Up` / `-- +goose Down` 两段 SQL（DDL 自己写，可删列 / 改类型 / 数据回填）
-3. 改 [`internal/model/`](../internal/model/) 的 struct 让 GORM 运行时映射对得上（struct 与迁移文件需手动保持一致）
+3. 改 [internal/repository/queries/](../internal/repository/queries/) 的 SQL 与 [internal/model/](../internal/model/) 的 struct，跑 make sqlc 重新生成（struct 与迁移文件需手动保持一致）
 4. `make run-migrate` 应用；回滚一版 `make migrate-down`，看状态 `make migrate-status`
 
 > 命令详解（含 `-cmd up/down/status`、命名约定）见 [runbook §本地起完整三进程](./runbook.md#本地起完整三进程)。和 AutoMigrate 不同，破坏性变更（删列 / 改类型）现在由你显式写在 Down/Up 里，goose 不会替你跳过。
@@ -145,7 +145,7 @@ yaml 是真相源。按这个顺序：
 ## 九、提交前必跑
 
 ```sh
-make verify              # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅）
+make verify              # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅）
 ```
 
 红了看最后一个 `=== STEP FAILED: xxx ===` 横幅指向的步骤；详细排错见 [runbook §排错 cheat sheet](./runbook.md#排错-cheat-sheet)。
@@ -159,7 +159,7 @@ make verify              # fmt + vet + test + lint + architecture-verify + env-v
 | 层 | 工具 | 模板 |
 |---|---|---|
 | service / handler / middleware | 标准库 `testing` + `httptest` + inline mock | [`internal/service/example_test.go`](../internal/service/example_test.go) |
-| repository (DryRun) | GORM `DryRun` 捕获 SQL | [`internal/repository/example_test.go`](../internal/repository/example_test.go) |
+| repository | 手写 mockDBTX / mockTx 断言 SQL 与参数 | [internal/repository/example_test.go](../internal/repository/example_test.go) |
 | repository (真实 DB) | `//go:build integration` + 真 PG | [`internal/repository/example_integration_test.go`](../internal/repository/example_integration_test.go) |
 
 **硬约束**（见 [CLAUDE.md::测试约定](../CLAUDE.md)）：

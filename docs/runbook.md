@@ -150,6 +150,17 @@ DTO 反推（可选）：`make new-endpoint NAME=Order DTO=1`（或 `--dto`）�
 `var _ oapi.ServerInterface = (*APIServer)(nil)`，OpenAPI yaml 与 APIServer
 方法集漂移时 `go build` 直接失败，不依赖人 review。
 
+## 改 SQL / 新增查询
+
+1. 表结构变更：`make migrate-create name=xxx` → 填 SQL（sqlc 也读这些文件作 schema）。
+2. 在 `internal/repository/queries/<资源>.sql` 写查询：`-- name: GetOrder :one` + SQL；可选条件用 `sqlc.narg(name)`，分页参数写 `sqlc.arg(lim)::bigint`。
+3. `make sqlc` 生成 `internal/repository/sqlcdb/`（不要手改）。
+4. repository 里调 `sqlcdb.New(dbFromContext(ctx, r.db)).GetOrder(ctx, ...)`，把行映射成 `model`。
+5. 用 `tx_test.go` 里的 `mockDBTX` / `mockTx` 写单测断言 SQL 与参数。
+6. `make verify`（`sqlc-verify` 会确认生成产物已提交）。
+
+排错：`sqlc generate` 报 `no queries contained in paths` → queries 目录为空，至少保留一条查询（drop-example 会留 `placeholder.sql`）。
+
 ## 新增一个 Asynq 异步任务
 
 ```sh

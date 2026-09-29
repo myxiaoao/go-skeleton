@@ -4,6 +4,7 @@
 package scripts
 
 import (
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,9 +35,7 @@ func writeDocsVerifyFixture(t *testing.T, overrides map[string]string) string {
 		"docs/development.md": "```sh\nmake verify              # fmt-verify + vet + test（每步打横幅）\n```\n",
 		"docs/runbook.md":     "```sh\nmake verify        # 项目级一站式\n```\n",
 	}
-	for k, v := range overrides {
-		files[k] = v
-	}
+	maps.Copy(files, overrides)
 	for name, content := range files {
 		writeFile(t, filepath.Join(dir, name), content)
 	}
@@ -56,6 +55,18 @@ func TestDocsVerify_HappyPath(t *testing.T) {
 	}
 }
 
+// CLAUDE.md 代码块里出现与 AGENTS.md 同名的 `## ` 行（比如示范写法）不算重复段。
+func TestDocsVerify_FencedHeadingInClaudeIgnored(t *testing.T) {
+	dir := writeDocsVerifyFixture(t, map[string]string{
+		"CLAUDE.md": "# 入口\n\n@AGENTS.md\n\n```md\n## 分层规则\n```\n",
+	})
+
+	code, out := runScript(t, dir, "docs-verify.go")
+	if code != 0 {
+		t.Fatalf("docs-verify exit=%d, expected 0 (fenced heading must be ignored)\n%s", code, out)
+	}
+}
+
 func TestDocsVerify_Failures(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -71,6 +82,11 @@ func TestDocsVerify_Failures(t *testing.T) {
 			name:      "duplicated rule section",
 			overrides: map[string]string{"CLAUDE.md": "# 入口\n\n@AGENTS.md\n\n## 分层规则\n\n复制回来的正文\n"},
 			wants:     []string{"CLAUDE.md:5: section [## 分层规则] duplicates AGENTS.md"},
+		},
+		{
+			name:      "import line only inside code fence",
+			overrides: map[string]string{"CLAUDE.md": "# 入口\n\n```md\n@AGENTS.md\n```\n"},
+			wants:     []string{"CLAUDE.md must contain a standalone `@AGENTS.md` line outside code fences"},
 		},
 		{
 			name:      "doc list missing step",

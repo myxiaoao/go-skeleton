@@ -493,11 +493,11 @@ import (
 // Deps 收拢所有异步任务 handler 共用的依赖。
 //
 // 故意**不**包含数据库连接：repository 是项目里唯一允许接触 pgx / sqlcdb 的层
-// （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
+// （见 AGENTS.md 分层规则）。Worker handler 需要落库的话，走 service 接口
 // → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
 // Cache / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
-// 业务接入新任务时按 CLAUDE.md "异步队列" 段，在本 struct 上加 typed
+// 业务接入新任务时按 AGENTS.md "异步队列" 段，在本 struct 上加 typed
 // processor 接口字段，避免回退到 interface{}。
 type Deps struct {
 	Cache *cache.Client
@@ -518,7 +518,7 @@ type ProcessorRequirement struct {
 //
 // 骨架态没有任何业务 task，返回空列表。**加新 task 类型的硬约束**：在 Deps
 // 上加新 processor 字段后，本方法必须同步追加一条记录；漏加 = production
-// 下静默 noop。这是 CLAUDE.md "异步队列" 段"production 漏注入 fail-fast"约束
+// 下静默 noop。这是 AGENTS.md "异步队列" 段"production 漏注入 fail-fast"约束
 // 的强制执行点。
 func (d *Deps) RequiredProcessors() []ProcessorRequirement {
 	if d == nil {
@@ -530,7 +530,7 @@ func (d *Deps) RequiredProcessors() []ProcessorRequirement {
 // RegisterHandlers 把所有异步任务 handler 注册到 mux 上。注册 TraceMiddleware
 // 让 task 调用链自带 trace_id；deps 为 nil 兜底成空 Deps，让 mux 仍然可用。
 //
-// 业务接入流程见 CLAUDE.md "异步队列" 段：定义 payload + Processor 接口 +
+// 业务接入流程见 AGENTS.md "异步队列" 段：定义 payload + Processor 接口 +
 // HandleXxxTask + 在这里 mux.HandleFunc(task.TypeXxx, deps.HandleXxxTask)。
 func RegisterHandlers(mux *asynq.ServeMux, deps *Deps) {
 	if mux == nil {

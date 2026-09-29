@@ -120,7 +120,7 @@ func main() {
 			check: importPrefixInDirs("gorm.io/", "."),
 		},
 		// 规则 6：task payload 必须把 Header 匿名内嵌在首字段，worker 端才
-		// 能用统一入口取 trace_id / 校验 schema version（见 CLAUDE.md "异步
+		// 能用统一入口取 trace_id / 校验 schema version（见 AGENTS.md "异步
 		// 队列" 段）。
 		{
 			id:    6,

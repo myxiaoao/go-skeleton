@@ -81,8 +81,8 @@ func main() {
 		claudeFile, agentsFile, lists, len(steps))
 }
 
-// checkClaudeImport 校验 CLAUDE.md 含单独一行 @AGENTS.md，且没有与 AGENTS.md
-// 同名的 H2 段。返回发现的问题数。
+// checkClaudeImport 校验 CLAUDE.md 在代码块之外含单独一行 @AGENTS.md（Claude Code
+// 不会导入代码块里的 @ 引用），且没有与 AGENTS.md 同名的 H2 段。返回发现的问题数。
 func checkClaudeImport() int {
 	claudeLines, err := readLines(claudeFile)
 	if err != nil {
@@ -94,8 +94,8 @@ func checkClaudeImport() int {
 	}
 
 	problems := 0
-	if !slices.ContainsFunc(claudeLines, func(l string) bool { return strings.TrimSpace(l) == importLine }) {
-		fmt.Fprintf(os.Stderr, "docs-verify: %s must contain a standalone `%s` line (Claude Code import)\n", claudeFile, importLine)
+	if !slices.ContainsFunc(proseLines(claudeLines), func(l numberedLine) bool { return strings.TrimSpace(l.text) == importLine }) {
+		fmt.Fprintf(os.Stderr, "docs-verify: %s must contain a standalone `%s` line outside code fences (Claude Code import)\n", claudeFile, importLine)
 		problems++
 	}
 
@@ -113,14 +113,15 @@ func checkClaudeImport() int {
 	return problems
 }
 
-type heading struct {
+// numberedLine 是带 1-based 行号的一行文本。
+type numberedLine struct {
 	text string
 	line int
 }
 
-// headings 返回代码块之外所有 `## ` 标题（去掉前缀）及其行号（1-based）。
-func headings(lines []string) []heading {
-	var out []heading
+// proseLines 返回代码块（``` / ~~~ 围起来的段）之外的行及其行号。
+func proseLines(lines []string) []numberedLine {
+	var out []numberedLine
 	inCodeFence := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -128,8 +129,19 @@ func headings(lines []string) []heading {
 			inCodeFence = !inCodeFence
 			continue
 		}
-		if !inCodeFence && strings.HasPrefix(line, "## ") {
-			out = append(out, heading{text: strings.TrimSpace(strings.TrimPrefix(line, "## ")), line: i + 1})
+		if !inCodeFence {
+			out = append(out, numberedLine{text: line, line: i + 1})
+		}
+	}
+	return out
+}
+
+// headings 返回代码块之外所有 `## ` 标题（text 去掉前缀）及其行号。
+func headings(lines []string) []numberedLine {
+	var out []numberedLine
+	for _, l := range proseLines(lines) {
+		if strings.HasPrefix(l.text, "## ") {
+			out = append(out, numberedLine{text: strings.TrimSpace(strings.TrimPrefix(l.text, "## ")), line: l.line})
 		}
 	}
 	return out

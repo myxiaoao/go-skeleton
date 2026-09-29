@@ -485,7 +485,6 @@ func rewriteWorkerHandler() error {
 
 import (
 	"github.com/hibiken/asynq"
-	"github.com/redis/go-redis/v9"
 
 	"go-skeleton/internal/taskqueue"
 	"go-skeleton/pkg/cache"
@@ -497,12 +496,11 @@ import (
 // （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
 // → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
-// Cache / RDB / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
+// Cache / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
 // 业务接入新任务时按 CLAUDE.md "异步队列" 段，在本 struct 上加 typed
 // processor 接口字段，避免回退到 interface{}。
 type Deps struct {
 	Cache *cache.Client
-	RDB   *redis.Client
 	Queue *taskqueue.Queue
 }
 

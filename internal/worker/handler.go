@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/hibiken/asynq"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"go-skeleton/internal/task"
@@ -54,11 +53,10 @@ func (noopExampleProcessor) ProcessExample(ctx context.Context, payload task.Exa
 // （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
 // → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
-// Cache / RDB / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
+// Cache / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
 type Deps struct {
 	Example ExampleProcessor
 	Cache   *cache.Client
-	RDB     *redis.Client
 	Queue   *taskqueue.Queue
 }
 

@@ -308,7 +308,8 @@ systemd-cgtop -m | grep go-skeleton
 - 可观测端口 `WORKER_METRICS_ADDR`（默认 `:9091`，显式留空关闭）：`/metrics`（含
   `go_skeleton_worker_asynq_tasks_processed_total{type,status}`、
   `go_skeleton_worker_asynq_task_duration_seconds{type}`、DB 连接池指标）、`/livez`
-  （恒 200）、`/health`（Redis 必查、配了 DB 时查 DB，失败 503）。端口在 asynq 进入消费态
+  （恒 200）、`/health`（Redis 必查、配了 DB 时查 DB，失败 503；两者顺序探测、共用 2s
+  超时，Redis 很慢时 DB 可能被连带标成 `unavailable`，排障时先看 Redis）。端口在 asynq 进入消费态
   后同步绑定，绑不上进程直接退出、不发 `READY=1`。用防火墙只放行 Prometheus 来源。
 
 ### Migrate unit

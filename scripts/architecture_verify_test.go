@@ -184,6 +184,67 @@ type BadPayload struct {
 	}
 }
 
+// TestArchitectureVerify_PayloadAliases 覆盖别名 / 基于其他类型定义的 Payload：
+// 规则 6 要顺着同包名字解析到最终 struct 再判定，引用其他包的类型一律报错。
+func TestArchitectureVerify_PayloadAliases(t *testing.T) {
+	const header = "package task\n\ntype Header struct {\n\tVersion int\n}\n\n"
+	cases := []struct {
+		name     string
+		body     string
+		wantFail bool
+	}{
+		{
+			name:     "别名指向内嵌 Header 的 struct",
+			body:     "type base struct {\n\tHeader\n\tName string\n}\n\ntype GoodPayload = base\n",
+			wantFail: false,
+		},
+		{
+			name:     "定义基于内嵌 Header 的 struct（多级）",
+			body:     "type base struct {\n\tHeader\n}\n\ntype mid base\n\ntype GoodPayload mid\n",
+			wantFail: false,
+		},
+		{
+			name:     "别名指向缺 Header 的 struct",
+			body:     "type base struct {\n\tName string\n}\n\ntype BadPayload = base\n",
+			wantFail: true,
+		},
+		{
+			name:     "引用其他包的类型",
+			body:     "import \"time\"\n\ntype BadPayload = time.Time\n",
+			wantFail: true,
+		},
+		{
+			name:     "非 struct 形态跳过",
+			body:     "type RawPayload []byte\n",
+			wantFail: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			initRepo(t, dir)
+			body := c.body
+			src := header + body
+			if strings.HasPrefix(body, "import") {
+				// import 必须紧跟 package 声明。
+				src = "package task\n\n" + body + "\ntype Header struct {\n\tVersion int\n}\n"
+			}
+			writeFile(t, filepath.Join(dir, "internal", "task", "p.go"), src)
+
+			code, out := runScript(t, dir, "architecture-verify.go")
+			if c.wantFail {
+				if code == 0 || !strings.Contains(out, "rule 6") || !strings.Contains(out, "internal/task/p.go") {
+					t.Fatalf("expected rule 6 violation for internal/task/p.go, exit=%d\n%s", code, out)
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("expected clean, exit=%d\n%s", code, out)
+			}
+		})
+	}
+}
+
 func TestArchitectureVerify_SkipsClaudeWorktrees(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
@@ -210,7 +271,7 @@ func TestArchitectureVerify_Clean(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 
-	// 空仓库：service / repository / pkg 都没文件，5 条规则都应通过。
+	// 空仓库：service / repository / pkg 都没文件，所有规则都应通过。
 	code, out := runScript(t, dir, "architecture-verify.go")
 	if code != 0 {
 		t.Fatalf("architecture-verify exit=%d on empty repo, expected 0\n%s", code, out)

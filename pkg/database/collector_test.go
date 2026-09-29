@@ -47,9 +47,8 @@ func TestCollectorDescribeEmitsAllDescs(t *testing.T) {
 }
 
 // TestCollectorCollectReadsPoolStat 用惰性 pool（unreachableDSN 未真正拨号）
-// 断言 Collect 顺序与取值：MaxConns 应反映配置值，其余累计型指标在没有真实
-// acquire 发生时应为 0——这足以验证 Stat() 字段到 Desc 的映射没接错线，不需
-// 要真实数据库。
+// 按指标名断言类型与取值：max_conns 应反映配置值，其余指标在没有真实 acquire
+// 时为 0——足以验证 Stat() 字段到指标的映射没接错线，不依赖 Collect 的输出顺序。
 func TestCollectorCollectReadsPoolStat(t *testing.T) {
 	m, err := Init(t.Context(), Config{DSN: unreachableDSN, MaxConns: 9})
 	if err != nil {
@@ -57,40 +56,50 @@ func TestCollectorCollectReadsPoolStat(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Close() })
 
-	c := m.Collector()
-	ch := make(chan prometheus.Metric, 16)
-	c.Collect(ch)
-	close(ch)
-
-	var metrics []prometheus.Metric
-	for metric := range ch {
-		metrics = append(metrics, metric)
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(m.Collector())
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
 	}
-	if len(metrics) != 8 {
-		t.Fatalf("Collect emitted %d metrics, want 8", len(metrics))
+	got := make(map[string]*dto.MetricFamily, len(families))
+	for _, f := range families {
+		got[f.GetName()] = f
 	}
 
-	// 顺序固定为 Collect 里写死的：acquired/idle/total/max (gauge) 后接
-	// acquire_count/empty_acquire/canceled_acquire/acquire_duration (counter)。
-	wantGauge := []float64{0, 0, 0, 9}
-	for i, want := range wantGauge {
-		var pb dto.Metric
-		if err := metrics[i].Write(&pb); err != nil {
-			t.Fatalf("write metric %d: %v", i, err)
-		}
-		if got := pb.GetGauge().GetValue(); got != want {
-			t.Errorf("gauge[%d] = %v, want %v", i, got, want)
-		}
+	want := []struct {
+		name  string
+		typ   dto.MetricType
+		value float64
+	}{
+		{"go_skeleton_db_pool_acquired_conns", dto.MetricType_GAUGE, 0},
+		{"go_skeleton_db_pool_idle_conns", dto.MetricType_GAUGE, 0},
+		{"go_skeleton_db_pool_total_conns", dto.MetricType_GAUGE, 0},
+		{"go_skeleton_db_pool_max_conns", dto.MetricType_GAUGE, 9},
+		{"go_skeleton_db_pool_acquire_count_total", dto.MetricType_COUNTER, 0},
+		{"go_skeleton_db_pool_empty_acquire_count_total", dto.MetricType_COUNTER, 0},
+		{"go_skeleton_db_pool_canceled_acquire_count_total", dto.MetricType_COUNTER, 0},
+		{"go_skeleton_db_pool_acquire_duration_seconds_total", dto.MetricType_COUNTER, 0},
 	}
-
-	wantCounter := []float64{0, 0, 0, 0}
-	for i, want := range wantCounter {
-		var pb dto.Metric
-		if err := metrics[4+i].Write(&pb); err != nil {
-			t.Fatalf("write metric %d: %v", 4+i, err)
+	if len(got) != len(want) {
+		t.Fatalf("gathered %d metric families, want %d", len(got), len(want))
+	}
+	for _, w := range want {
+		f, ok := got[w.name]
+		if !ok {
+			t.Errorf("missing metric %s", w.name)
+			continue
 		}
-		if got := pb.GetCounter().GetValue(); got != want {
-			t.Errorf("counter[%d] = %v, want %v", i, got, want)
+		if f.GetType() != w.typ {
+			t.Errorf("%s type = %v, want %v", w.name, f.GetType(), w.typ)
+		}
+		metric := f.GetMetric()[0]
+		v := metric.GetGauge().GetValue()
+		if w.typ == dto.MetricType_COUNTER {
+			v = metric.GetCounter().GetValue()
+		}
+		if v != w.value {
+			t.Errorf("%s = %v, want %v", w.name, v, w.value)
 		}
 	}
 }

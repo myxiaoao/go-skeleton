@@ -348,13 +348,21 @@ if [ "${RENAME_BARE:-0}" = "1" ]; then
   fi
 fi
 
-# --- 6. final fmt + (partial) verify -------------------------------------
+# --- 6. fmt + oapi regen + (partial) verify -------------------------------
 
 # Clean lint cache: golangci-lint caches abs paths and gets confused after
 # bulk rewrites (especially across worktrees), surfacing as ghost issues
 # pointing at non-existent files. Cheap to clean here, expensive to debug
 # later. Best-effort — older versions don't have `cache clean`.
 golangci-lint cache clean >/dev/null 2>&1 || true
+
+# Reformat once (mutating) before the verification loop below, which only
+# runs the read-only fmt-verify — the bulk sed rewrites can leave lines that
+# gofumpt / gci would otherwise reflow.
+echo "rename: running make fmt across rewritten files…"
+make fmt >/dev/null 2>&1 || {
+  echo "rename: make fmt failed; run manually to inspect" >&2; exit 1;
+}
 
 # Regenerate the embedded OpenAPI spec (its base64 changes because we
 # rewrote `title: <name> API` in api/openapi.yaml).

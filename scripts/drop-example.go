@@ -82,12 +82,15 @@ func main() {
 	must(runGo("mod", "tidy"), "go mod tidy")
 
 	log.Println("drop-example: 跑构建 + 测试 + 静态校验确认改动正确...")
-	// 不跑完整 make verify——里头的 oapi-verify / docs-deploy-check /
+	// 不跑完整 make verify——里头的 oapi-verify / sqlc-verify /
 	// docs-errcodes-verify 都用 `git diff --quiet` 对比工作树和 HEAD，
-	// drop-example 改了生成产物但还没让用户提交，必然 "out of sync"。
-	// 这里跑构成 verify 的真材实料子集：fmt / vet / test / lint /
-	// architecture / env / tidy / docs-verify（这些不依赖 HEAD ↔ 工作树
-	// diff）。"与 HEAD 同步" 类校验由用户 commit 后再跑 make verify 自查。
+	// drop-example 改了生成产物（oapi.gen.go / sqlcdb / errcodes.md）但还
+	// 没让用户提交，必然 "out of sync"。docs-deploy-check 不是 git-diff
+	// 校验（纯静态比对 docs/deploy.md 与 deploy/systemd/*.service），可以
+	// 放心跑。这里跑构成 verify 的真材实料子集：fmt / vet / test / lint /
+	// architecture / env / tidy / docs-verify / docs-deploy-check（这些不
+	// 依赖 HEAD ↔ 工作树 diff）。"与 HEAD 同步" 类校验由用户 commit 后再
+	// 跑 make verify 自查。
 	subverify := []string{
 		"fmt",
 		"vet",
@@ -97,6 +100,7 @@ func main() {
 		"env-verify",
 		"tidy-verify",
 		"docs-verify",
+		"docs-deploy-check",
 	}
 	for _, t := range subverify {
 		if err := runMake(t); err != nil {
@@ -109,12 +113,12 @@ drop-example: make %s 失败。最常见的剩余清理：
 	}
 
 	fmt.Println(`
-✅ Example 示例模块已拔除（fmt/vet/test/lint/architecture/env/tidy/docs-verify 全绿）。
+✅ Example 示例模块已拔除（fmt/vet/test/lint/architecture/env/tidy/docs-verify/docs-deploy-check 全绿）。
    后续动作：
    1. git status / git diff 确认改动符合预期
    2. CHANGELOG.md 写一条 Removed：移除示例 Example 模块
    3. git add -A && git commit
-   4. commit 后再跑一次 make verify：oapi-verify / docs-deploy-check /
+   4. commit 后再跑一次 make verify：oapi-verify / sqlc-verify /
       docs-errcodes-verify 比对工作树和 HEAD，要等本次改动入库后才会绿。
    5. 起真业务：make new-endpoint NAME=<Name>`)
 }

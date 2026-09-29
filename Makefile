@@ -245,9 +245,10 @@ oapi-install: ## 仅校验/安装 oapi-codegen（pin 版本，不匹配会重装
 	@$(MAKE) --no-print-directory _ensure-oapi-codegen
 
 .PHONY: oapi
-oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
+oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go（并 go mod tidy 补齐生成代码新增/去除的依赖，如 oapi-codegen/runtime）
 	@mkdir -p $(dir $(OAPI_OUTPUT))
 	oapi-codegen -config $(OAPI_CFG) $(OAPI_SPEC)
+	$(GO) mod tidy
 	@echo "generated: $(OAPI_OUTPUT)"
 
 .PHONY: architecture-verify
@@ -579,7 +580,7 @@ fmt: ## 格式化代码（gofumpt + gci，统一走 golangci-lint fmt，配置�
 # golangci-lint fmt --diff 只打印差异、不改写文件；有差异时非 0 退出（已用
 # v2.13.2 验证：clean 退出 0，有 diff 退出 1），适合塞进 verify 链只读校验。
 # 跟 lint 分开是因为 gofumpt / gci 是 formatter，golangci-lint run 本身不检查
-# 格式问题——见 constraints 里的实测结论。
+# 格式问题。
 .PHONY: fmt-verify
 fmt-verify: ## 校验代码已格式化（不改写文件）
 	@command -v golangci-lint >/dev/null 2>&1 || { \

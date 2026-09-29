@@ -97,9 +97,9 @@ make drop-example   # 一次性脚本，需 clean checkout
 - 清掉 `internal/server.go` / `router.go` / `worker.go` / `handler/openapi.go` 里的 Example 装配 + 转发方法，**保留** `// NEH ...` 锚点供 `make new-endpoint` 后续注入
 - 清掉 `api/openapi.yaml` 里 `/api/v1/examples`、`/examples/tasks` 路径 + 8 个 `Example*` schemas + `tags.example`
 - 跑 `make oapi` 重新生成 `internal/oapi/oapi.gen.go`、`go mod tidy` 收敛依赖
-- 跑构建 + 测试 + 静态校验子集（fmt/vet/test/lint/architecture-verify/env-verify/tidy-verify/docs-verify）确认不破坏
+- 跑构建 + 测试 + 静态校验子集（fmt/vet/test/lint/architecture-verify/env-verify/tidy-verify/docs-verify/docs-deploy-check）确认不破坏——`docs-deploy-check` 是纯静态比对（不比工作树 vs HEAD），可以放心跑
 
-跑完手动 commit 后再跑一次 `make verify`，让 oapi-verify / docs-deploy-check / docs-errcodes-verify（这些比对工作树 vs HEAD）也变绿。然后 `make new-endpoint NAME=<Name>` 接真业务（脚本已改成 yaml 驱动，不依赖 Example 模板源文件——drop 后照常可用）。
+跑完手动 commit 后再跑一次 `make verify`，让 oapi-verify / sqlc-verify / docs-errcodes-verify（这些比对工作树 vs HEAD）也变绿。然后 `make new-endpoint NAME=<Name>` 接真业务（脚本已改成 yaml 驱动，不依赖 Example 模板源文件——drop 后照常可用）。
 
 ## 新增一个 HTTP API endpoint
 

@@ -82,6 +82,20 @@ func New(subsystem string) *Registry {
 	}
 }
 
+// MustRegister 把外部 collector（如 pkg/database.DBManager.Collector()）
+// 注册进本 Registry 的私有 prometheus.Registry。命名跟 client_golang 的
+// prometheus.Registry.MustRegister 一致：注册失败（如重复注册同名指标）
+// 直接 panic，让配置错误在启动期暴露，而不是悄悄丢指标。
+//
+// 之所以开这个口子而不是让业务包各自 New(subsystem) 建一份独立 Registry，
+// 是因为 DB 连接池 collector 需要和 HTTP / asynq 指标出现在同一份 /metrics
+// 输出里，让 Grafana 一个 dashboard 就能关联查看；但业务代码仍然拿不到
+// Registerer，只能通过这个方法喂 collector，不能绕过 New() 里定的默认
+// collector 集合。
+func (r *Registry) MustRegister(cs ...prometheus.Collector) {
+	r.reg.MustRegister(cs...)
+}
+
 // Handler 返回符合 Prometheus 抓取格式的 http.Handler。挂到 gin 的方式：
 //
 //	engine.GET("/metrics", gin.WrapH(metrics.Handler()))

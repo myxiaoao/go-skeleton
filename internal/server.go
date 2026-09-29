@@ -314,6 +314,12 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	if reg.Cfg.Server.MetricsEnabled {
 		metricsReg = metrics.New("api")
 		engine.Use(metricsReg.HTTPMiddleware())
+
+		// DB 未配置（DSN 空）时 Collector() 返回 nil，跳过注册——不产出这组
+		// 连接池指标，而不是注册一个恒为 0 的假 collector 误导 SRE。
+		if dbCollector := reg.DB.Collector(); dbCollector != nil {
+			metricsReg.MustRegister(dbCollector)
+		}
 	}
 
 	engine.Use(middleware.Recovery())

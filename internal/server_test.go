@@ -114,6 +114,39 @@ func TestNewServerMountsMetricsOnBusinessPortByDefault(t *testing.T) {
 	}
 }
 
+// TestNewServerRegistersDBPoolCollector 验证 NewServer 把 reg.DB.Collector()
+// 挂进了 metrics Registry：/metrics 输出里应该能看到连接池指标，不需要真的
+// 连上数据库（pgxpool 惰性建连，Stat() 在未拨号时也能读到 MaxConns 等值）。
+func TestNewServerRegistersDBPoolCollector(t *testing.T) {
+	srv, err := NewServer(testRegistryForServer(t, ""))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	srv.Engine.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("business /metrics code=%d, want 200", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, marker := range []string{
+		"go_skeleton_db_pool_acquired_conns",
+		"go_skeleton_db_pool_idle_conns",
+		"go_skeleton_db_pool_total_conns",
+		"go_skeleton_db_pool_max_conns",
+		"go_skeleton_db_pool_acquire_count_total",
+		"go_skeleton_db_pool_empty_acquire_count_total",
+		"go_skeleton_db_pool_canceled_acquire_count_total",
+		"go_skeleton_db_pool_acquire_duration_seconds_total",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("metrics output missing %q", marker)
+		}
+	}
+}
+
 // TestNewMetricsServerOnlyServesMetrics 验证独立 metrics server 的 mux：
 // /metrics 路由能命中、能拿到 Prometheus 格式响应；其他路径（包括根路径）
 // 一律 404，避免被误当成业务端口。

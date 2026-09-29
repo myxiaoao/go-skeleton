@@ -24,6 +24,10 @@ set -euo pipefail
 staged_go=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.go$' || true)
 
 # ---- 1. fmt-verify + vet（仅在改了 .go 时跑；fmt-verify 只读校验，不改写文件）----
+# 注意：fmt-verify / vet 校验的是工作树（working tree），不是暂存区
+# （staged index）——只 `git add -p` 部分暂存时，工作树里未暂存的改动也会
+# 被一起校验，可能和实际要提交的内容不完全一致。这是已知取舍，图简单没有
+# 额外 stash 未暂存改动再校验。
 if [ -n "$staged_go" ]; then
   echo "[pre-commit] fmt-verify + vet ..."
   if ! make --no-print-directory fmt-verify vet; then

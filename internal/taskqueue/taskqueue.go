@@ -69,6 +69,11 @@ func (q *Queue) Ping(ctx context.Context) error {
 	if q == nil || q.client == nil {
 		return ErrQueueUnavailable
 	}
+	// 快路径：ctx 已经结束（超时/取消）就直接返回，不必再起一个注定被丢弃
+	// 结果的 goroutine 去发 PING。
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	result := make(chan error, 1)
 	go func() {

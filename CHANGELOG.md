@@ -12,107 +12,12 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
-- **AGENTS.md 成为 AI 编码助手规则的唯一来源**: `CLAUDE.md` 缩减为
-  `@AGENTS.md` 导入行 + Claude Code 专属补充，不再并行维护两份规则正文；
-  `CLAUDE.md` 独有的 `.dockerignore` 目录树条目并入 AGENTS.md。docs/ 下指向
-  `CLAUDE.md::xxx` 的链接改指 AGENTS.md。
-- **`make docs-verify` 改为两项校验**: (1) `CLAUDE.md` 必须含 `@AGENTS.md`
-  导入行，且不得出现与 AGENTS.md 同名的 `## ` 段；(2) 解析 Makefile `verify:`
-  的 `_verify-step` 序列，校验 README.md / README_en.md / docs/development.md /
-  docs/runbook.md / AGENTS.md 中 `make verify   # a + b + ...` 清单及 Makefile
-  `verify` 帮助文案与之完全一致（含顺序）。去掉旧的 sharedSections 段落比对，
-  并修正了现存漂移（缺 fmt-verify / sqlc-verify / shell-verify）。
-- **`make verify` 首步改为只读的 `fmt-verify`**: pre-commit hook 改跑
-  `make fmt-verify vet`；`make fmt` 仍负责改写文件。
-- **`scripts/rename.sh` 自检跑完整 verify 门禁**: 除 oapi-verify / sqlc-verify /
-  docs-errcodes-verify（比对已提交产物）外全部执行。
-
-- **数据访问从 GORM 迁移到 sqlc（pgx/v5）**: 查询写在
-  `internal/repository/queries/*.sql`，`make sqlc` 生成
-  `internal/repository/sqlcdb`（`make verify` 新增 `sqlc-verify` 校验产物已提交）。
-  `pkg/database` 改为 pgxpool + pgx QueryTracer（只记 SQL 模板）；repository
-  事务改用 `pgx.BeginTxFunc`，新增 `repository.TxManager` / `service.Transactor`；
-  `model.Example.ID` 改为 `int64`。配置项改名：`GORM_LOG_LEVEL` → `DB_LOG_LEVEL`、
-  `DB_MAX_OPEN_CONNS` → `DB_MAX_CONNS`、`DB_MAX_IDLE_CONNS` → `DB_MIN_CONNS`。
-  architecture-verify 规则 2 改为限制 pgx / sqlcdb，新增规则 5 全仓禁止 gorm。
-  `CLAUDE.md` / `AGENTS.md` 同步新增"代码注释统一用简体中文"约定。
-
-- **`api/openapi.yaml` 全量加中文 `summary` / `description`**:
-  Stoplight Elements 渲染 description 走 Markdown 原生支持中文，团队 review
-  /docs 更顺。覆盖：4 个 tag（health/auth/example/meta）、8 个 endpoint 的
-  summary + description、所有 parameters / requestBody / responses 的描述、
-  所有 schemas 顶层 + 每个 property 的描述、8 条 reusable components.responses
-  的描述。命名相关字段（`operationId` / 字段 key / `reason` 常量串）保留
-  英文以保证机读稳定性。
-  `internal/oapi/oapi.gen.go` 重新生成入库。`CLAUDE.md` / `AGENTS.md` §API
-  契约 加 "yaml 文档语言" 子节，约束未来新增 endpoint 时 summary/description
-  用中文、命名相关字段保持英文。
-
-
-- **BREAKING：HTTP 状态码按 errcode 映射，不再一律返 200**:
-  之前所有业务 API 永远返 HTTP 200、客户端只能靠 body code 判断成败；副作用
-  是 Prometheus `http_requests_total{status="200"}` 全绿，业务错误被监控
-  埋掉。
-  本轮改成 `pkg/errcode.Error.HTTPStatus()` 把 errcode 映射成对应 HTTP：
-  成功仍 200；1xxx 客户端错误 → 400 / 401 / 403 / 408 / 429 / 503（按 reason
-  精确映射，详见 [`docs/errcodes.md`](docs/errcodes.md)）；9xxx 服务端错误
-  → 500 / 501 / 503。客户端**仍**以 body `code` / `reason` 做精确分支，HTTP
-  status 给监控 / LB / 代理用作粗粒度信号；两者互不替代。
-  - **`pkg/errcode/type.go`**：加 `Error.HTTPStatus() int` + `HTTPStatusFor(code, reason)`
-    纯函数版（给 scripts/gen-errcodes 用，避免循环 import）。零值 / 未知 reason
-    走 500 兜底，让监控亮起来而不是静默 200。
-  - **`pkg/response/response.go`**：`WriteError` / `WriteValidationError` 改用
-    `ec.HTTPStatus()`；`WriteSuccess` 仍 200；三个 Write 函数顺手 `c.Set(MetricsCodeKey, code)`
-    把业务码塞进 gin.Context 给 metrics 拿。
-  - **`pkg/metrics/metrics.go`**：requests / duration 两个 Histogram labels 从
-    `[method, route, status]` 扩到 `[method, route, status, code]`——HTTP status
-    给粗粒度告警、code 给细粒度 SLO（两个码组合能精确定位是哪条业务错路径在涨）。
-    label 取自 gin.Context `response_code`，未走 pkg/response 的端点（如 /health）
-    兜底 "0"。
-  - **`api/openapi.yaml`**：顶部 description 重写、加 `ErrorEnvelope` schema +
-    `components.responses` 复用 7 条错误响应（BadRequest / Unauthorized /
-    Forbidden / RequestTimeout / TooManyRequests / InternalError / NotImplemented
-    / ServiceUnavailable）。5 个业务 endpoint 按可能错码挂上对应 `$ref`。
-    `internal/oapi/oapi.gen.go` 重新生成入库。
-  - **`scripts/gen-errcodes.go` + `docs/errcodes.md`**：表格加 HTTP 列，自动从
-    `errcode.HTTPStatusFor` 取，作者无需手填。
-  - **测试断言**：3 处 SERVICE_DISABLED 测试期望从 HTTP 200 改成 503（端点
-    在 spec 里但被配置开关关，与"路由不存在 / 404"区分开，body code=1006 进
-    一步说明是配置关而非依赖挂）。metrics 加 `TestRegistry_BusinessCodeLabel`
-    覆盖 code label。errcode 加 `TestHTTPStatus_PrecisePerReason` /
-    `TestHTTPStatus_FallbackBySegment` / `TestHTTPStatus_ZeroValue`。
-  - **`CLAUDE.md` / `AGENTS.md` §统一响应协议 + `docs/development.md` §五加错误码**
-    重写：明示新映射规则与新加错码时如何同步 HTTPStatus switch。
-  
-  **客户端影响**：只看 body `code` 的客户端**完全不受影响**；按 HTTP 2xx/4xx/5xx
-  判断成功失败的客户端会被影响（按文档之前的约定，这不应该存在，但需要标注）。
-  **监控影响**：已有按 `status="200"` 写的 SLO / 告警规则需要重做——现在业务
-  错误会出现在 4xx/5xx 上，可同时用新加的 `code` label 精确定位错误类型。
-
-### Removed
-
-- **`worker.Deps.RDB`**: 未被任何 processor 使用的 Redis 字段删除。
-
-### Fixed
-
-- **new-endpoint 修审计发现的三个 hard stop**:
-  上一版"yaml 反向驱动"承诺生成后立即 `make verify` 绿，实测发现三个漏点：
-  (1) `internal/router/router_test.go::buildEngine` 的 deps fixture 不会被
-  注入，新 spec 路径走 `TestRouterCoversAllSpecOperations` 时 404；
-  (2) `registerXxxRoutes` 用写死的 `/<lower>s`，导致 `/api/v1/order-items`
-  注册成 `/orderitemss`，违背"yaml 真相源"；
-  (3) `Get`/`Update`/`Delete` 模板写死 `c.Param("id")` 与 service 参数
-  名 `id`，yaml 用 `{order_id}` 时 gin 路径变 `/:order_id` 但 handler 取
-  空字符串。
-  本轮：`router_test.go::buildEngine` 加 `// NEH test-deps` 锚点；脚本注入
-  zero-value handler；`collectOperations` 返回 yaml 真实 resourcePrefix
-  做 `r.Group` 路径；`operation` 新增 `PathParamNames []string` 从 yaml
-  path 正则提取，handler / service 模板用真实参数名；≥2 个 path 参数
-  fail-fast 提示用 `x-handler-method` 覆盖手写。
-  `scripts/scripts_test.go` 新增 5 个回归覆盖：路径来源、参数名、
-  router_test 注入、router_test 缺失场景、多参数 fail-fast。
+- Response envelope field renamed from `msg` to `message` to drop the
+  abbreviation. Update any client that reads `response.msg`. The Go field
+  name (`Response.Message`) is unchanged; only the JSON tag and the
+  OpenAPI schema move.
 
 ### Added
 
@@ -132,7 +37,9 @@ Commit prefixes follow the convention in `AGENTS.md`
   `internal/server.go` 通过 `metrics.Registry.MustRegister` 挂到 `/metrics`。
 - **`/health` 队列探测**: 新增非关键 `queue` 检查（`taskqueue.Queue.Ping`，遵守
   `/health` 超时）；队列不可用 → `degraded` + 200。
-- **`make fmt-verify`**: `golangci-lint fmt --diff` 只读校验格式，不改写文件。
+- **`make fmt-verify`**: `golangci-lint fmt --diff` 只读校验格式，不改写文件；
+  `make verify` 首步与 pre-commit hook（`make fmt-verify vet`）改用它，`make fmt`
+  仍负责改写文件。
 - **architecture-verify 规则 6**: `internal/task` 下 `*Payload` struct 首字段必须
   匿名内嵌 `Header`。
 
@@ -450,7 +357,233 @@ Commit prefixes follow the convention in `AGENTS.md`
   指标——与业务在 L4 层就隔离。`config.ProductionWarnings` 在 production 下
   `METRICS_ADDR` 为空时打 warn 提醒。
 
+- **PR / Issue templates**: `.github/pull_request_template.md` and
+  `.github/ISSUE_TEMPLATE/{bug,feature,config}.yml` with the project's
+  hard rules baked into the checklists (no testify/Wire, msg→message,
+  oapi sync, env example sync, …).
+- **CODEOWNERS template** at `.github/CODEOWNERS` covering OpenAPI,
+  deploy, CI, `pkg/`, bootstrap, and the AGENTS.md / CLAUDE.md rule files.
+- **`make sec`** wires `govulncheck` + `gosec` (versions pinned in the
+  Makefile). Decoupled from `make verify` to avoid CVE-database churn
+  causing flaky local runs; `.github/workflows/security.yml` schedules a
+  weekly scan and supports manual dispatch.
+- **Integration test build tag**: `make test-integration` runs only
+  `//go:build integration` files; `make test` and CI stay fast.
+  `internal/repository/example_integration_test.go` is the template.
+- **`make docs-deploy-check`** (and a verify-step) keeps `docs/deploy.md`
+  in sync with `deploy/systemd/*.service` — paths, `EnvironmentFile`,
+  `User=` / `Group=`, and referenced unit filenames cross-checked by
+  `scripts/deploy-doc-verify.sh`.
+- **`docs/errcodes.md`** generated from `pkg/errcode` + `pkg/response.MessageFor`
+  via `scripts/gen-errcodes.go`. `make docs-errcodes` regenerates;
+  `make docs-errcodes-verify` (run by `make verify`) fails when out of
+  sync, so adding an errcode without docs trips CI.
+- **`make watch`** runs the API with `air` hot reload (`.air.toml`).
+  `air` is installed on first use, kept off the default `make init`
+  path; `tmp/` ignored.
+- **`docker compose --profile debug up -d asynqmon`** (and `make
+  dev-asynqmon`) exposes the Asynq Web UI on `127.0.0.1:8980`. Off by
+  default; the profile keeps it out of the regular `make dev-up`.
+- **Pre-commit hook template** at `.githooks/pre-commit` + `make
+  hooks-install`. Runs `make fmt vet`, blocks `.env` / `*.pem` /
+  `credentials.json` from being staged, supports `FULL=1` opt-in for a
+  full `make verify`.
+- **Example teaching headers**: every `internal/{handler,service,
+  repository,model,task}/example.go` now opens with a short package-doc
+  comment explaining what that layer is allowed and forbidden to do, so
+  new contributors and AI assistants can mirror the pattern.
+- **`.env.example` self-documentation**: every variable now has a 1-3
+  line comment explaining purpose, legal values, and the production
+  default to aim for. `/livez` also added to `AUDIT_LOG_EXCLUDE_PATHS`
+  alongside `/health`.
+- `pkg/response.MessageFor` exported so `scripts/gen-errcodes.go` can
+  reuse the same default-message table without forking it; `INTERNAL_ERROR`
+  picks up its own message instead of falling through to "operation
+  failed".
+- **Startup dependency probe (fail-fast)**: `internal/bootstrap/{api,worker}.go::InitXxx`
+  pings DB / Redis immediately after opening them (`STARTUP_PROBE_TIMEOUT=5s`);
+  on failure it releases the resources and exits non-zero, so systemd
+  restarts on misconfiguration instead of running degraded.
+- **pprof debug endpoint**: `internal/router/pprof.go` + `PPROF_ENABLED=false /
+  PPROF_ADDR=127.0.0.1:6060`. Separate mux and listener for network-layer
+  isolation; off in production by default, accessed via SSH tunnel +
+  `go tool pprof`. Runbook gained an "open pprof" troubleshooting section.
+- **Graceful drain + `/health 503`**: `Registry.Draining *atomic.Bool` acts as
+  the process-wide graceful signal; on SIGTERM `cmd/api/main.go` flips it
+  and sleeps `GRACEFUL_DRAIN` (default 10s) so the LB can pull the pod out
+  of rotation before `Shutdown`. `/livez` is unaffected.
+- **`/health` tiered status (`degraded`)**: `HealthResponse.status` adds a
+  `degraded` enum value (backwards-compatible). DB down → `unhealthy` + 503
+  (LB drains); Redis down → `degraded` + 200 (LB keeps the pod, since cache
+  flaps shouldn't take the pod offline).
+- **Recovery middleware trace_id fallback**: `middleware/recovery.go` panic
+  log explicitly adds `zap.String("trace_id", c.GetString(...))`, so the
+  field is always present (possibly empty) even if middleware ordering is
+  reshuffled and `applog.FromContext` can't pick it up from ctx.
+- **`make new-endpoint NAME=Foo`**: `scripts/new-endpoint.sh` copies
+  `internal/{handler,service,repository,model,task}/example.go` five times,
+  `sed`-renames `Example` → `<Name>` only inside the new files, and prints
+  the three manual wiring steps (openapi.yaml, server.go, router.go).
+- **`config.Load()` validation pass**: `config/validate.go` centralises
+  startup constraints — `RequestTimeout > 0`, `GracefulDrain >= 0`,
+  `DB_MAX_OPEN_CONNS > 0` (when DSN is non-empty), `WORKER_CONCURRENCY > 0`
+  (when Queues is non-empty), `RATE_LIMIT_PER_MINUTE >= 0`. Misconfiguration
+  fails fast in `cmd/main` rather than at first business request.
+- **`make mod-upgrade`**: `scripts/mod-upgrade.sh` parses `go list -m -u
+  -json` via `jq`, classifies direct deps by semver MAJOR (major / v0.x
+  bumps print only; patch / minor auto-applied via `go get` → `go mod tidy`
+  → `make verify`; any failure triggers `git checkout -- go.mod go.sum`
+  rollback).
+- **systemd `Type=notify` + `WatchdogSec=30s` + `LimitNOFILE=65535`**: new
+  `pkg/sdnotify` package — `linux` build tag does the real sd_notify,
+  other platforms ship a noop stub. `cmd/api/main.go` runs a goroutine
+  emitting `READY=1` and periodic `WATCHDOG=1`. Adds dep
+  `github.com/coreos/go-systemd/v22`. Worker / migrate units unchanged.
+- **CI `validate-systemd-units` job**: `.github/workflows/ci.yml` adds a
+  dedicated job that runs `sudo systemd-analyze verify
+  deploy/systemd/*.service` against placeholder targets (dummy binaries,
+  env file, user) so unit-file syntax / `Type=notify` consistency errors
+  fail on push.
+- **Runbook P0 troubleshooting table**: `docs/runbook.md` gained an 11-row
+  matrix mapping symptoms ("API won't start", "OOM restart", "watchdog
+  restart", "FD exhaustion", "/health degraded vs 503", …) to the first
+  command to run (journalctl / ss / Asynqmon / pg_stat_activity /
+  `/proc/$pid/limits` etc.).
+- **`.golangci.yml` explicit `errcheck`**: enabled explicitly (v2 has it
+  on by default; the explicit declaration makes lint reports clearer);
+  `settings.errcheck.exclude-functions` lists `gin.Context.Error` and
+  `fmt.Fprint*` as intentionally ignored, to avoid encouraging meaningless
+  `_ =` assignments.
+
+- `scripts/rename.sh` one-shot rename helper. Pass
+  `NEW_MODULE NEW_SHORTNAME`; it rewrites Go imports, `go.mod`, Makefile
+  vars, `.env.example`, `.golangci.yml`, OpenAPI title, systemd unit file
+  names + contents, `docker-compose` container names, JWT issuer defaults,
+  and test fixtures, then runs `fmt + vet + test + lint + docs-verify`
+  to confirm the rewrite is clean. README / README_zh / runbook updated
+  to point at it instead of the previous hand-rolled `sed` command.
+- **Binary deployment path** alongside the Docker path. `make build-linux`
+  cross-compiles static `linux/amd64` + `linux/arm64` binaries (CGO off,
+  `-tags netgo`, `-trimpath`); `make release` packages them with the
+  systemd units, `.env.example`, and `DEPLOY.md` into per-arch tarballs
+  plus a `SHA256SUMS` manifest.
+- `.github/workflows/release.yml` publishes those tarballs to GitHub
+  Releases on every `v*` tag push.
+- `deploy/systemd/{go-skeleton-api,go-skeleton-worker,go-skeleton-migrate}.service`
+  unit templates with security hardening (NoNewPrivileges, ProtectSystem,
+  PrivateTmp, etc.).
+- `docs/deploy.md` step-by-step binary deployment guide: host setup,
+  systemd install, rolling upgrade, rollback, journald queries, and a
+  troubleshooting cheat sheet.
+- `pkg/buildinfo` exposes `Version` / `Commit` / `BuildTime` injected via
+  ldflags; each `cmd/` binary supports `-version`, `/livez` includes the
+  version, and `/health` returns a `build` object so monitoring can
+  scrape the running version without a separate endpoint.
+
+- `/livez` liveness probe; `/health` is now documented as the readiness probe.
+- `cmd/worker` performs a two-phase shutdown (`Stop` then `Shutdown`) so
+  in-flight Asynq tasks complete before exit.
+- `make dev-up` / `make dev-down` spin up Postgres + Redis via docker-compose.
+- Multi-stage `Dockerfile` and `make docker-build` / `make docker-run` for
+  the API process; the same Dockerfile builds worker / migrate via
+  `CMD_TARGET`.
+- README "Production Checklist" and "Using this Skeleton" sections.
+- `.golangci.yml` enables gofumpt + gci formatters; gci uses explicit
+  three-section import grouping (`standard / default / prefix(go-skeleton)`)
+  so the short module name doesn't get misread as stdlib. `make fmt` now
+  routes through `golangci-lint fmt`. Tool versions pinned in the Makefile.
+- `make verify` prints a coloured banner before each step and on
+  success/failure, so AI assistants and humans can spot the failing step
+  instantly.
+- `make docs-verify` and `scripts/docs-verify.sh` keep the shared sections
+  of `AGENTS.md` and `CLAUDE.md` in sync.
+- `docs/runbook.md` cheat sheet of machine-executable commands (add
+  endpoint, add task, run specific tests, troubleshoot); README /
+  AGENTS.md / CLAUDE.md link to it.
+- `.gitattributes` marks `internal/oapi/oapi.gen.go`, `*.gen.go`, and
+  `go.sum` as generated so GitHub diff collapses them and language stats
+  ignore them.
+- AGENTS.md / CLAUDE.md gained an "AI 助手提示" section listing the
+  high-frequency rules AI assistants tend to violate (don't edit
+  `oapi.gen.go`, don't import `oapi.Example`, don't inject `*gin.Context`,
+  etc.).
+
 ### Changed
+
+- **AGENTS.md 成为 AI 编码助手规则的唯一来源**: `CLAUDE.md` 缩减为
+  `@AGENTS.md` 导入行 + Claude Code 专属补充，不再并行维护两份规则正文；
+  `CLAUDE.md` 独有的 `.dockerignore` 目录树条目并入 AGENTS.md。docs/ 下指向
+  `CLAUDE.md::xxx` 的链接改指 AGENTS.md。
+- **`make docs-verify` 改为两项校验**: (1) `CLAUDE.md` 必须含 `@AGENTS.md`
+  导入行，且不得出现与 AGENTS.md 同名的 `## ` 段；(2) 解析 Makefile `verify:`
+  的 `_verify-step` 序列，校验 README.md / README_en.md / docs/development.md /
+  docs/runbook.md / AGENTS.md 中 `make verify   # a + b + ...` 清单及 Makefile
+  `verify` 帮助文案与之完全一致（含顺序）。去掉旧的 sharedSections 段落比对，
+  并修正了现存漂移（缺 fmt-verify / sqlc-verify / shell-verify）。
+- **`scripts/rename.sh` 自检跑完整 verify 门禁**: 除 oapi-verify / sqlc-verify /
+  docs-errcodes-verify（比对已提交产物）外全部执行。
+
+- **数据访问从 GORM 迁移到 sqlc（pgx/v5）**: 查询写在
+  `internal/repository/queries/*.sql`，`make sqlc` 生成
+  `internal/repository/sqlcdb`（`make verify` 新增 `sqlc-verify` 校验产物已提交）。
+  `pkg/database` 改为 pgxpool + pgx QueryTracer（只记 SQL 模板）；repository
+  事务改用 `pgx.BeginTxFunc`，新增 `repository.TxManager` / `service.Transactor`；
+  `model.Example.ID` 改为 `int64`。配置项改名：`GORM_LOG_LEVEL` → `DB_LOG_LEVEL`、
+  `DB_MAX_OPEN_CONNS` → `DB_MAX_CONNS`、`DB_MAX_IDLE_CONNS` → `DB_MIN_CONNS`。
+  architecture-verify 规则 2 改为限制 pgx / sqlcdb，新增规则 5 全仓禁止 gorm。
+  `CLAUDE.md` / `AGENTS.md` 同步新增"代码注释统一用简体中文"约定。
+
+- **`api/openapi.yaml` 全量加中文 `summary` / `description`**:
+  Stoplight Elements 渲染 description 走 Markdown 原生支持中文，团队 review
+  /docs 更顺。覆盖：4 个 tag（health/auth/example/meta）、8 个 endpoint 的
+  summary + description、所有 parameters / requestBody / responses 的描述、
+  所有 schemas 顶层 + 每个 property 的描述、8 条 reusable components.responses
+  的描述。命名相关字段（`operationId` / 字段 key / `reason` 常量串）保留
+  英文以保证机读稳定性。
+  `internal/oapi/oapi.gen.go` 重新生成入库。`CLAUDE.md` / `AGENTS.md` §API
+  契约 加 "yaml 文档语言" 子节，约束未来新增 endpoint 时 summary/description
+  用中文、命名相关字段保持英文。
+
+
+- **BREAKING：HTTP 状态码按 errcode 映射，不再一律返 200**:
+  之前所有业务 API 永远返 HTTP 200、客户端只能靠 body code 判断成败；副作用
+  是 Prometheus `http_requests_total{status="200"}` 全绿，业务错误被监控
+  埋掉。
+  本轮改成 `pkg/errcode.Error.HTTPStatus()` 把 errcode 映射成对应 HTTP：
+  成功仍 200；1xxx 客户端错误 → 400 / 401 / 403 / 408 / 429 / 503（按 reason
+  精确映射，详见 [`docs/errcodes.md`](docs/errcodes.md)）；9xxx 服务端错误
+  → 500 / 501 / 503。客户端**仍**以 body `code` / `reason` 做精确分支，HTTP
+  status 给监控 / LB / 代理用作粗粒度信号；两者互不替代。
+  - **`pkg/errcode/type.go`**：加 `Error.HTTPStatus() int` + `HTTPStatusFor(code, reason)`
+    纯函数版（给 scripts/gen-errcodes 用，避免循环 import）。零值 / 未知 reason
+    走 500 兜底，让监控亮起来而不是静默 200。
+  - **`pkg/response/response.go`**：`WriteError` / `WriteValidationError` 改用
+    `ec.HTTPStatus()`；`WriteSuccess` 仍 200；三个 Write 函数顺手 `c.Set(MetricsCodeKey, code)`
+    把业务码塞进 gin.Context 给 metrics 拿。
+  - **`pkg/metrics/metrics.go`**：requests / duration 两个 Histogram labels 从
+    `[method, route, status]` 扩到 `[method, route, status, code]`——HTTP status
+    给粗粒度告警、code 给细粒度 SLO（两个码组合能精确定位是哪条业务错路径在涨）。
+    label 取自 gin.Context `response_code`，未走 pkg/response 的端点（如 /health）
+    兜底 "0"。
+  - **`api/openapi.yaml`**：顶部 description 重写、加 `ErrorEnvelope` schema +
+    `components.responses` 复用 7 条错误响应（BadRequest / Unauthorized /
+    Forbidden / RequestTimeout / TooManyRequests / InternalError / NotImplemented
+    / ServiceUnavailable）。5 个业务 endpoint 按可能错码挂上对应 `$ref`。
+    `internal/oapi/oapi.gen.go` 重新生成入库。
+  - **`scripts/gen-errcodes.go` + `docs/errcodes.md`**：表格加 HTTP 列，自动从
+    `errcode.HTTPStatusFor` 取，作者无需手填。
+  - **测试断言**：3 处 SERVICE_DISABLED 测试期望从 HTTP 200 改成 503（端点
+    在 spec 里但被配置开关关，与"路由不存在 / 404"区分开，body code=1006 进
+    一步说明是配置关而非依赖挂）。metrics 加 `TestRegistry_BusinessCodeLabel`
+    覆盖 code label。errcode 加 `TestHTTPStatus_PrecisePerReason` /
+    `TestHTTPStatus_FallbackBySegment` / `TestHTTPStatus_ZeroValue`。
+  - **`CLAUDE.md` / `AGENTS.md` §统一响应协议 + `docs/development.md` §五加错误码**
+    重写：明示新映射规则与新加错码时如何同步 HTTPStatus switch。
+  
+  **客户端影响**：只看 body `code` 的客户端**完全不受影响**；按 HTTP 2xx/4xx/5xx
+  判断成功失败的客户端会被影响（按文档之前的约定，这不应该存在，但需要标注）。
+  **监控影响**：已有按 `status="200"` 写的 SLO / 告警规则需要重做——现在业务
+  错误会出现在 4xx/5xx 上，可同时用新加的 `code` label 精确定位错误类型。
 
 - **scripts/ 6 个 bash 脚本改 Go**: `architecture-verify.sh` /
   `env-verify.sh` / `new-endpoint.sh` / `docs-verify.sh` /
@@ -562,8 +695,6 @@ Commit prefixes follow the convention in `AGENTS.md`
   `TRUSTED_PROXIES` 空 / `METRICS_ADDR` 空）。`cmd/api/main.go` 启动期一次
   性 iterate warnings 打 log，不再散落多处。
 
-### Docs
-
 - `internal/middleware/timeout.go`: godoc now warns the middleware is unsafe
   for streaming / SSE handlers (Gin's synchronous `c.Next()` + `Written()`
   check truncates the response without writing the error envelope). The
@@ -574,7 +705,44 @@ Commit prefixes follow the convention in `AGENTS.md`
   approximation. Callers needing strong consistency should wrap in
   `InTx` + `REPEATABLE READ`.
 
+- **`internal/middleware/rate_limit_test.go`** (was 0 coverage): burst /
+  block, per-IP isolation, zero-budget disabling, `cleanup` staleness
+  pruning, `Stop` releases the cleanup goroutine, idempotent `Stop`.
+- **`internal/worker/server_test.go`** (was 0 coverage):
+  `computeRetryDelay` table tests including the overflow boundary at
+  `n=30,100`; invariant test `delay ∈ [0, max]` over `n ∈ [-5, 100]`;
+  `taskLogContext` trace-source resolution (payload vs synthesised);
+  `traceMiddleware` does not swallow handler errors.
+
+- `make verify` chain now also runs `docs-deploy-check` and
+  `docs-errcodes-verify` so doc drift fails fast.
+
+- `make init` verifies installed tool versions against the pinned ones and
+  reinstalls when they differ.
+- CI now runs `make test-race` on top of `make verify`.
+
+### Removed
+
+- **`worker.Deps.RDB`**: 未被任何 processor 使用的 Redis 字段删除。
+
 ### Fixed
+
+- **new-endpoint 修审计发现的三个 hard stop**:
+  上一版"yaml 反向驱动"承诺生成后立即 `make verify` 绿，实测发现三个漏点：
+  (1) `internal/router/router_test.go::buildEngine` 的 deps fixture 不会被
+  注入，新 spec 路径走 `TestRouterCoversAllSpecOperations` 时 404；
+  (2) `registerXxxRoutes` 用写死的 `/<lower>s`，导致 `/api/v1/order-items`
+  注册成 `/orderitemss`，违背"yaml 真相源"；
+  (3) `Get`/`Update`/`Delete` 模板写死 `c.Param("id")` 与 service 参数
+  名 `id`，yaml 用 `{order_id}` 时 gin 路径变 `/:order_id` 但 handler 取
+  空字符串。
+  本轮：`router_test.go::buildEngine` 加 `// NEH test-deps` 锚点；脚本注入
+  zero-value handler；`collectOperations` 返回 yaml 真实 resourcePrefix
+  做 `r.Group` 路径；`operation` 新增 `PathParamNames []string` 从 yaml
+  path 正则提取，handler / service 模板用真实参数名；≥2 个 path 参数
+  fail-fast 提示用 `x-handler-method` 覆盖手写。
+  `scripts/scripts_test.go` 新增 5 个回归覆盖：路径来源、参数名、
+  router_test 注入、router_test 缺失场景、多参数 fail-fast。
 
 - **JWT issuer can be silently disabled**: `pkg/auth.JWTManager.ParseToken`
   skipped iss-claim validation when `Issuer` was empty, so any token signed
@@ -606,16 +774,8 @@ Commit prefixes follow the convention in `AGENTS.md`
   test asserts deterministically that `Stop` returns instead of polling a
   global counter.
 
-### Tests
-
-- **`internal/middleware/rate_limit_test.go`** (was 0 coverage): burst /
-  block, per-IP isolation, zero-budget disabling, `cleanup` staleness
-  pruning, `Stop` releases the cleanup goroutine, idempotent `Stop`.
-- **`internal/worker/server_test.go`** (was 0 coverage):
-  `computeRetryDelay` table tests including the overflow boundary at
-  `n=30,100`; invariant test `delay ∈ [0, max]` over `n ∈ [-5, 100]`;
-  `taskLogContext` trace-source resolution (payload vs synthesised);
-  `traceMiddleware` does not swallow handler errors.
+- `POST /api/v1/auth/token` stays registered when JWT is unconfigured and
+  returns `SERVICE_DISABLED`, matching the OpenAPI contract instead of 404.
 
 ### Security
 
@@ -626,179 +786,3 @@ Commit prefixes follow the convention in `AGENTS.md`
   回新增 `ErrMissingTTL`，避免自家签出无 exp token 自己验不过；
   `GenerateTokenWithClaims` 同步要求 `claims.ExpiresAt != nil`，堵住自定
   义 claims 旁路。
-
-### Added
-
-- **PR / Issue templates**: `.github/pull_request_template.md` and
-  `.github/ISSUE_TEMPLATE/{bug,feature,config}.yml` with the project's
-  hard rules baked into the checklists (no testify/Wire, msg→message,
-  oapi sync, env example sync, …).
-- **CODEOWNERS template** at `.github/CODEOWNERS` covering OpenAPI,
-  deploy, CI, `pkg/`, bootstrap, and the AGENTS.md / CLAUDE.md rule files.
-- **`make sec`** wires `govulncheck` + `gosec` (versions pinned in the
-  Makefile). Decoupled from `make verify` to avoid CVE-database churn
-  causing flaky local runs; `.github/workflows/security.yml` schedules a
-  weekly scan and supports manual dispatch.
-- **Integration test build tag**: `make test-integration` runs only
-  `//go:build integration` files; `make test` and CI stay fast.
-  `internal/repository/example_integration_test.go` is the template.
-- **`make docs-deploy-check`** (and a verify-step) keeps `docs/deploy.md`
-  in sync with `deploy/systemd/*.service` — paths, `EnvironmentFile`,
-  `User=` / `Group=`, and referenced unit filenames cross-checked by
-  `scripts/deploy-doc-verify.sh`.
-- **`docs/errcodes.md`** generated from `pkg/errcode` + `pkg/response.MessageFor`
-  via `scripts/gen-errcodes.go`. `make docs-errcodes` regenerates;
-  `make docs-errcodes-verify` (run by `make verify`) fails when out of
-  sync, so adding an errcode without docs trips CI.
-- **`make watch`** runs the API with `air` hot reload (`.air.toml`).
-  `air` is installed on first use, kept off the default `make init`
-  path; `tmp/` ignored.
-- **`docker compose --profile debug up -d asynqmon`** (and `make
-  dev-asynqmon`) exposes the Asynq Web UI on `127.0.0.1:8980`. Off by
-  default; the profile keeps it out of the regular `make dev-up`.
-- **Pre-commit hook template** at `.githooks/pre-commit` + `make
-  hooks-install`. Runs `make fmt vet`, blocks `.env` / `*.pem` /
-  `credentials.json` from being staged, supports `FULL=1` opt-in for a
-  full `make verify`.
-- **Example teaching headers**: every `internal/{handler,service,
-  repository,model,task}/example.go` now opens with a short package-doc
-  comment explaining what that layer is allowed and forbidden to do, so
-  new contributors and AI assistants can mirror the pattern.
-- **`.env.example` self-documentation**: every variable now has a 1-3
-  line comment explaining purpose, legal values, and the production
-  default to aim for. `/livez` also added to `AUDIT_LOG_EXCLUDE_PATHS`
-  alongside `/health`.
-- `pkg/response.MessageFor` exported so `scripts/gen-errcodes.go` can
-  reuse the same default-message table without forking it; `INTERNAL_ERROR`
-  picks up its own message instead of falling through to "operation
-  failed".
-- **Startup dependency probe (fail-fast)**: `internal/bootstrap/{api,worker}.go::InitXxx`
-  pings DB / Redis immediately after opening them (`STARTUP_PROBE_TIMEOUT=5s`);
-  on failure it releases the resources and exits non-zero, so systemd
-  restarts on misconfiguration instead of running degraded.
-- **pprof debug endpoint**: `internal/router/pprof.go` + `PPROF_ENABLED=false /
-  PPROF_ADDR=127.0.0.1:6060`. Separate mux and listener for network-layer
-  isolation; off in production by default, accessed via SSH tunnel +
-  `go tool pprof`. Runbook gained an "open pprof" troubleshooting section.
-- **Graceful drain + `/health 503`**: `Registry.Draining *atomic.Bool` acts as
-  the process-wide graceful signal; on SIGTERM `cmd/api/main.go` flips it
-  and sleeps `GRACEFUL_DRAIN` (default 10s) so the LB can pull the pod out
-  of rotation before `Shutdown`. `/livez` is unaffected.
-- **`/health` tiered status (`degraded`)**: `HealthResponse.status` adds a
-  `degraded` enum value (backwards-compatible). DB down → `unhealthy` + 503
-  (LB drains); Redis down → `degraded` + 200 (LB keeps the pod, since cache
-  flaps shouldn't take the pod offline).
-- **Recovery middleware trace_id fallback**: `middleware/recovery.go` panic
-  log explicitly adds `zap.String("trace_id", c.GetString(...))`, so the
-  field is always present (possibly empty) even if middleware ordering is
-  reshuffled and `applog.FromContext` can't pick it up from ctx.
-- **`make new-endpoint NAME=Foo`**: `scripts/new-endpoint.sh` copies
-  `internal/{handler,service,repository,model,task}/example.go` five times,
-  `sed`-renames `Example` → `<Name>` only inside the new files, and prints
-  the three manual wiring steps (openapi.yaml, server.go, router.go).
-- **`config.Load()` validation pass**: `config/validate.go` centralises
-  startup constraints — `RequestTimeout > 0`, `GracefulDrain >= 0`,
-  `DB_MAX_OPEN_CONNS > 0` (when DSN is non-empty), `WORKER_CONCURRENCY > 0`
-  (when Queues is non-empty), `RATE_LIMIT_PER_MINUTE >= 0`. Misconfiguration
-  fails fast in `cmd/main` rather than at first business request.
-- **`make mod-upgrade`**: `scripts/mod-upgrade.sh` parses `go list -m -u
-  -json` via `jq`, classifies direct deps by semver MAJOR (major / v0.x
-  bumps print only; patch / minor auto-applied via `go get` → `go mod tidy`
-  → `make verify`; any failure triggers `git checkout -- go.mod go.sum`
-  rollback).
-- **systemd `Type=notify` + `WatchdogSec=30s` + `LimitNOFILE=65535`**: new
-  `pkg/sdnotify` package — `linux` build tag does the real sd_notify,
-  other platforms ship a noop stub. `cmd/api/main.go` runs a goroutine
-  emitting `READY=1` and periodic `WATCHDOG=1`. Adds dep
-  `github.com/coreos/go-systemd/v22`. Worker / migrate units unchanged.
-- **CI `validate-systemd-units` job**: `.github/workflows/ci.yml` adds a
-  dedicated job that runs `sudo systemd-analyze verify
-  deploy/systemd/*.service` against placeholder targets (dummy binaries,
-  env file, user) so unit-file syntax / `Type=notify` consistency errors
-  fail on push.
-- **Runbook P0 troubleshooting table**: `docs/runbook.md` gained an 11-row
-  matrix mapping symptoms ("API won't start", "OOM restart", "watchdog
-  restart", "FD exhaustion", "/health degraded vs 503", …) to the first
-  command to run (journalctl / ss / Asynqmon / pg_stat_activity /
-  `/proc/$pid/limits` etc.).
-- **`.golangci.yml` explicit `errcheck`**: enabled explicitly (v2 has it
-  on by default; the explicit declaration makes lint reports clearer);
-  `settings.errcheck.exclude-functions` lists `gin.Context.Error` and
-  `fmt.Fprint*` as intentionally ignored, to avoid encouraging meaningless
-  `_ =` assignments.
-
-### Changed
-
-- `make verify` chain now also runs `docs-deploy-check` and
-  `docs-errcodes-verify` so doc drift fails fast.
-
-### Added
-
-- `scripts/rename.sh` one-shot rename helper. Pass
-  `NEW_MODULE NEW_SHORTNAME`; it rewrites Go imports, `go.mod`, Makefile
-  vars, `.env.example`, `.golangci.yml`, OpenAPI title, systemd unit file
-  names + contents, `docker-compose` container names, JWT issuer defaults,
-  and test fixtures, then runs `fmt + vet + test + lint + docs-verify`
-  to confirm the rewrite is clean. README / README_zh / runbook updated
-  to point at it instead of the previous hand-rolled `sed` command.
-- **Binary deployment path** alongside the Docker path. `make build-linux`
-  cross-compiles static `linux/amd64` + `linux/arm64` binaries (CGO off,
-  `-tags netgo`, `-trimpath`); `make release` packages them with the
-  systemd units, `.env.example`, and `DEPLOY.md` into per-arch tarballs
-  plus a `SHA256SUMS` manifest.
-- `.github/workflows/release.yml` publishes those tarballs to GitHub
-  Releases on every `v*` tag push.
-- `deploy/systemd/{go-skeleton-api,go-skeleton-worker,go-skeleton-migrate}.service`
-  unit templates with security hardening (NoNewPrivileges, ProtectSystem,
-  PrivateTmp, etc.).
-- `docs/deploy.md` step-by-step binary deployment guide: host setup,
-  systemd install, rolling upgrade, rollback, journald queries, and a
-  troubleshooting cheat sheet.
-- `pkg/buildinfo` exposes `Version` / `Commit` / `BuildTime` injected via
-  ldflags; each `cmd/` binary supports `-version`, `/livez` includes the
-  version, and `/health` returns a `build` object so monitoring can
-  scrape the running version without a separate endpoint.
-
-### Breaking
-- Response envelope field renamed from `msg` to `message` to drop the
-  abbreviation. Update any client that reads `response.msg`. The Go field
-  name (`Response.Message`) is unchanged; only the JSON tag and the
-  OpenAPI schema move.
-
-### Added
-- `/livez` liveness probe; `/health` is now documented as the readiness probe.
-- `cmd/worker` performs a two-phase shutdown (`Stop` then `Shutdown`) so
-  in-flight Asynq tasks complete before exit.
-- `make dev-up` / `make dev-down` spin up Postgres + Redis via docker-compose.
-- Multi-stage `Dockerfile` and `make docker-build` / `make docker-run` for
-  the API process; the same Dockerfile builds worker / migrate via
-  `CMD_TARGET`.
-- README "Production Checklist" and "Using this Skeleton" sections.
-- `.golangci.yml` enables gofumpt + gci formatters; gci uses explicit
-  three-section import grouping (`standard / default / prefix(go-skeleton)`)
-  so the short module name doesn't get misread as stdlib. `make fmt` now
-  routes through `golangci-lint fmt`. Tool versions pinned in the Makefile.
-- `make verify` prints a coloured banner before each step and on
-  success/failure, so AI assistants and humans can spot the failing step
-  instantly.
-- `make docs-verify` and `scripts/docs-verify.sh` keep the shared sections
-  of `AGENTS.md` and `CLAUDE.md` in sync.
-- `docs/runbook.md` cheat sheet of machine-executable commands (add
-  endpoint, add task, run specific tests, troubleshoot); README /
-  AGENTS.md / CLAUDE.md link to it.
-- `.gitattributes` marks `internal/oapi/oapi.gen.go`, `*.gen.go`, and
-  `go.sum` as generated so GitHub diff collapses them and language stats
-  ignore them.
-- AGENTS.md / CLAUDE.md gained an "AI 助手提示" section listing the
-  high-frequency rules AI assistants tend to violate (don't edit
-  `oapi.gen.go`, don't import `oapi.Example`, don't inject `*gin.Context`,
-  etc.).
-
-### Changed
-- `make init` verifies installed tool versions against the pinned ones and
-  reinstalls when they differ.
-- CI now runs `make test-race` on top of `make verify`.
-
-### Fixed
-- `POST /api/v1/auth/token` stays registered when JWT is unconfigured and
-  returns `SERVICE_DISABLED`, matching the OpenAPI contract instead of 404.

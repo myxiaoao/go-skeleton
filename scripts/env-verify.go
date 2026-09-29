@@ -37,6 +37,7 @@ import (
 var envHelpers = map[string]bool{
 	"Getenv":          true, // os.Getenv
 	"getEnvOrDefault": true,
+	"optionalEnv":     true,
 	"boolEnv":         true,
 	"intEnv":          true,
 	"int64Env":        true,

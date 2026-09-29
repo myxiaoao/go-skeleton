@@ -8,7 +8,9 @@
 #     1) API → 业务端口 3000 来自任意 Pod（具体限制由 Ingress / LB 决定，
 #        集群内部组件横向调用也常见），metrics 9090 只允许 Prometheus
 #        所在 namespace。需要更严的话改 from.podSelector 限定客户端。
-#     2) Worker → 不开任何端口，**全部** ingress 拒绝。
+#     2) Worker → 只开可观测端口 9091（/metrics、/livez、/health），同样只
+#        允许 Prometheus 所在 namespace；其余 ingress 全部拒绝。kubelet 探针
+#        由节点发起，主流 CNI 默认放行 host → Pod，不受本策略影响。
 # - default-deny 不放 base：太激进，集群里可能跑着 sidecar / mesh 需要
 #   额外端口。要 default-deny 自行在 overlay 加。
 #
@@ -65,5 +67,13 @@ spec:
       app.kubernetes.io/component: worker
   policyTypes:
     - Ingress
-  # 空 ingress = 拒绝所有入站。worker 是纯消费者，没人需要主动连它。
-  ingress: []
+  # worker 是纯消费者，业务上没人需要主动连它；只放行监控 namespace 抓取
+  # 可观测端口（与 API metrics 端口同一套 purpose=monitoring 约定，fail-secure）。
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              purpose: monitoring
+      ports:
+        - port: 9091
+          protocol: TCP

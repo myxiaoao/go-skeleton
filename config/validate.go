@@ -168,6 +168,36 @@ func ProductionWarnings(cfg *Config) []string {
 	return warns
 }
 
+// WorkerProductionWarnings 返回 worker 进程在 production 下"非致命但大概率
+// 漏配"的提示列表，由 cmd/worker/main.go 启动时打出。和 ProductionWarnings
+// 分开：后者的限流 / trusted proxies / API metrics 同端口等项只对 API 有意义，
+// 混在一起会让 worker 日志出现无关告警。非 production 一律返 nil。
+func WorkerProductionWarnings(cfg *Config) []string {
+	if cfg == nil || !cfg.Env.IsProduction() {
+		return nil
+	}
+	var warns []string
+
+	// worker 可观测端口监听全部网卡或公网 IP：/metrics 会随公网网卡暴露。
+	// loopback / 私网地址视为已收敛；K8s 下可用 Pod IP（私网）或靠 NetworkPolicy 兜底。
+	addr := strings.TrimSpace(cfg.Worker.MetricsAddr)
+	if addr != "" && !isLoopbackAddr(addr) && !isPrivateAddr(addr) {
+		warns = append(warns, fmt.Sprintf("WORKER_METRICS_ADDR=%q listens on all interfaces or a public IP; bind to a loopback/private address or restrict it via firewall / NetworkPolicy", addr))
+	}
+	return warns
+}
+
+// isPrivateAddr 判断 listener 地址是否绑在私网 IP（RFC 1918 / RFC 4193）。
+// 空 host（":port"）与 0.0.0.0 / :: 监听全部网卡，按非私网处理。
+func isPrivateAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsPrivate()
+}
+
 // isLoopbackAddr 判断 listener 地址是否绑在回环。空 addr / `:port` / `0.0.0.0:port`
 // 都视为非 loopback——它们会监听所有网卡，包括公网网卡。Go 标准的 net.SplitHostPort
 // 能稳定取出 host 部分，配合 net.ParseIP 走 IP 的 IsLoopback 比字符串前缀匹配

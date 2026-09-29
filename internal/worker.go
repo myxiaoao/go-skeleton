@@ -2,20 +2,34 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
 
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/internal/repository"
 	"go-skeleton/internal/service"
 	"go-skeleton/internal/worker"
+	applog "go-skeleton/pkg/log"
+	"go-skeleton/pkg/metrics"
 )
 
-// Worker 持有从 Registry 装配出来的 Asynq 异步任务运行时（server + ServeMux）。
+// observabilityShutdownTimeout 是 worker 可观测端口优雅关闭的上限：只剩探针
+// 和 Prometheus scrape 这类短请求，5s 足够。
+const observabilityShutdownTimeout = 5 * time.Second
+
+// Worker 持有从 Registry 装配出来的 Asynq 异步任务运行时（server + ServeMux），
+// 以及可选的可观测端口（/metrics、/livez、/health；WORKER_METRICS_ADDR 为空时为 nil）。
 type Worker struct {
 	server *asynq.Server
 	mux    *asynq.ServeMux
+	http   *http.Server
 }
 
 // NewWorker 装配异步任务 handler 和 worker 运行时。reg 不全时返 error；
@@ -29,10 +43,15 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
+	metricsReg, httpSrv := newWorkerObservability(reg)
+	if metricsReg != nil {
+		deps.Metrics = metricsReg
+	}
 	mux := asynq.NewServeMux()
 	worker.RegisterHandlers(mux, deps)
 
 	return &Worker{
+		http: httpSrv,
 		server: worker.NewServer(
 			bootstrap.AsynqRedisOpt(reg.Cfg),
 			worker.ServerConfig{
@@ -54,6 +73,9 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 // 能精确地"启动成功后才发 READY=1"——这是 onReady 的关键：在 Start 返回 nil
 // 之后调，Asynq 已真正进入消费态。若 Start 失败（如 Redis 不可达），直接返
 // error，READY 不会发，systemd 不会被骗成"已就绪"。onReady 为 nil 时跳过。
+//
+// 启用了 WORKER_METRICS_ADDR 时，可观测端口在 Start 成功后同步绑定、绑定成功
+// 才回调 onReady；停服顺序为 asynq Stop → Shutdown → 可观测端口 Shutdown（带超时）。
 func (w *Worker) Run(ctx context.Context, onReady func()) error {
 	if w == nil || w.server == nil || w.mux == nil {
 		return errNilWorker
@@ -62,6 +84,15 @@ func (w *Worker) Run(ctx context.Context, onReady func()) error {
 	if err := w.server.Start(w.mux); err != nil {
 		return fmt.Errorf("start worker server: %w", err)
 	}
+	// 可观测端口在 asynq 进入消费态后同步绑定：绑不上就停掉 asynq 并返 error，
+	// 保证 READY 只在"消费 + 探针"全部就绪后发出。
+	ln, err := w.listenObservability()
+	if err != nil {
+		w.server.Stop()
+		w.server.Shutdown()
+		return err
+	}
+	w.serveObservability(ln)
 	if onReady != nil {
 		onReady()
 	}
@@ -74,7 +105,71 @@ func (w *Worker) Run(ctx context.Context, onReady func()) error {
 	// 重新调度，破坏 at-least-once 语义。
 	w.server.Stop()
 	w.server.Shutdown()
+	// 可观测端口最后关：停服窗口内 /livez 仍可答、/metrics 仍可抓到最后的任务指标。
+	w.shutdownObservability(ctx)
 	return nil
+}
+
+// newWorkerObservability 在 WORKER_METRICS_ADDR 非空时构造 worker 指标
+// Registry（subsystem=worker）与可观测 http.Server；为空时两者都返回 nil。
+// 配了 DB 时把连接池 collector 注册进同一份 /metrics。/health 的 Redis 探测
+// 走 reg.Queue（asynq 实际使用的 Redis 连接），DB 探测只在配置时参与。
+func newWorkerObservability(reg *bootstrap.Registry) (*metrics.Registry, *http.Server) {
+	addr := strings.TrimSpace(reg.Cfg.Worker.MetricsAddr)
+	if addr == "" {
+		return nil, nil
+	}
+	metricsReg := metrics.New("worker")
+	var checks worker.HealthChecks
+	// 避免 typed-nil 把接口包成 non-nil。
+	if reg.Queue != nil {
+		checks.Redis = reg.Queue
+	}
+	if reg.DB != nil {
+		checks.DB = reg.DB
+		if dbCollector := reg.DB.Collector(); dbCollector != nil {
+			metricsReg.MustRegister(dbCollector)
+		}
+	}
+	return metricsReg, worker.NewHTTPServer(addr, metricsReg.Handler(), checks)
+}
+
+// listenObservability 同步绑定可观测端口；未启用时返回 nil listener。
+func (w *Worker) listenObservability() (net.Listener, error) {
+	if w.http == nil {
+		return nil, nil
+	}
+	ln, err := net.Listen("tcp", w.http.Addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen worker observability on %s: %w", w.http.Addr, err)
+	}
+	return ln, nil
+}
+
+// serveObservability 在后台 Serve 已绑定的 listener。运行期异常只记 error
+// 日志，不打断任务消费（可观测端口不是业务关键路径）。
+func (w *Worker) serveObservability(ln net.Listener) {
+	if w.http == nil || ln == nil {
+		return
+	}
+	go func() {
+		if err := w.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			applog.L().Error("worker observability server error", zap.Error(err))
+		}
+	}()
+}
+
+// shutdownObservability 带超时优雅关闭可观测端口。ctx 此时通常已取消，用
+// WithoutCancel 继承其 value 但摆脱取消信号，再单独套超时。
+func (w *Worker) shutdownObservability(ctx context.Context) {
+	if w.http == nil {
+		return
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), observabilityShutdownTimeout)
+	defer cancel()
+	if err := w.http.Shutdown(shutdownCtx); err != nil {
+		applog.L().Warn("worker observability shutdown failed", zap.Error(err))
+	}
 }
 
 // validateWorkerRegistry 校验 Worker 装配需要的 Registry 字段都齐了。

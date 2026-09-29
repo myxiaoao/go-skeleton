@@ -163,4 +163,7 @@ type WorkerConfig struct {
 	RetryBaseDelay time.Duration
 	// RetryMaxDelay 给指数 backoff 封顶，防止无界增长（见 computeRetryDelay）。
 	RetryMaxDelay time.Duration
+	// MetricsAddr 是 worker 可观测端口（/metrics、/livez、/health）的监听地址。
+	// 未设置默认 ":9091"；显式设为空字符串表示不启动该端口。
+	MetricsAddr string
 }

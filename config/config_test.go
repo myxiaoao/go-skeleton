@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -260,5 +261,38 @@ func TestParseCSVHandlesWhitespaceAndEmpties(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("parseCSV[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// TestWorkerMetricsAddr 验证 WORKER_METRICS_ADDR 的三态语义：未设置走默认
+// :9091；显式设为空字符串表示关闭 worker 可观测端口；设值则原样使用（去首尾空白）。
+func TestWorkerMetricsAddr(t *testing.T) {
+	tests := []struct {
+		name  string
+		value *string // nil 表示 unset
+		want  string
+	}{
+		{name: "unset 走默认", value: nil, want: ":9091"},
+		{name: "空字符串关闭", value: new(""), want: ""},
+		{name: "显式地址", value: new(" 127.0.0.1:9100 "), want: "127.0.0.1:9100"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("WORKER_METRICS_ADDR", "")
+			if tc.value == nil {
+				if err := os.Unsetenv("WORKER_METRICS_ADDR"); err != nil {
+					t.Fatalf("unsetenv: %v", err)
+				}
+			} else {
+				t.Setenv("WORKER_METRICS_ADDR", *tc.value)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+			if cfg.Worker.MetricsAddr != tc.want {
+				t.Errorf("Worker.MetricsAddr = %q, want %q", cfg.Worker.MetricsAddr, tc.want)
+			}
+		})
 	}
 }

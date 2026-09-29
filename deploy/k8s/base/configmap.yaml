@@ -50,6 +50,10 @@ data:
   WORKER_QUEUES: "critical:6,default:3,low:1"
   WORKER_RETRY_BASE_DELAY: "5s"
   WORKER_RETRY_MAX_DELAY: "1h"
+  # Worker 可观测端口（/metrics、/livez、/health），对应 .env.example 同名变量；
+  # 留空 = 关闭。worker-deployment.yaml 会用 env 覆盖成 $(POD_IP):9091（绑私网
+  # Pod IP），这里的值只是与 .env.example 对齐的兜底，端口号必须与之保持一致。
+  WORKER_METRICS_ADDR: ":9091"
 
   # 在线 API 文档页 (/docs)。生产隐藏 TryIt 减少误操作面，schemas 仍展示。
   DOCS_TITLE: "API"

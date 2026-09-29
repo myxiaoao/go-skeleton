@@ -116,6 +116,16 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Added
 
+- **Worker 可观测端口与任务指标**: 新增 `WORKER_METRICS_ADDR`（默认 `:9091`，
+  显式留空关闭），worker 暴露 `/metrics`、`/livez`（恒 200）、`/health`（Redis
+  必查、配了 DB 时查 DB，失败 503）；端口在 asynq `Start` 成功后同步绑定，失败则
+  `Run` 返 error、不发 READY。`pkg/metrics` 新增
+  `asynq_tasks_processed_total{type,status}` / `asynq_task_duration_seconds{type}`
+  与 `(*Registry).ObserveTask`，由 `internal/worker.MetricsMiddleware` 记录；worker
+  的 `/metrics` 同时带 DB 连接池指标。`config.WorkerProductionWarnings` 在生产下对
+  监听全部网卡 / 公网 IP 的 `WORKER_METRICS_ADDR` 打 warn。K8s worker Deployment
+  加 9091 端口 + liveness / readiness 探针 + PodMonitor，NetworkPolicy 放行监控
+  namespace 抓取 9091。
 - **错误码 `NOT_FOUND`（1007 → 404）与 `CONFLICT`（1008 → 409）**: 同步
   `MessageFor` 文案、`HTTPStatus` 映射与 `docs/errcodes.md`。
 - **连接池 Prometheus 指标**: `pkg/database` 新增 `(*DBManager).Collector()`，

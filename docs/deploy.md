@@ -125,6 +125,7 @@ sudo $EDITOR /etc/go-skeleton/.env
 - `TRUSTED_PROXIES` 配置成实际 LB 网段；否则 `c.ClientIP()` 会退回 `RemoteAddr`，LB 后面会把所有客户端识别成代理 IP（裸直连无 LB 时可空）
 - `RATE_LIMIT_PER_MINUTE` 非 0（上游 LB/WAF 限流时可保 0）
 - `METRICS_ADDR` 设独立地址（如 `127.0.0.1:9090`），让 `/metrics` 与业务端口在 L4 层隔离
+- `WORKER_METRICS_ADDR`（worker 可观测端口，默认 `:9091`）绑 loopback / 内网地址（如 `127.0.0.1:9091`）；监听全部网卡或公网 IP 时 worker 启动会打 warn（`config.WorkerProductionWarnings`）
 
 其他必改但不拦的：
 
@@ -277,6 +278,7 @@ systemd-cgtop -m | grep go-skeleton
 | 想确认跑的是哪个版本 | `/opt/go-skeleton/bin/api -version` 或 `curl /health \| jq .build` |
 | 配置文件改了不生效 | systemd unit 用 `EnvironmentFile` 静态读，必须 `systemctl restart` |
 | Worker 任务停了 | 检查 Redis 是否可达；`journalctl -u go-skeleton-worker.service` 看 asynq 日志 |
+| Worker 是否健康 / 任务失败率 | `curl http://127.0.0.1:9091/health \| jq`；`curl -s http://127.0.0.1:9091/metrics \| grep asynq_tasks_processed_total` |
 
 ## 8. 安全注意
 
@@ -303,6 +305,12 @@ systemd-cgtop -m | grep go-skeleton
 - 配 `LimitNOFILE=65535` 同 API 理由。
 - watchdog 不能替代业务监控：仍然要看 Asynqmon 队列堆积、ErrorHandler 日志。watchdog
   只兜底"进程卡死"，识别不了"进程在跑但任务一直失败"。
+- 可观测端口 `WORKER_METRICS_ADDR`（默认 `:9091`，显式留空关闭）：`/metrics`（含
+  `go_skeleton_worker_asynq_tasks_processed_total{type,status}`、
+  `go_skeleton_worker_asynq_task_duration_seconds{type}`、DB 连接池指标）、`/livez`
+  （恒 200）、`/health`（Redis 必查、配了 DB 时查 DB，失败 503；两者顺序探测、共用 2s
+  超时，Redis 很慢时 DB 可能被连带标成 `unavailable`，排障时先看 Redis）。端口在 asynq 进入消费态
+  后同步绑定，绑不上进程直接退出、不发 `READY=1`。用防火墙只放行 Prometheus 来源。
 
 ### Migrate unit
 
@@ -392,10 +400,10 @@ deploy/k8s/
 │   ├── configmap.yaml             # 非敏感 env（与 .env.example 对齐）
 │   ├── secret.example.yaml        # 敏感 env 占位（**不要**直接 apply）
 │   ├── api-deployment.yaml        # API Deployment + Service（含 metrics 端口）
-│   ├── worker-deployment.yaml
+│   ├── worker-deployment.yaml     # Worker Deployment（可观测端口 9091 + 探针）
 │   ├── migrate-job.yaml
 │   ├── hpa.yaml                   # API CPU HPA
-│   └── servicemonitor.yaml        # Prometheus Operator scrape
+│   └── servicemonitor.yaml        # Prometheus Operator scrape（API ServiceMonitor + Worker PodMonitor）
 └── overlays/production/
     └── kustomization.yaml         # 镜像 tag / 副本数 / HPA 边界 patch
 ```
@@ -427,7 +435,7 @@ kubectl -n go-skeleton wait --for=condition=complete --timeout=600s job/go-skele
 可选依赖（缺哪个就注释掉对应 yaml）：
 
 - `hpa.yaml` → 集群要装 metrics-server
-- `servicemonitor.yaml` → 集群要装 Prometheus Operator
+- `servicemonitor.yaml` → 集群要装 Prometheus Operator（含 ServiceMonitor / PodMonitor CRD）
 - Deployment 的 `reloader.stakater.com/auto` annotation → 集群要装 [stakater/Reloader](https://github.com/stakater/Reloader)，否则改 ConfigMap 后要手动 `kubectl rollout restart`
 
 不引 Helm 是有意为之：一份 yaml 比 chart + values 易读、易 diff、易移植。各团队按需自行包 Helm chart。

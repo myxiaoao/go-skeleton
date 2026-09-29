@@ -10,7 +10,7 @@
 #
 # 做的事：跑轻量级检查，给出 fail-fast 反馈；不跑全量 make verify
 # （那个太慢，留到 push 前手动跑 / CI 兜底）。这里只做：
-#   1. fmt + vet                              — 30s 内能给出回应
+#   1. fmt-verify + vet                       — 30s 内能给出回应
 #   2. 阻止疑似秘钥 / .env 真值被加进暂存
 #
 # 命中检查时不要用 --no-verify 整体绕过——按仓库约定 hook 失败先修问题再重新
@@ -23,11 +23,11 @@ set -euo pipefail
 # 只看本次提交动到的 *.go，全部都跑没必要。
 staged_go=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.go$' || true)
 
-# ---- 1. fmt + vet（仅在改了 .go 时跑）----
+# ---- 1. fmt-verify + vet（仅在改了 .go 时跑；fmt-verify 只读校验，不改写文件）----
 if [ -n "$staged_go" ]; then
-  echo "[pre-commit] fmt + vet ..."
-  if ! make --no-print-directory fmt vet; then
-    echo "[pre-commit] fmt/vet failed. Fix the issues and re-add files."
+  echo "[pre-commit] fmt-verify + vet ..."
+  if ! make --no-print-directory fmt-verify vet; then
+    echo "[pre-commit] fmt-verify/vet failed. Run 'make fmt' to fix formatting, then re-add files."
     exit 1
   fi
 fi

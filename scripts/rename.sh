@@ -364,9 +364,12 @@ make oapi >/dev/null 2>&1 || {
   echo "rename: make oapi failed; run manually to inspect" >&2; exit 1;
 }
 
-# Skip oapi-verify here because it checks git-diff against HEAD, and we
-# have intentionally uncommitted rewrites. Run the rest of the gate.
-for step in fmt vet test lint docs-verify; do
+# Skip oapi-verify / sqlc-verify / docs-errcodes-verify here: all three do a
+# `git diff` against the currently-committed generated artifact, and we have
+# intentionally uncommitted rewrites (the whole point of this pass) — they'd
+# fail-fast on our own not-yet-committed changes, not on a real drift. Run
+# the rest of the `make verify` gate that doesn't depend on git state.
+for step in fmt-verify vet test lint architecture-verify env-verify tidy-verify docs-verify docs-deploy-check shell-verify; do
   if ! make "$step" >/dev/null 2>&1; then
     echo "" >&2
     echo "rename: make $step FAILED after rewrites." >&2
@@ -375,7 +378,7 @@ for step in fmt vet test lint docs-verify; do
     exit 1
   fi
 done
-echo "  ✓ fmt / vet / test / lint / docs-verify clean"
+echo "  ✓ fmt-verify / vet / test / lint / architecture-verify / env-verify / tidy-verify / docs-verify / docs-deploy-check / shell-verify clean"
 
 # --- 7. surface remaining mentions ----------------------------------------
 #

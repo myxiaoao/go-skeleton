@@ -576,6 +576,23 @@ fmt: ## 格式化代码（gofumpt + gci，统一走 golangci-lint fmt，配置�
 	}
 	golangci-lint fmt
 
+# golangci-lint fmt --diff 只打印差异、不改写文件；有差异时非 0 退出（已用
+# v2.13.2 验证：clean 退出 0，有 diff 退出 1），适合塞进 verify 链只读校验。
+# 跟 lint 分开是因为 gofumpt / gci 是 formatter，golangci-lint run 本身不检查
+# 格式问题——见 constraints 里的实测结论。
+.PHONY: fmt-verify
+fmt-verify: ## 校验代码已格式化（不改写文件）
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "golangci-lint not found, run: make init"; exit 1; \
+	}
+	@golangci-lint fmt --diff || { \
+		echo ""; \
+		echo "ERROR: code is not formatted."; \
+		echo "       Run 'make fmt' and commit the result."; \
+		echo ""; \
+		exit 1; \
+	}
+
 .PHONY: vet
 vet: ## go vet
 	$(GO) vet ./...
@@ -672,8 +689,8 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
-	@$(MAKE) --no-print-directory _verify-step STEP=fmt
+verify: ## 提交前一站式校验（fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
+	@$(MAKE) --no-print-directory _verify-step STEP=fmt-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
 	@$(MAKE) --no-print-directory _verify-step STEP=lint

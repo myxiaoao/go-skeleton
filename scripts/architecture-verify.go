@@ -119,6 +119,14 @@ func main() {
 			desc:  "禁止 import gorm.io/*（数据访问统一走 sqlc + pgx）",
 			check: importPrefixInDirs("gorm.io/", "."),
 		},
+		// 规则 6：task payload 必须把 Header 匿名内嵌在首字段，worker 端才
+		// 能用统一入口取 trace_id / 校验 schema version（见 CLAUDE.md "异步
+		// 队列" 段）。
+		{
+			id:    6,
+			desc:  "internal/task 下 *Payload struct 首字段必须匿名内嵌 Header",
+			check: payloadHeaderInDirs("internal/task"),
+		},
 	}
 
 	var all []violation
@@ -136,7 +144,7 @@ func main() {
 	}
 
 	if len(all) == 0 {
-		fmt.Println("architecture-verify: 5 import / context rules clean.")
+		fmt.Println("architecture-verify: 6 import / context / payload rules clean.")
 		return
 	}
 
@@ -281,6 +289,58 @@ func contextBackgroundInDirs(dirs ...string) func() ([]violation, error) {
 	}
 }
 
+// payloadHeaderInDirs 在 dirs 下扫所有 .go（非 _test.go），检查每个名字以
+// "Payload" 结尾的 struct 类型，首字段必须是匿名内嵌的 Header（同包裸标识符
+// 或防御性接受 task.Header 选择器写法）。
+func payloadHeaderInDirs(dirs ...string) func() ([]violation, error) {
+	return func() ([]violation, error) {
+		var vs []violation
+		for _, d := range dirs {
+			more, err := walkTypeSpecs(d, func(file string, ts *ast.TypeSpec) *violation {
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok || !strings.HasSuffix(ts.Name.Name, "Payload") {
+					return nil
+				}
+				if isHeaderFirstField(st) {
+					return nil
+				}
+				return &violation{
+					file: file,
+					line: lineOf(ts.Pos()),
+					note: fmt.Sprintf("type %s 首字段必须匿名内嵌 Header", ts.Name.Name),
+				}
+			})
+			if err != nil {
+				return nil, err
+			}
+			vs = append(vs, more...)
+		}
+		return vs, nil
+	}
+}
+
+// isHeaderFirstField 报告 struct 的第一个字段是否是匿名内嵌的 Header。
+func isHeaderFirstField(st *ast.StructType) bool {
+	if st.Fields == nil || len(st.Fields.List) == 0 {
+		return false
+	}
+	first := st.Fields.List[0]
+	if len(first.Names) != 0 {
+		return false // 具名字段不算匿名内嵌
+	}
+	switch t := first.Type.(type) {
+	case *ast.Ident:
+		return t.Name == "Header"
+	case *ast.SelectorExpr:
+		// 防御性兼容 task.Header 这种带包名前缀的写法（正常情况下 internal/task
+		// 包内引用同包类型不会带前缀，但不排除未来跨包场景）。
+		ident, ok := t.X.(*ast.Ident)
+		return ok && ident.Name == "task" && t.Sel.Name == "Header"
+	default:
+		return false
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AST walker
 
@@ -308,6 +368,26 @@ func walkCalls(dir string, hit func(file string, call *ast.CallExpr) *violation)
 				return true
 			}
 			if v := hit(path, call); v != nil {
+				vs = append(vs, *v)
+			}
+			return true
+		})
+	})
+	return vs, err
+}
+
+// walkTypeSpecs 走 dir 下所有 .go（非 _test.go），对每个 type 声明
+// （*ast.TypeSpec）回调 hit——注释里出现的示例代码不会被解析成 AST 节点，
+// 天然豁免（如 header.go 文档注释里的 ExamplePayload 例子）。
+func walkTypeSpecs(dir string, hit func(file string, ts *ast.TypeSpec) *violation) ([]violation, error) {
+	var vs []violation
+	err := walkGoFiles(dir, func(path string, f *ast.File) {
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			if v := hit(path, ts); v != nil {
 				vs = append(vs, *v)
 			}
 			return true

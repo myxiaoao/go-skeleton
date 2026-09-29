@@ -1,6 +1,7 @@
 // architecture_verify_test.go 覆盖 architecture-verify.go 的分层依赖规则:
 // 规则 1 service 不 import gin、规则 2 pgx / sqlcdb 限定到 repository /
-// bootstrap / pkg/database、规则 5 全仓禁止 gorm。
+// bootstrap / pkg/database、规则 5 全仓禁止 gorm、规则 6 task payload 必须
+// 匿名内嵌 Header。
 package scripts
 
 import (
@@ -100,6 +101,86 @@ var _ = gorm.DB{}
 	}
 	if !strings.Contains(out, "rule 5") || !strings.Contains(out, "internal/repository/x.go") {
 		t.Errorf("expected rule 5 + repository/x.go, got:\n%s", out)
+	}
+}
+
+func TestArchitectureVerify_PayloadHeaderEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// 正例：Header 匿名内嵌在首位 → 规则 6 通过。
+	writeFile(t, filepath.Join(dir, "internal", "task", "example.go"), `package task
+
+type Header struct {
+	Version int
+	TraceID string
+}
+
+type ExamplePayload struct {
+	Header
+	Name string
+}
+`)
+
+	code, out := runScript(t, dir, "architecture-verify.go")
+	if code != 0 {
+		t.Fatalf("architecture-verify should pass when Header is embedded first\n%s", out)
+	}
+	if !strings.Contains(out, "clean") {
+		t.Errorf("expected 'clean' in success output, got:\n%s", out)
+	}
+}
+
+func TestArchitectureVerify_PayloadMissingHeader(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// 反例：Payload 完全没有内嵌 Header。
+	writeFile(t, filepath.Join(dir, "internal", "task", "bad.go"), `package task
+
+type BadPayload struct {
+	Name string
+}
+`)
+
+	code, out := runScript(t, dir, "architecture-verify.go")
+	if code == 0 {
+		t.Fatalf("architecture-verify should fail when Payload missing embedded Header\n%s", out)
+	}
+	if !strings.Contains(out, "rule 6") {
+		t.Errorf("expected rule 6 in diagnostic, got:\n%s", out)
+	}
+	if !strings.Contains(out, "internal/task/bad.go") {
+		t.Errorf("expected internal/task/bad.go in diagnostic, got:\n%s", out)
+	}
+}
+
+func TestArchitectureVerify_PayloadHeaderNotFirst(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	// 反例：Header 内嵌了，但不是首字段。
+	writeFile(t, filepath.Join(dir, "internal", "task", "bad.go"), `package task
+
+type Header struct {
+	Version int
+}
+
+type BadPayload struct {
+	Name string
+	Header
+}
+`)
+
+	code, out := runScript(t, dir, "architecture-verify.go")
+	if code == 0 {
+		t.Fatalf("architecture-verify should fail when Header is not the first field\n%s", out)
+	}
+	if !strings.Contains(out, "rule 6") {
+		t.Errorf("expected rule 6 in diagnostic, got:\n%s", out)
+	}
+	if !strings.Contains(out, "internal/task/bad.go") {
+		t.Errorf("expected internal/task/bad.go in diagnostic, got:\n%s", out)
 	}
 }
 

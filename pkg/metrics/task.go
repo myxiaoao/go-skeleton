@@ -7,8 +7,9 @@ import (
 )
 
 // taskMetrics 持有 worker 消费端的任务级指标：按 task type 统计处理结果与耗时。
-// label 只用 type / status——task type 是代码里的常量，基数可控；不要加
-// task_id / queue 之外的高基数维度。
+// label 只用 type / status。type 由调用方收敛到低基数集合（worker 侧取 mux
+// 注册 pattern，未注册的 type 统一记 "unknown"，见 internal/worker/metrics.go），
+// 不要直接用生产方传入的任意字符串；也不要加 task_id / 业务 ID 这类高基数维度。
 type taskMetrics struct {
 	processed *prometheus.CounterVec
 	duration  *prometheus.HistogramVec

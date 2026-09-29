@@ -29,7 +29,7 @@ func (m *mockTaskObserver) ObserveTask(taskType string, err error, d time.Durati
 func TestMetricsMiddlewareObservesSuccessAndFailure(t *testing.T) {
 	obs := &mockTaskObserver{}
 	boom := errors.New("boom")
-	h := MetricsMiddleware(obs)(asynq.HandlerFunc(func(_ context.Context, t *asynq.Task) error {
+	h := MetricsMiddleware(obs, nil)(asynq.HandlerFunc(func(_ context.Context, t *asynq.Task) error {
 		if t.Type() == "fail" {
 			return boom
 		}
@@ -63,7 +63,7 @@ func TestMetricsMiddlewareObservesSuccessAndFailure(t *testing.T) {
 // 直接透传，不 panic。
 func TestMetricsMiddlewareNilObserverIsPassthrough(t *testing.T) {
 	called := false
-	h := MetricsMiddleware(nil)(asynq.HandlerFunc(func(context.Context, *asynq.Task) error {
+	h := MetricsMiddleware(nil, nil)(asynq.HandlerFunc(func(context.Context, *asynq.Task) error {
 		called = true
 		return nil
 	}))
@@ -92,4 +92,54 @@ func TestRegisterMetricsMiddlewareOnMux(t *testing.T) {
 
 	registerMetricsMiddleware(nil, obs)
 	registerMetricsMiddleware(asynq.NewServeMux(), nil)
+}
+
+// TestMetricsMiddlewareCountsPanicAsFailure 验证 handler panic 时仍记一次
+// failure（asynq 在 middleware 链之外 recover，不 defer 记录会漏掉最严重的失败），
+// 并且 panic 继续向上抛，让 asynq 的 recover / 重试照常生效。
+func TestMetricsMiddlewareCountsPanicAsFailure(t *testing.T) {
+	obs := &mockTaskObserver{}
+	h := MetricsMiddleware(obs, nil)(asynq.HandlerFunc(func(context.Context, *asynq.Task) error {
+		panic("kaboom")
+	}))
+
+	func() {
+		defer func() {
+			if r := recover(); r != "kaboom" {
+				t.Fatalf("recovered = %v, want kaboom (panic must propagate)", r)
+			}
+		}()
+		_ = h.ProcessTask(t.Context(), asynq.NewTask("boom", nil))
+		t.Fatal("ProcessTask should have panicked")
+	}()
+
+	if len(obs.calls) != 1 || obs.calls[0].taskType != "boom" || obs.calls[0].err == nil {
+		t.Fatalf("observe calls = %+v, want one failure for boom", obs.calls)
+	}
+}
+
+// TestRegisterMetricsMiddlewareFoldsUnknownType 验证未在 mux 注册的 task type
+// （走 asynq NotFoundHandler）统一记成 "unknown"，防止任意 type 撑爆 label 基数；
+// 已注册的 type 用注册 pattern 作 label。
+func TestRegisterMetricsMiddlewareFoldsUnknownType(t *testing.T) {
+	obs := &mockTaskObserver{}
+	mux := asynq.NewServeMux()
+	registerMetricsMiddleware(mux, obs)
+	mux.HandleFunc("demo", func(context.Context, *asynq.Task) error { return nil })
+
+	if err := mux.ProcessTask(t.Context(), asynq.NewTask("random:type:123", nil)); err == nil {
+		t.Fatal("unregistered type should return not-found error")
+	}
+	if err := mux.ProcessTask(t.Context(), asynq.NewTask("demo", nil)); err != nil {
+		t.Fatalf("demo err = %v", err)
+	}
+	if len(obs.calls) != 2 {
+		t.Fatalf("observe calls = %+v, want 2", obs.calls)
+	}
+	if obs.calls[0].taskType != unknownTaskType || obs.calls[0].err == nil {
+		t.Errorf("unregistered call = %+v, want type=%s failure", obs.calls[0], unknownTaskType)
+	}
+	if obs.calls[1].taskType != "demo" {
+		t.Errorf("registered call = %+v, want type=demo", obs.calls[1])
+	}
 }

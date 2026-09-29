@@ -106,7 +106,8 @@ func TestObservabilityServesAndShutsDown(t *testing.T) {
 	}
 
 	w.shutdownObservability(t.Context())
-	if _, err := net.Dial("tcp", ln.Addr().String()); err == nil {
+	if conn, err := net.Dial("tcp", ln.Addr().String()); err == nil {
+		_ = conn.Close()
 		t.Error("port should be released after shutdown")
 	}
 }

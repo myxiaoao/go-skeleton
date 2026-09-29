@@ -275,7 +275,7 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	// NEH handlers-deps
 
 	authH := handler.NewAuthHandler(reg.Auth, reg.Cfg.Auth.DevTokenEndpointEnabled)
-	healthH := handler.NewHealthHandler(reg.DB, reg.Cache, reg.Draining)
+	healthH := handler.NewHealthHandler(reg.DB, reg.Cache, reg.Queue, reg.Draining)
 	exampleH := handler.NewExampleHandler(exampleService)
 	// NEH handlers-construct
 	openapiH := handler.NewOpenAPIHandler(reg.Cfg.Docs)

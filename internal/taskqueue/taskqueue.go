@@ -51,3 +51,15 @@ func (q *Queue) Enqueue(ctx context.Context, t *asynq.Task, opts ...asynq.Option
 	}
 	return q.client.EnqueueContext(ctx, t, opts...)
 }
+
+// Ping 探测 Asynq 底层 Redis 连接是否可达，供 /health 的队列探针用。
+//
+// asynq v0.26 的 (*asynq.Client).Ping() 不接 ctx 参数（它内部直接用短超时
+// PING 一次 Redis）；这里仍然收 ctx 是为了跟 healthDBPinger / healthCachePinger
+// 的接口形状对齐，也给未来 asynq 版本补上 ctx 参数留好扩展点，本层不用它。
+func (q *Queue) Ping(_ context.Context) error {
+	if q == nil || q.client == nil {
+		return ErrQueueUnavailable
+	}
+	return q.client.Ping()
+}

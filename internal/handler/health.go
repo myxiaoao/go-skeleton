@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"go-skeleton/internal/oapi"
+	"go-skeleton/internal/taskqueue"
 	"go-skeleton/pkg/buildinfo"
 	"go-skeleton/pkg/cache"
 	"go-skeleton/pkg/database"
@@ -24,18 +25,25 @@ type healthCachePinger interface {
 	Ping(context.Context) error
 }
 
+// healthQueuePinger 让 /health 的队列探针可测；生产实现是
+// *taskqueue.Queue（Ping 内部转调 asynq.Client.Ping）。
+type healthQueuePinger interface {
+	Ping(context.Context) error
+}
+
 // HealthHandler 实现 K8s 风格的探活：/livez（liveness）+ /health（readiness）。
-// 持有 db / cache 的 ping 接口和 draining 信号；后者由 main 在 SIGTERM 时翻
-// true，用来让 /health 提前返 503 让 LB 摘流。
+// 持有 db / cache / queue 的 ping 接口和 draining 信号；后者由 main 在
+// SIGTERM 时翻 true，用来让 /health 提前返 503 让 LB 摘流。
 type HealthHandler struct {
 	db       healthDBPinger
 	cache    healthCachePinger
+	queue    healthQueuePinger
 	draining *atomic.Bool
 }
 
 // NewHealthHandler 构造 HealthHandler。db 为 nil 表示 not_configured；
-// cache 为 nil 同义。draining 可为 nil（不参与 graceful drain 的进程）。
-func NewHealthHandler(db *database.DBManager, cache *cache.Client, draining *atomic.Bool) *HealthHandler {
+// cache / queue 为 nil 同义。draining 可为 nil（不参与 graceful drain 的进程）。
+func NewHealthHandler(db *database.DBManager, cache *cache.Client, queue *taskqueue.Queue, draining *atomic.Bool) *HealthHandler {
 	h := &HealthHandler{draining: draining}
 	// 避免 typed-nil 把接口包成 non-nil。
 	if db != nil {
@@ -43,6 +51,9 @@ func NewHealthHandler(db *database.DBManager, cache *cache.Client, draining *ato
 	}
 	if cache != nil {
 		h.cache = cache
+	}
+	if queue != nil {
+		h.queue = queue
 	}
 	return h
 }
@@ -76,6 +87,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 			Checks: map[string]oapi.HealthResponseChecks{
 				"postgres": oapi.HealthResponseChecksUnavailable,
 				"redis":    oapi.HealthResponseChecksUnavailable,
+				"queue":    oapi.HealthResponseChecksUnavailable,
 			},
 		}
 		resp.Build.BuildTime = buildinfo.BuildTime
@@ -115,13 +127,26 @@ func (h *HealthHandler) Health(c *gin.Context) {
 		checks["redis"] = oapi.HealthResponseChecksOk
 	}
 
+	// 队列（Asynq/Redis）跟 Redis 缓存一样是非关键依赖：挂了只影响异步任务
+	// 投递，不影响同步读写主链路，所以走 degraded（200）而不是摘流（503）。
+	queueHealthy := true
+	switch {
+	case h.queue == nil:
+		checks["queue"] = oapi.HealthResponseChecksNotConfigured
+	case h.queue.Ping(ctx) != nil:
+		checks["queue"] = oapi.HealthResponseChecksUnavailable
+		queueHealthy = false
+	default:
+		checks["queue"] = oapi.HealthResponseChecksOk
+	}
+
 	status := oapi.HealthResponseStatusOk
 	httpStatus := http.StatusOK
 	switch {
 	case !dbHealthy:
 		status = oapi.HealthResponseStatusUnhealthy
 		httpStatus = http.StatusServiceUnavailable
-	case !cacheHealthy:
+	case !cacheHealthy || !queueHealthy:
 		status = oapi.HealthResponseStatusDegraded
 		// httpStatus 保持 200：让 LB 区别 "完全挂" 和 "降级运行"。
 	}

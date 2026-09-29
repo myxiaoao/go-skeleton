@@ -344,7 +344,10 @@ components:
             LB 不摘流；unhealthy: 关键依赖（Postgres）异常，HTTP 503，LB 摘流。
         checks:
           type: object
-          description: 每个依赖的健康状态，key 是依赖名（postgres / redis / asynq 等）。
+          description: |
+            每个依赖的健康状态，key 是依赖名：postgres（关键依赖，异常直接
+            unhealthy）、redis（缓存，非关键）、queue（Asynq 队列，探测底层
+            Redis 连通性，非关键）。非关键依赖异常只触发 degraded，不摘流。
           additionalProperties:
             type: string
             enum: [ok, unavailable, not_configured]

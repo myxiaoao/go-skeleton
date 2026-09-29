@@ -327,6 +327,15 @@ oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
 		git --no-pager diff -- $(OAPI_OUTPUT) | head -40; \
 		exit 1; \
 	fi
+	@# oapi 目标会跑 go mod tidy：生成代码增删依赖时 go.mod / go.sum 也会漂移，一并校验
+	@if ! git diff --quiet -- go.mod go.sum; then \
+		echo ""; \
+		echo "ERROR: go.mod / go.sum changed after 'make oapi' (go mod tidy)."; \
+		echo "       Run 'make oapi' (or 'go mod tidy') and commit go.mod / go.sum."; \
+		echo ""; \
+		git --no-pager diff -- go.mod go.sum | head -40; \
+		exit 1; \
+	fi
 	@echo "oapi-verify: $(OAPI_OUTPUT) is in sync with $(OAPI_SPEC)."
 
 SQLC_OUTPUT := internal/repository/sqlcdb

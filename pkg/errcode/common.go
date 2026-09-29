@@ -40,6 +40,10 @@ var (
 	// ServiceDisabled 表示端点存在于 OpenAPI 契约里、但被配置开关关掉了
 	// （例如开发期路由在生产环境保持禁用），保持 spec 与运行时行为对齐。
 	ServiceDisabled = newError(1006, "SERVICE_DISABLED")
+	// NotFound 表示请求的资源不存在（如按 id 查询未命中）。
+	NotFound = newError(1007, "NOT_FOUND")
+	// Conflict 表示请求与资源当前状态冲突（如唯一键重复、状态机不允许该操作）。
+	Conflict = newError(1008, "CONFLICT")
 
 	// InternalError 是所有未识别 server 侧错误的兜底。
 	InternalError = newError(9001, "INTERNAL_ERROR")

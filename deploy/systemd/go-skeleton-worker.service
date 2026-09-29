@@ -20,6 +20,10 @@ ExecStart=/opt/go-skeleton/bin/worker
 
 Restart=on-failure
 RestartSec=5s
+# Observability port: WORKER_METRICS_ADDR (default :9091) serves /metrics,
+# /livez and /health. Bind it to 127.0.0.1 / an internal address in .env and
+# firewall it to the Prometheus host only. If the port cannot be bound the
+# worker exits before READY=1, so systemd sees a failed start.
 # Worker does two-phase shutdown (Stop → Shutdown) on SIGTERM; give it
 # room to finish in-flight tasks before systemd SIGKILLs it.
 KillSignal=SIGTERM

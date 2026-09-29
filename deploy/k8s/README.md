@@ -12,7 +12,7 @@ deploy/k8s/
 │   ├── configmap.yaml             # 非敏感 env（与 .env.example 对齐）
 │   ├── secret.example.yaml        # 敏感 env 占位（不要直接 apply）
 │   ├── api-deployment.yaml        # API Deployment + Service（含 metrics 端口）
-│   ├── worker-deployment.yaml     # Worker Deployment
+│   ├── worker-deployment.yaml     # Worker Deployment（可观测端口 9091 + 探针）
 │   ├── migrate-job.yaml           # 一次性迁移 Job
 │   ├── hpa.yaml                   # API CPU HPA
 │   ├── servicemonitor.yaml        # Prometheus Operator scrape 配置
@@ -53,7 +53,7 @@ deploy/k8s/
    | 资源 | 集群要装 |
    |---|---|
    | `hpa.yaml` | metrics-server（`kubectl top pods` 能跑就有） |
-   | `servicemonitor.yaml` | Prometheus Operator（`kubectl get crd servicemonitors.monitoring.coreos.com`） |
+   | `servicemonitor.yaml` | Prometheus Operator（`kubectl get crd servicemonitors.monitoring.coreos.com podmonitors.monitoring.coreos.com`；Worker 用 PodMonitor） |
    | `networkpolicy.yaml` | NetworkPolicy CNI 实现（Calico / Cilium / Weave 等）；普通 kindnet 没装时 yaml 被接受但策略不生效 |
    | Deployment `reloader.stakater.com/auto` annotation | [stakater/Reloader](https://github.com/stakater/Reloader)（缺则改 ConfigMap 后要手动 `kubectl rollout restart`） |
 
@@ -61,7 +61,7 @@ deploy/k8s/
 
 - `pdb.yaml` 默认 `minAvailable=1`：保单副本时阻止 voluntary 驱逐，多副本
   时允许逐个滚动。生产推荐 `minAvailable: 2` 或 `maxUnavailable: 25%`。
-- `networkpolicy.yaml` 给 API metrics 端口 9090 限定 `namespaceSelector:
+- `networkpolicy.yaml` 给 API metrics 端口 9090、Worker 可观测端口 9091 限定 `namespaceSelector:
   matchLabels: { purpose: monitoring }`——Prometheus 所在 namespace 必须
   打 `purpose=monitoring` 标签才能 scrape。没装监控时 metrics 端口被锁死
   是预期（fail-secure）。

@@ -34,3 +34,29 @@ spec:
       scrapeTimeout: 10s
       scheme: http
       # 业务进程不要求 /metrics 鉴权（生产靠网络隔离 + Service 不暴露公网）
+---
+# PodMonitor: Worker 没有 Service（不接业务流量），用 PodMonitor 直接按 Pod
+# label 发现并 scrape 可观测端口（containerPort 名 metrics，默认 9091）。
+# 同样依赖 Prometheus Operator（kubectl get crd podmonitors.monitoring.coreos.com）。
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: go-skeleton-worker
+  labels:
+    app.kubernetes.io/name: go-skeleton
+    app.kubernetes.io/component: worker
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-skeleton
+      app.kubernetes.io/component: worker
+  namespaceSelector:
+    matchNames:
+      - go-skeleton
+  podMetricsEndpoints:
+    - port: metrics             # 对应 worker-deployment 的 containerPort 名
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      scheme: http

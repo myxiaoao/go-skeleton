@@ -198,6 +198,8 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 - Worker 消费端 handler 在 `internal/worker/handler.go` 注册，业务流程委托给 service。
 - Worker 停服走两阶段：`srv.Stop()` 停止接新任务、`srv.Shutdown()` 等当前任务完成（已在 `internal/worker.go` 实现，扩展时不要破坏顺序）。
 - Worker 启动用 `asynq.Server.Start`（同步、返回启动期 error），**不要退回 `server.Run`**。`Run` = `Start` + 它内置的 `waitForSignals` + `Shutdown`，那条内置 signal loop 会和 `cmd/worker/main.go` 的 `signal.NotifyContext` 抢 SIGTERM；而且 `Run` 异步起 goroutine 没法精确知道启动成败，会让 sd_notify `READY=1` 早发。`internal/worker.go` 的 `Run(ctx, onReady)` 已经是：`Start` 成功后才回调 `onReady`、停服由传入的 `ctx` 驱动。
+- **Worker 可观测端口**：`WORKER_METRICS_ADDR`（默认 `:9091`，显式留空关闭）由 `internal/worker.go` 在 asynq `Start` 成功后同步绑定（绑不上 `Run` 返 error、不发 READY），暴露 `/metrics`、`/livez`（恒 200）、`/health`（Redis 必查、DB 配置时查，失败 503，不走业务信封）；停服顺序 asynq `Stop` → `Shutdown` → HTTP `Shutdown`。实现是 `internal/worker/http.go` 的标准库 `net/http`，**不要**为它引入 gin / handler 包。
+- **任务指标**：`internal/worker/metrics.go` 的 `MetricsMiddleware` 与 TraceMiddleware 一起在 `RegisterHandlers` 挂载（`Deps.Metrics` 为 nil 时不挂），记录 `go_skeleton_worker_asynq_tasks_processed_total{type,status}` 与 `go_skeleton_worker_asynq_task_duration_seconds{type}`。label 只允许 task type 这类低基数值，不要加 task_id / 业务 ID。
 - **Production 漏注入业务 processor 必须 fail-fast**。`internal/worker.go::buildWorkerDeps` 在 `APP_ENV=production` 下调 `deps.RequiredProcessors()`（定义在 `internal/worker/handler.go`）显式检查每个 task 的 processor 注入状态；任一 missing 就返 error，让 `NewWorker` 启动期失败。dev / staging 仍允许 noop 兜底，方便从模板态启动；但生产环境消息被 noop 消费 + ack 掉，比 panic 更危险（消息消失但只剩 warn 日志），所以宁可起不来也不能静默。**加新 task 类型时：必须同步在 `Deps.RequiredProcessors` 追加一条记录**——漏加 = production 下静默 noop，回到改造前的隐患。这是显式声明取代"reg.DB == nil"巧合代理的强制点。
 
 ## context 传递（硬约束）

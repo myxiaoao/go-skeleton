@@ -42,14 +42,48 @@ spec:
           image: go-skeleton-worker:REPLACE-TAG
           imagePullPolicy: IfNotPresent
           args: []
-          # Worker 不开 HTTP server，没有 /livez / /health 可探。让 K8s 看
-          # 进程是否还活（exec/tcp 探针都不适用）走默认的 "进程退出 = 失败"
-          # 重启策略即可。若需更精细的健康判断，业务自行起 sidecar。
+          # Worker 可观测端口（WORKER_METRICS_ADDR，默认 :9091）：/metrics 给
+          # Prometheus（PodMonitor，见 servicemonitor.yaml）、/livez 给 liveness、
+          # /health 给 readiness。Worker 不接业务流量，所以不建 Service。
+          ports:
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: go-skeleton-env
             - secretRef:
                 name: go-skeleton-secrets
+          # 显式 env 覆盖 envFrom：把可观测端口绑到 Pod IP（私网地址），而不是
+          # 0.0.0.0——APP_ENV=production 下 config.WorkerProductionWarnings 对
+          # 监听全部网卡会打 warn。kubelet 探针与 Prometheus 都走 Pod IP，不受影响。
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: WORKER_METRICS_ADDR
+              value: "$(POD_IP):9091"
+          # liveness 打 /livez（恒 200，不碰依赖）：Redis 抖动时重启 worker
+          # 救不回 Redis，反而打断在跑的任务。
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # readiness 打 /health（Redis 必查、配了 DB 时查 DB，失败 503）。worker
+          # 没有 Service 可摘流，readiness 主要给滚动升级判断新 Pod 是否就绪。
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m

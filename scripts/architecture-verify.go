@@ -144,7 +144,7 @@ func main() {
 	}
 
 	if len(all) == 0 {
-		fmt.Println("architecture-verify: 6 import / context / payload rules clean.")
+		fmt.Printf("architecture-verify: %d import / context / payload rules clean.\n", len(rules))
 		return
 	}
 
@@ -296,26 +296,69 @@ func payloadHeaderInDirs(dirs ...string) func() ([]violation, error) {
 	return func() ([]violation, error) {
 		var vs []violation
 		for _, d := range dirs {
-			more, err := walkTypeSpecs(d, func(file string, ts *ast.TypeSpec) *violation {
-				st, ok := ts.Type.(*ast.StructType)
-				if !ok || !strings.HasSuffix(ts.Name.Name, "Payload") {
-					return nil
-				}
-				if isHeaderFirstField(st) {
-					return nil
-				}
-				return &violation{
-					file: file,
-					line: lineOf(ts.Pos()),
-					note: fmt.Sprintf("type %s 首字段必须匿名内嵌 Header", ts.Name.Name),
-				}
-			})
-			if err != nil {
+			// 先收集目录内全部类型声明，再逐个检查 *Payload：别名（type X = Y）
+			// 或基于同包类型的定义（type X Y）要顺着名字找到最终的 struct 再判定。
+			type located struct {
+				file string
+				ts   *ast.TypeSpec
+			}
+			var specs []located
+			byName := map[string]*ast.TypeSpec{}
+			if _, err := walkTypeSpecs(d, func(file string, ts *ast.TypeSpec) *violation {
+				specs = append(specs, located{file: file, ts: ts})
+				byName[ts.Name.Name] = ts
+				return nil
+			}); err != nil {
 				return nil, err
 			}
-			vs = append(vs, more...)
+			for _, sp := range specs {
+				if !strings.HasSuffix(sp.ts.Name.Name, "Payload") {
+					continue
+				}
+				if msg := checkPayloadType(sp.ts, byName); msg != "" {
+					vs = append(vs, violation{
+						file: sp.file,
+						line: lineOf(sp.ts.Pos()),
+						note: fmt.Sprintf("type %s %s", sp.ts.Name.Name, msg),
+					})
+				}
+			}
 		}
 		return vs, nil
+	}
+}
+
+// checkPayloadType 返回违规说明，合规时返回空串。
+//   - struct 字面量：首字段必须匿名内嵌 Header；
+//   - 同包名字（别名或定义）：顺着名字解析到最终 struct 再判定，带环检测；
+//   - 其他包的类型（pkg.T）：无法静态确认内嵌了 Header，按违规处理；
+//   - slice / map 等非 struct 形态不是 JSON 对象 payload，跳过。
+func checkPayloadType(ts *ast.TypeSpec, byName map[string]*ast.TypeSpec) string {
+	const needHeader = "首字段必须匿名内嵌 Header"
+	seen := map[string]bool{ts.Name.Name: true}
+	expr := ts.Type
+	for {
+		switch t := expr.(type) {
+		case *ast.StructType:
+			if isHeaderFirstField(t) {
+				return ""
+			}
+			return needHeader
+		case *ast.Ident:
+			next, ok := byName[t.Name]
+			if !ok {
+				return fmt.Sprintf("引用的 %s 不是本包 struct，%s", t.Name, needHeader)
+			}
+			if seen[t.Name] {
+				return "类型定义成环"
+			}
+			seen[t.Name] = true
+			expr = next.Type
+		case *ast.SelectorExpr:
+			return "引用其他包的类型，无法确认内嵌 Header；请定义为本包 struct 并" + needHeader
+		default:
+			return ""
+		}
 	}
 }
 

@@ -118,6 +118,8 @@ func TestMessageForCoversEveryDeclaredReason(t *testing.T) {
 		errcode.DatabaseError.Reason(),
 		errcode.QueueUnavailable.Reason(),
 		errcode.QueueError.Reason(),
+		errcode.NotFound.Reason(),
+		errcode.Conflict.Reason(),
 	}
 	for _, r := range declared {
 		if msg := MessageFor(r); msg == "" || msg == "operation failed" {

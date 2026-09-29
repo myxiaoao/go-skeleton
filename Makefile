@@ -245,13 +245,14 @@ oapi-install: ## 仅校验/安装 oapi-codegen（pin 版本，不匹配会重装
 	@$(MAKE) --no-print-directory _ensure-oapi-codegen
 
 .PHONY: oapi
-oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go
+oapi: oapi-install ## 从 api/openapi.yaml 生成 internal/oapi/oapi.gen.go（并 go mod tidy 补齐生成代码新增/去除的依赖，如 oapi-codegen/runtime）
 	@mkdir -p $(dir $(OAPI_OUTPUT))
 	oapi-codegen -config $(OAPI_CFG) $(OAPI_SPEC)
+	$(GO) mod tidy
 	@echo "generated: $(OAPI_OUTPUT)"
 
 .PHONY: architecture-verify
-architecture-verify: ## 校验分层 import 边界（gin 外溢、pgx / sqlcdb 外溢、禁 gorm、pkg→internal 反向依赖、service/handler 误用 context.Background）
+architecture-verify: ## 校验分层 import 边界（gin 外溢、pgx / sqlcdb 外溢、禁 gorm、pkg→internal 反向依赖、service/handler 误用 context.Background、task payload 必须内嵌 Header）
 	$(GO) run scripts/architecture-verify.go
 
 .PHONY: env-verify
@@ -259,7 +260,7 @@ env-verify: ## 校验 config/ 读取的 env key 与 .env.example 模板同步
 	$(GO) run scripts/env-verify.go
 
 .PHONY: docs-verify
-docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
+docs-verify: ## 校验 CLAUDE.md 只导入 AGENTS.md（不重复规则段）+ 各文档 verify 清单与 Makefile 一致
 	$(GO) run scripts/docs-verify.go
 
 .PHONY: docs-deploy-check
@@ -324,6 +325,15 @@ oapi-verify: oapi ## 校验生成产物与 yaml 一致（CI / 提交前用）
 		echo "       Run 'make oapi' and commit the result."; \
 		echo ""; \
 		git --no-pager diff -- $(OAPI_OUTPUT) | head -40; \
+		exit 1; \
+	fi
+	@# oapi 目标会跑 go mod tidy：生成代码增删依赖时 go.mod / go.sum 也会漂移，一并校验
+	@if ! git diff --quiet -- go.mod go.sum; then \
+		echo ""; \
+		echo "ERROR: go.mod / go.sum changed after 'make oapi' (go mod tidy)."; \
+		echo "       Run 'make oapi' (or 'go mod tidy') and commit go.mod / go.sum."; \
+		echo ""; \
+		git --no-pager diff -- go.mod go.sum | head -40; \
 		exit 1; \
 	fi
 	@echo "oapi-verify: $(OAPI_OUTPUT) is in sync with $(OAPI_SPEC)."
@@ -576,6 +586,23 @@ fmt: ## 格式化代码（gofumpt + gci，统一走 golangci-lint fmt，配置�
 	}
 	golangci-lint fmt
 
+# golangci-lint fmt --diff 只打印差异、不改写文件；有差异时非 0 退出（已用
+# v2.13.2 验证：clean 退出 0，有 diff 退出 1），适合塞进 verify 链只读校验。
+# 跟 lint 分开是因为 gofumpt / gci 是 formatter，golangci-lint run 本身不检查
+# 格式问题。
+.PHONY: fmt-verify
+fmt-verify: ## 校验代码已格式化（不改写文件）
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "golangci-lint not found, run: make init"; exit 1; \
+	}
+	@golangci-lint fmt --diff || { \
+		echo ""; \
+		echo "ERROR: code is not formatted."; \
+		echo "       Run 'make fmt' and commit the result."; \
+		echo ""; \
+		exit 1; \
+	}
+
 .PHONY: vet
 vet: ## go vet
 	$(GO) vet ./...
@@ -672,8 +699,8 @@ cover: ## 生成覆盖率报告（coverage.out + coverage.html）
 # ---------- 入口：提交前必跑 ----------
 
 .PHONY: verify
-verify: ## 提交前一站式校验（fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
-	@$(MAKE) --no-print-directory _verify-step STEP=fmt
+verify: ## 提交前一站式校验（fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify）
+	@$(MAKE) --no-print-directory _verify-step STEP=fmt-verify
 	@$(MAKE) --no-print-directory _verify-step STEP=vet
 	@$(MAKE) --no-print-directory _verify-step STEP=test
 	@$(MAKE) --no-print-directory _verify-step STEP=lint

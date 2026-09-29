@@ -3,7 +3,7 @@
 按时间线串起从"克隆仓库"到"PR merge"的全过程。本文档只负责**叙事顺序**和**链接到详细文档**——具体规则 / 命令清单 / 排障指南都在原处。
 
 > - 命令查表（横向：按场景） → [`docs/runbook.md`](./runbook.md)
-> - 项目宪法（约束 + 分层规则） → [`CLAUDE.md`](../CLAUDE.md) / [`AGENTS.md`](../AGENTS.md)
+> - 项目宪法（约束 + 分层规则） → [`AGENTS.md`](../AGENTS.md)（唯一来源；`CLAUDE.md` 仅 `@AGENTS.md` 导入）
 > - 二进制部署 → [`docs/deploy.md`](./deploy.md)
 
 ---
@@ -65,7 +65,7 @@ yaml 是真相源。按这个顺序：
 4. **填业务逻辑**：在 service 里换掉 NotImplementedYet 为真实业务规则；repository 实现 SQL；model 补字段；handler 补 `c.ShouldBind...` 把 req 传给 service
 5. **写测试**：参考生成的 `*_test.go` smoke 模板 + 现有 `example_test.go`（见 [§十 测试](#十测试)）
 
-详细分层规则：[CLAUDE.md::分层规则](../CLAUDE.md)。
+详细分层规则：[AGENTS.md::分层规则](../AGENTS.md)。
 
 **禁忌**：
 - handler 写业务规则 → 挪到 service
@@ -75,7 +75,7 @@ yaml 是真相源。按这个顺序：
 
 **资源识别**：优先看 yaml 的 `x-resource`（operation 级 > path 级），未声明时 fallback 到"operationId 大小写不敏感包含 NAME"。`NAME=Order` 走 fallback 时会命中 `listOrders / createOrder / getOrder / enqueueOrderTask`，但同时误命中 `listOrderPayments`——歧义场景请直接在 yaml 写 `x-resource: Order` / `x-resource: OrderPayment` 显式归属。
 
-**支持边界与不支持形态**：see CLAUDE.md / AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节——列清了脚本能跑（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run）和需手写（≥2 个 path 参数 / 同资源跨多根路径）的形态。
+**支持边界与不支持形态**：见 AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节——列清了脚本能跑（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run）和需手写（≥2 个 path 参数 / 同资源跨多根路径）的形态。
 
 **漂移检查（drift detector）**：`make new-endpoint-check` 是只读 checker——重新解析 yaml 比对代码端，按 `[!] Missing` / `[~] Stale` / `[-] Mismatch` 三档输出 yaml ↔ 代码漂移。**不写盘**、不删代码。改完 yaml 没跑 `make new-endpoint`、或 rename / 删 operation 后代码端残留 router 注册 / handler 方法时它都能抓到。传 `NAME=Order` 只扫单资源。不并入 `make verify`（避免 schema 调整让 PR 抖动），作为调试入口单跑；CI 想接进定时扫的话另起 job。
 
@@ -145,12 +145,12 @@ yaml 是真相源。按这个顺序：
 ## 九、提交前必跑
 
 ```sh
-make verify              # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅）
+make verify              # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify（每步打横幅）
 ```
 
 红了看最后一个 `=== STEP FAILED: xxx ===` 横幅指向的步骤；详细排错见 [runbook §排错 cheat sheet](./runbook.md#排错-cheat-sheet)。
 
-**不要用 `--no-verify` 跳过 pre-commit hook**——hook 自身只跑 `fmt + vet` + .env 拦截，不挂全量 verify。挂了就是真问题，不要绕过。
+**不要用 `--no-verify` 跳过 pre-commit hook**——hook 自身只跑 `fmt-verify + vet`（只读校验，格式问题用 `make fmt` 修）+ .env 拦截，不挂全量 verify。挂了就是真问题，不要绕过。
 
 ---
 
@@ -162,7 +162,7 @@ make verify              # fmt + vet + test + lint + architecture-verify + env-v
 | repository | 手写 mockDBTX / mockTx 断言 SQL 与参数 | [internal/repository/example_test.go](../internal/repository/example_test.go) |
 | repository (真实 DB) | `//go:build integration` + 真 PG | [`internal/repository/example_integration_test.go`](../internal/repository/example_integration_test.go) |
 
-**硬约束**（见 [CLAUDE.md::测试约定](../CLAUDE.md)）：
+**硬约束**（见 [AGENTS.md::测试约定](../AGENTS.md)）：
 - ❌ 不引入 testify / gomock / mockery / sqlmock / testcontainers
 - ✅ mock 是 inline struct + func 字段，就近放在测试文件里
 - ✅ 测试 `init()` 调 `applog.SetLogger(zap.NewNop())` 静音日志
@@ -181,7 +181,7 @@ make cover && open coverage.html            # 覆盖率
 
 ## 十一、Commit + PR
 
-**Commit message** 格式（详见 [CLAUDE.md::Commit message](../CLAUDE.md)）：
+**Commit message** 格式（详见 [AGENTS.md::Commit message](../AGENTS.md)）：
 
 ```text
 type(scope): description

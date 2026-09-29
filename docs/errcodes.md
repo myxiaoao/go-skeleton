@@ -31,6 +31,8 @@ API 响应走统一信封 `{code, message, reason?, data?, metadata?}`；HTTP �
 | 1004 | `TOO_MANY_REQUESTS` | 429 | too many requests | `errcode.TooManyRequests` |
 | 1005 | `REQUEST_TIMEOUT` | 408 | request timeout | `errcode.RequestTimeout` |
 | 1006 | `SERVICE_DISABLED` | 503 | endpoint is disabled by configuration | `errcode.ServiceDisabled` |
+| 1007 | `NOT_FOUND` | 404 | resource not found | `errcode.NotFound` |
+| 1008 | `CONFLICT` | 409 | resource conflict | `errcode.Conflict` |
 | 9001 | `INTERNAL_ERROR` | 500 | internal server error | `errcode.InternalError` |
 | 9002 | `DATABASE_ERROR` | 500 | database error | `errcode.DatabaseError` |
 | 9003 | `QUEUE_UNAVAILABLE` | 503 | queue unavailable | `errcode.QueueUnavailable` |

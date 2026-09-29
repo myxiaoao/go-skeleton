@@ -6,13 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it leaves the unreleased phase.
 
-Commit prefixes follow the convention in `CLAUDE.md`
+Commit prefixes follow the convention in `AGENTS.md`
 (`type(scope): description`); group entries below by `Added`, `Changed`,
 `Fixed`, `Removed`, `Security`, or `Deprecated`.
 
 ## [Unreleased]
 
 ### Changed
+
+- **AGENTS.md 成为 AI 编码助手规则的唯一来源**: `CLAUDE.md` 缩减为
+  `@AGENTS.md` 导入行 + Claude Code 专属补充，不再并行维护两份规则正文；
+  `CLAUDE.md` 独有的 `.dockerignore` 目录树条目并入 AGENTS.md。docs/ 下指向
+  `CLAUDE.md::xxx` 的链接改指 AGENTS.md。
+- **`make docs-verify` 改为两项校验**: (1) `CLAUDE.md` 必须含 `@AGENTS.md`
+  导入行，且不得出现与 AGENTS.md 同名的 `## ` 段；(2) 解析 Makefile `verify:`
+  的 `_verify-step` 序列，校验 README.md / README_en.md / docs/development.md /
+  docs/runbook.md / AGENTS.md 中 `make verify   # a + b + ...` 清单及 Makefile
+  `verify` 帮助文案与之完全一致（含顺序）。去掉旧的 sharedSections 段落比对，
+  并修正了现存漂移（缺 fmt-verify / sqlc-verify / shell-verify）。
+- **`make verify` 首步改为只读的 `fmt-verify`**: pre-commit hook 改跑
+  `make fmt-verify vet`；`make fmt` 仍负责改写文件。
+- **`scripts/rename.sh` 自检跑完整 verify 门禁**: 除 oapi-verify / sqlc-verify /
+  docs-errcodes-verify（比对已提交产物）外全部执行。
 
 - **数据访问从 GORM 迁移到 sqlc（pgx/v5）**: 查询写在
   `internal/repository/queries/*.sql`，`make sqlc` 生成
@@ -76,6 +91,10 @@ Commit prefixes follow the convention in `CLAUDE.md`
   **监控影响**：已有按 `status="200"` 写的 SLO / 告警规则需要重做——现在业务
   错误会出现在 4xx/5xx 上，可同时用新加的 `code` label 精确定位错误类型。
 
+### Removed
+
+- **`worker.Deps.RDB`**: 未被任何 processor 使用的 Redis 字段删除。
+
 ### Fixed
 
 - **new-endpoint 修审计发现的三个 hard stop**:
@@ -96,6 +115,16 @@ Commit prefixes follow the convention in `CLAUDE.md`
   router_test 注入、router_test 缺失场景、多参数 fail-fast。
 
 ### Added
+
+- **错误码 `NOT_FOUND`（1007 → 404）与 `CONFLICT`（1008 → 409）**: 同步
+  `MessageFor` 文案、`HTTPStatus` 映射与 `docs/errcodes.md`。
+- **连接池 Prometheus 指标**: `pkg/database` 新增 `(*DBManager).Collector()`，
+  `internal/server.go` 通过 `metrics.Registry.MustRegister` 挂到 `/metrics`。
+- **`/health` 队列探测**: 新增非关键 `queue` 检查（`taskqueue.Queue.Ping`，遵守
+  `/health` 超时）；队列不可用 → `degraded` + 200。
+- **`make fmt-verify`**: `golangci-lint fmt --diff` 只读校验格式，不改写文件。
+- **architecture-verify 规则 6**: `internal/task` 下 `*Payload` struct 首字段必须
+  匿名内嵌 `Header`。
 
 - **`make new-endpoint NAME=Order DTO=1` —— yaml schema 反推 DTO（可选）**:
   默认关；开启后从 yaml schema 反推 service 包的请求 DTO struct + handler

@@ -275,7 +275,7 @@ func newHTTPHandlers(reg *bootstrap.Registry) *HTTPHandlers {
 	// NEH handlers-deps
 
 	authH := handler.NewAuthHandler(reg.Auth, reg.Cfg.Auth.DevTokenEndpointEnabled)
-	healthH := handler.NewHealthHandler(reg.DB, reg.Cache, reg.Draining)
+	healthH := handler.NewHealthHandler(reg.DB, reg.Cache, reg.Queue, reg.Draining)
 	exampleH := handler.NewExampleHandler(exampleService)
 	// NEH handlers-construct
 	openapiH := handler.NewOpenAPIHandler(reg.Cfg.Docs)
@@ -314,6 +314,12 @@ func newEngine(reg *bootstrap.Registry, handlers *HTTPHandlers, rl *middleware.I
 	if reg.Cfg.Server.MetricsEnabled {
 		metricsReg = metrics.New("api")
 		engine.Use(metricsReg.HTTPMiddleware())
+
+		// DB 未配置（DSN 空）时 Collector() 返回 nil，跳过注册——不产出这组
+		// 连接池指标，而不是注册一个恒为 0 的假 collector 误导 SRE。
+		if dbCollector := reg.DB.Collector(); dbCollector != nil {
+			metricsReg.MustRegister(dbCollector)
+		}
 	}
 
 	engine.Use(middleware.Recovery())

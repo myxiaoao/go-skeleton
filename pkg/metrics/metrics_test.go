@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestRegistry_MiddlewareAndHandler(t *testing.T) {
@@ -114,4 +115,48 @@ func TestRegistry_BusinessCodeLabel(t *testing.T) {
 			t.Errorf("metrics output missing label %q\nbody:\n%s", want, body)
 		}
 	}
+}
+
+// TestRegistry_MustRegisterExposesExternalCollector 验证外部 collector（如
+// pkg/database.DBManager.Collector()）挂上 Registry 之后能在 /metrics 里
+// 抓到——这是 internal/server.go 注册 DB 连接池指标要依赖的行为。
+func TestRegistry_MustRegisterExposesExternalCollector(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := New("test")
+
+	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "fake_external_gauge",
+		Help: "fixture for MustRegister test",
+	})
+	gauge.Set(42)
+	r.MustRegister(gauge)
+
+	engine := gin.New()
+	engine.GET("/metrics", gin.WrapH(r.Handler()))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	if !strings.Contains(w.Body.String(), "fake_external_gauge 42") {
+		t.Errorf("metrics output missing externally registered collector, body:\n%s", w.Body.String())
+	}
+}
+
+// TestRegistry_MustRegisterPanicsOnDuplicate 保持和 prometheus.Registry 一致
+// 的语义：重复注册同名指标应该 panic，把配置错误留在启动期暴露。
+func TestRegistry_MustRegisterPanicsOnDuplicate(t *testing.T) {
+	r := New("test")
+
+	newGauge := func() prometheus.Collector {
+		return prometheus.NewGauge(prometheus.GaugeOpts{Name: "dup_gauge", Help: "dup"})
+	}
+	r.MustRegister(newGauge())
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected MustRegister to panic on duplicate collector")
+		}
+	}()
+	r.MustRegister(newGauge())
 }

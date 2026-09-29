@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/hibiken/asynq"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"go-skeleton/internal/task"
@@ -51,14 +50,13 @@ func (noopExampleProcessor) ProcessExample(ctx context.Context, payload task.Exa
 // Deps 收拢所有异步任务 handler 共用的依赖。
 //
 // 故意**不**包含数据库连接：repository 是项目里唯一允许接触 pgx / sqlcdb 的层
-// （见 CLAUDE.md 分层规则）。Worker handler 需要落库的话，走 service 接口
+// （见 AGENTS.md 分层规则）。Worker handler 需要落库的话，走 service 接口
 // → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
-// Cache / RDB / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
+// Cache / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
 type Deps struct {
 	Example ExampleProcessor
 	Cache   *cache.Client
-	RDB     *redis.Client
 	Queue   *taskqueue.Queue
 }
 
@@ -75,7 +73,7 @@ type ProcessorRequirement struct {
 // 调它，任一 Present=false 就 fail-fast 退出。
 //
 // **加新 task 类型的硬约束**：在 Deps 上加新 processor 字段后，本方法必须
-// 同步追加一条记录；漏加 = production 下静默 noop。这是 CLAUDE.md §异步队列
+// 同步追加一条记录；漏加 = production 下静默 noop。这是 AGENTS.md §异步队列
 // 里"production 漏注入 fail-fast"约束的强制执行点——把"是否需要真 processor"
 // 从 reg.DB == nil 这种巧合代理换成显式声明，避免"新 task 不依赖 DB 但仍需
 // 真业务处理"这种场景下旧逻辑失效。

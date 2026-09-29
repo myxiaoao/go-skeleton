@@ -94,7 +94,8 @@ make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
    `Documentation=` 上游 URL）、`docker-compose` 容器名、JWT issuer 默认值、
    测试 fixture、Kubernetes label / namespace / kubectl 命令、release
    tarball 文件名 / cosign verify URL、用户名 / 组名 / chown / install -o/-g 命令。
-   结束前会跑 `make fmt + vet + test + lint + docs-verify` 确认没问题，
+   结束前会跑 `make verify` 里除 oapi-verify / sqlc-verify / docs-errcodes-verify
+   之外的全部步骤（这三项比对已提交产物，需改写入库后再跑）确认没问题，
    再列出剩余 `go-skeleton` 命中给你手工 review。
 
    默认模式保留 README / 文档里 `go-skeleton` 字面引用（描述上游 skeleton
@@ -133,12 +134,18 @@ make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
    - 填业务：handler 补 `c.ShouldBind...`、service 写业务规则、repository
      写 SQL、model 补字段。异步任务：在 `internal/task/` 定义类型，在
      `internal/worker/handler.go` 注册 handler。
+   - `make new-endpoint` 只生成分层骨架，以下几项仍需手写：
+     `internal/repository/queries/*.sql` + `make sqlc`（新查询）、
+     `migrations/*.sql`（新表 / 新列，`make migrate-create`）、复杂 DTO
+     （yaml 里 allOf / oneOf / 嵌套 object / array / enum / `$ref`，反推会
+     降级成空 struct + `// TODO`）、以及 ≥2 个 path 参数的路由（脚本
+     fail-fast，需手写 handler / router）。
    - 调试 yaml ↔ 代码漂移：`make new-endpoint-check` 只读 drift detector。
 
 5. 保证 CI 全绿：
 
    ```sh
-   make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
+   make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
    ```
 
 ## 运行时依赖
@@ -269,7 +276,7 @@ make oapi-verify   # 生成产物与 yaml 不一致时失败（make verify 会�
 提交前跑一站式检查：
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
+make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
 ```
 
 也可以单独跑某一项（`make test`、`make lint`、`make shell-verify`、`make scaffold-verify` 等），完整列表见 `make help`。

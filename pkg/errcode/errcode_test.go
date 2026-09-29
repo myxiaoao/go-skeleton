@@ -35,6 +35,8 @@ func TestHTTPStatus_PrecisePerReason(t *testing.T) {
 		{QueueUnavailable, http.StatusServiceUnavailable},
 		{QueueError, http.StatusInternalServerError},
 		{NotImplementedYet, http.StatusNotImplemented},
+		{NotFound, http.StatusNotFound},
+		{Conflict, http.StatusConflict},
 	}
 	for _, tc := range cases {
 		if got := tc.err.HTTPStatus(); got != tc.want {

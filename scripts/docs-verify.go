@@ -1,22 +1,22 @@
 //go:build ignore
 
-// docs-verify 保证 AGENTS.md 和 CLAUDE.md 在那些"应该一直保持一致"的
-// `## <heading>` 段落上不漂移。两份文件是给不同 AI 编码助手并行维护的，
-// 漏改一份是最常见的悄无声息腐化。
+// docs-verify 守两类"文档悄悄腐化"：
+//
+//  1. 规则文件单一来源：AGENTS.md 是全部 AI 编码助手共用的唯一规则文件，
+//     CLAUDE.md 只通过单独一行 `@AGENTS.md`（Claude Code 导入语法）引用它。
+//     校验 CLAUDE.md 含该导入行，且不出现任何与 AGENTS.md 同名的 `## ` 段
+//     标题——防止有人又把规则正文复制回 CLAUDE.md，回到两份并行维护的老路。
+//  2. verify 清单防漂移：解析 Makefile `verify:` 目标里 `_verify-step STEP=xxx`
+//     的步骤序列（真相源），检查 verifyDocs 里每一行 `make verify   # a + b + ...`
+//     的行尾注释列出的步骤与之完全一致（含顺序）；Makefile `verify` 的 `##`
+//     帮助文案括号里的清单同样要一致。不一致时输出 文件:行 + 期望清单。
 //
 // 入口：
 //
 //	go run scripts/docs-verify.go
-//	go run scripts/docs-verify.go CLAUDE.md AGENTS.md     # 显式指定路径
 //	make docs-verify                                       # 推荐
 //
-// 与旧 bash/awk 版的语义差异：
-//   - 解析走"逐行扫描 H2"，标准 Markdown 行首 `## ` 才算 heading；
-//     避免 awk 在代码块内的 `## ` 误命中（旧版没这个保护）。
-//   - 段落对比走 strings.Compare：相等 ✓，不等输出 unified-style diff
-//     头几行让人定位（不是 GNU diff 完整输出，但够用来看错位）。
-//   - 校验项（sharedSections）数据驱动，加新段改一行。
-//
+// 只认行首 `## ` 为 H2 标题，代码块（``` / ~~~ 围起来的段）里的 `## ` 不算。
 // 不属于任何包，//go:build ignore 让 go build/test 跳过它。
 package main
 
@@ -24,179 +24,227 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 )
 
-// sharedSections 是两份文件应当完全一致的 H2 标题集合。改这里同步更新
-// CLAUDE.md / AGENTS.md 的对应段。新增段时往这里加一行。
-//
-// 顺序无关——比对按 set 做。这里写成 slice 便于 diff review 时看清楚清单。
-var sharedSections = []string{
-	"分层规则：handler → service → repository",
-	"依赖装配（手写 DI）",
-	"统一响应协议",
-	"i18n",
-	"JWT 鉴权",
-	"异步队列",
-	"context 传递（硬约束）",
-	"环境变量",
-	"审计日志",
-	"pkg/ 边界",
-	"AI 助手提示",
-	"写代码时常犯的错（已知会触发返工）",
-	"API 契约：OpenAPI 3.1",
-	"验证命令",
-	"测试约定",
-	"Git Workflow",
+const (
+	claudeFile   = "CLAUDE.md"
+	agentsFile   = "AGENTS.md"
+	makefileFile = "Makefile"
+	importLine   = "@AGENTS.md"
+)
+
+// verifyDocs 是带 `make verify   # a + b + ...` 清单注释、需要与 Makefile
+// 对齐的文档。新增写了该清单的文档时往这里加一行。
+var verifyDocs = []string{
+	"README.md",
+	"README_en.md",
+	"docs/development.md",
+	"docs/runbook.md",
+	agentsFile,
 }
+
+var stepRe = regexp.MustCompile(`_verify-step\s+STEP=(\S+)`)
 
 func main() {
-	claude := "CLAUDE.md"
-	agents := "AGENTS.md"
-	if len(os.Args) >= 3 {
-		claude = os.Args[1]
-		agents = os.Args[2]
-	}
+	problems := checkClaudeImport()
 
-	for _, p := range []string{claude, agents} {
-		if _, err := os.Stat(p); err != nil {
-			fatal(fmt.Errorf("%s not found", p))
-		}
-	}
-
-	claudeMap, err := extractSections(claude)
+	steps, helpLine, helpSteps, err := parseMakefileVerify(makefileFile)
 	if err != nil {
 		fatal(err)
 	}
-	agentsMap, err := extractSections(agents)
-	if err != nil {
-		fatal(err)
+	if len(steps) == 0 {
+		fatal(fmt.Errorf("%s: no `_verify-step STEP=xxx` found under `verify:` target", makefileFile))
+	}
+	if helpSteps != nil && !slices.Equal(helpSteps, steps) {
+		reportMismatch(makefileFile, helpLine, helpSteps, steps)
+		problems++
 	}
 
-	mismatched := 0
-	for _, sec := range sharedSections {
-		cb, hasC := claudeMap[sec]
-		ab, hasA := agentsMap[sec]
-		if !hasC {
-			fmt.Fprintf(os.Stderr, "docs-verify: section [%s] missing in %s\n", sec, claude)
-			mismatched++
-			continue
+	lists := 0
+	for _, doc := range verifyDocs {
+		n, bad, err := checkVerifyLists(doc, steps)
+		if err != nil {
+			fatal(err)
 		}
-		if !hasA {
-			fmt.Fprintf(os.Stderr, "docs-verify: section [%s] missing in %s\n", sec, agents)
-			mismatched++
-			continue
-		}
-		if cb == ab {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "docs-verify: section [%s] differs between %s and %s\n", sec, claude, agents)
-		printDiff(cb, ab)
-		fmt.Fprintln(os.Stderr)
-		mismatched++
+		lists += n
+		problems += bad
 	}
 
-	if mismatched > 0 {
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "docs-verify: AGENTS.md and CLAUDE.md are out of sync.")
-		fmt.Fprintln(os.Stderr, "             Apply the same change to both files and re-run.")
+	if problems > 0 {
+		fmt.Fprintf(os.Stderr, "\ndocs-verify: %d problem(s) found.\n", problems)
 		os.Exit(1)
 	}
-
-	fmt.Println("docs-verify: AGENTS.md and CLAUDE.md shared sections in sync.")
+	fmt.Printf("docs-verify: %s imports %s; %d verify list(s) match Makefile (%d steps).\n",
+		claudeFile, agentsFile, lists, len(steps))
 }
 
-// extractSections 把 path 切成 `## <heading>` → body 的 map。body 是
-// 该 heading 之后到下一个 `## ` 之间的所有行（含末尾换行），与旧 awk
-// 版语义一致。
-//
-// "行首 `## `" 才算 heading：代码块（``` 围起来的段）里的 `## ` 不算。
-// 这是相对旧版的收紧——awk 版没维护 code-fence 状态。
-func extractSections(path string) (map[string]string, error) {
+// checkClaudeImport 校验 CLAUDE.md 在代码块之外含单独一行 @AGENTS.md（Claude Code
+// 不会导入代码块里的 @ 引用），且没有与 AGENTS.md 同名的 H2 段。返回发现的问题数。
+func checkClaudeImport() int {
+	claudeLines, err := readLines(claudeFile)
+	if err != nil {
+		fatal(err)
+	}
+	agentsLines, err := readLines(agentsFile)
+	if err != nil {
+		fatal(err)
+	}
+
+	problems := 0
+	if !slices.ContainsFunc(proseLines(claudeLines), func(l numberedLine) bool { return strings.TrimSpace(l.text) == importLine }) {
+		fmt.Fprintf(os.Stderr, "docs-verify: %s must contain a standalone `%s` line outside code fences (Claude Code import)\n", claudeFile, importLine)
+		problems++
+	}
+
+	agentsHeadings := map[string]bool{}
+	for _, h := range headings(agentsLines) {
+		agentsHeadings[h.text] = true
+	}
+	for _, h := range headings(claudeLines) {
+		if agentsHeadings[h.text] {
+			fmt.Fprintf(os.Stderr, "docs-verify: %s:%d: section [## %s] duplicates %s; keep rules only in %s\n",
+				claudeFile, h.line, h.text, agentsFile, agentsFile)
+			problems++
+		}
+	}
+	return problems
+}
+
+// numberedLine 是带 1-based 行号的一行文本。
+type numberedLine struct {
+	text string
+	line int
+}
+
+// proseLines 返回代码块（``` / ~~~ 围起来的段）之外的行及其行号。
+func proseLines(lines []string) []numberedLine {
+	var out []numberedLine
+	inCodeFence := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inCodeFence = !inCodeFence
+			continue
+		}
+		if !inCodeFence {
+			out = append(out, numberedLine{text: line, line: i + 1})
+		}
+	}
+	return out
+}
+
+// headings 返回代码块之外所有 `## ` 标题（text 去掉前缀）及其行号。
+func headings(lines []string) []numberedLine {
+	var out []numberedLine
+	for _, l := range proseLines(lines) {
+		if strings.HasPrefix(l.text, "## ") {
+			out = append(out, numberedLine{text: strings.TrimSpace(strings.TrimPrefix(l.text, "## ")), line: l.line})
+		}
+	}
+	return out
+}
+
+// parseMakefileVerify 读取 `verify:` 目标的 recipe（紧随其后、以 tab 开头的行），
+// 按出现顺序收集 `_verify-step STEP=xxx`。同时解析 `verify: ## 描述（a + b）`
+// 帮助文案里的清单；没有清单时 helpSteps 为 nil（不校验）。
+func parseMakefileVerify(path string) (steps []string, helpLine int, helpSteps []string, err error) {
+	lines, err := readLines(path)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "verify:") {
+			continue
+		}
+		if _, help, ok := strings.Cut(line, "##"); ok {
+			_, inside := splitParen(help)
+			helpLine, helpSteps = i+1, splitSteps(inside)
+		}
+		for _, r := range lines[i+1:] {
+			if !strings.HasPrefix(r, "\t") {
+				break
+			}
+			if m := stepRe.FindStringSubmatch(r); m != nil {
+				steps = append(steps, m[1])
+			}
+		}
+		return steps, helpLine, helpSteps, nil
+	}
+	return nil, 0, nil, fmt.Errorf("%s: `verify:` target not found", path)
+}
+
+// checkVerifyLists 扫 doc 里所有 `make verify   # a + b + ...` 行，逐行与 steps
+// 比对。返回检查过的清单数与不一致数。
+func checkVerifyLists(doc string, steps []string) (checked, bad int, err error) {
+	lines, err := readLines(doc)
+	if err != nil {
+		return 0, 0, err
+	}
+	for i, line := range lines {
+		cmd, comment, ok := strings.Cut(line, "#")
+		if !ok || strings.TrimSpace(cmd) != "make verify" {
+			continue
+		}
+		// 行尾注释形如 "a + b + c（说明）"：括号里是补充说明，不算步骤。
+		before, _ := splitParen(comment)
+		got := splitSteps(before)
+		if got == nil {
+			continue
+		}
+		checked++
+		if !slices.Equal(got, steps) {
+			reportMismatch(doc, i+1, got, steps)
+			bad++
+		}
+	}
+	return checked, bad, nil
+}
+
+// splitParen 把 "前缀（括号内）后缀" 切成括号前与括号内两段，全角 / 半角括号
+// 等价；没有括号时 inside 为空。
+func splitParen(s string) (before, inside string) {
+	s = strings.NewReplacer("（", "(", "）", ")").Replace(s)
+	before, rest, _ := strings.Cut(s, "(")
+	inside, _, _ = strings.Cut(rest, ")")
+	return before, inside
+}
+
+// splitSteps 把 "a + b + c" 按 + 切成步骤列表。不含 + 的文本不算清单，返回 nil。
+func splitSteps(s string) []string {
+	if !strings.Contains(s, "+") {
+		return nil
+	}
+	var out []string
+	for part := range strings.SplitSeq(s, "+") {
+		out = append(out, strings.TrimSpace(part))
+	}
+	return out
+}
+
+func reportMismatch(file string, line int, got, want []string) {
+	fmt.Fprintf(os.Stderr, "docs-verify: %s:%d: verify step list drifted from Makefile\n", file, line)
+	fmt.Fprintf(os.Stderr, "  got:      %s\n", strings.Join(got, " + "))
+	fmt.Fprintf(os.Stderr, "  expected: %s\n", strings.Join(want, " + "))
+}
+
+func readLines(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	sections := map[string]string{}
-	var cur string
-	var buf strings.Builder
-	inCodeFence := false
-
-	flush := func() {
-		if cur != "" {
-			sections[cur] = buf.String()
-		}
-		buf.Reset()
-	}
-
+	var lines []string
 	sc := bufio.NewScanner(f)
-	// 默认 Buffer 上限 64KB，CLAUDE.md/AGENTS.md 单行不会爆，但提升一档防意外。
+	// 默认 Buffer 上限 64KB，文档单行不会爆，但提升一档防意外。
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		line := sc.Text()
-
-		// 维护代码块状态：行首 ``` 或 ~~~ 进出。不严格识别 info string，
-		// 实际文档里都是 ```sh 这种形态。
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inCodeFence = !inCodeFence
-			if cur != "" {
-				buf.WriteString(line)
-				buf.WriteByte('\n')
-			}
-			continue
-		}
-
-		if !inCodeFence && strings.HasPrefix(line, "## ") {
-			flush()
-			cur = strings.TrimSpace(strings.TrimPrefix(line, "## "))
-			continue
-		}
-
-		if cur != "" {
-			buf.WriteString(line)
-			buf.WriteByte('\n')
-		}
+		lines = append(lines, sc.Text())
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	flush()
-	return sections, nil
-}
-
-// printDiff 给两段 body 输出"前 20 个不同行"的简版 diff。不引第三方
-// diff 库——足够定位"哪几行错位了"即可。
-func printDiff(a, b string) {
-	aLines := strings.Split(a, "\n")
-	bLines := strings.Split(b, "\n")
-	maxLen := max(len(aLines), len(bLines))
-	shown := 0
-	const limit = 20
-	for i := 0; i < maxLen && shown < limit; i++ {
-		var la, lb string
-		if i < len(aLines) {
-			la = aLines[i]
-		}
-		if i < len(bLines) {
-			lb = bLines[i]
-		}
-		if la == lb {
-			continue
-		}
-		if i < len(aLines) {
-			fmt.Fprintf(os.Stderr, "  - %s\n", la)
-		}
-		if i < len(bLines) {
-			fmt.Fprintf(os.Stderr, "  + %s\n", lb)
-		}
-		shown++
-	}
-	if shown >= limit {
-		fmt.Fprintln(os.Stderr, "  ... (truncated; fix the first few and re-run)")
-	}
+	return lines, sc.Err()
 }
 
 func fatal(err error) {

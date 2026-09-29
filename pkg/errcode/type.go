@@ -84,6 +84,10 @@ func (e Error) HTTPStatus() int {
 		return http.StatusServiceUnavailable
 	case "NOT_IMPLEMENTED_YET":
 		return http.StatusNotImplemented
+	case "NOT_FOUND":
+		return http.StatusNotFound
+	case "CONFLICT":
+		return http.StatusConflict
 	}
 	// code == 0 + reason 空 → 零值 Error，500 兜底（监控亮起，不静默 200）。
 	// code == 0 + reason 非空（理论上不该发生）也走 500，让 caller 修复构造。

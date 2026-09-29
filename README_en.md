@@ -95,8 +95,9 @@ Steps to take after cloning this repo as the starting point for a new service:
    the JWT issuer default, test fixtures, Kubernetes labels / namespace /
    `kubectl` commands, release tarball filenames / cosign verify URLs, and
    user / group / chown / install -o/-g shell commands.
-   It then runs `make fmt + vet + test + lint + docs-verify` to confirm nothing
-   broke, and prints any remaining `go-skeleton` mentions for you to review by hand.
+   It then runs every `make verify` step except oapi-verify / sqlc-verify /
+   docs-errcodes-verify (those diff against committed artifacts, so run them after
+   committing the rewrite) to confirm nothing broke, and prints any remaining `go-skeleton` mentions for you to review by hand.
 
    The default mode keeps literal `go-skeleton` mentions in README / docs
    (they describe the upstream skeleton, not your fork). Pass `RENAME_BARE=1`
@@ -136,12 +137,19 @@ Steps to take after cloning this repo as the starting point for a new service:
    - Fill in business logic: handler `c.ShouldBind...`, service rules, repository
      SQL, model fields. Async tasks: define the type in `internal/task/` and
      register the handler in `internal/worker/handler.go`.
+   - `make new-endpoint` only generates the layered skeleton; the following
+     still need to be written by hand: `internal/repository/queries/*.sql` +
+     `make sqlc` (new queries), `migrations/*.sql` (new tables/columns via
+     `make migrate-create`), complex DTOs (yaml `allOf` / `oneOf` / nested
+     objects / arrays / enums / `$ref` degrade to an empty struct + `// TODO`),
+     and routes with 2+ path parameters (the script fails fast; write the
+     handler/router manually).
    - Debug yaml ↔ code drift with `make new-endpoint-check` (read-only).
 
 5. Keep CI green:
 
    ```sh
-   make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
+   make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
    ```
 
 ## Runtime Dependencies
@@ -272,7 +280,7 @@ Every `v*` tag push triggers GitHub Actions to publish `linux-amd64` / `linux-ar
 One-stop check before every commit:
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
+make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
 ```
 
 Or call the underlying targets individually (`make test`, `make lint`, `make shell-verify`, `make scaffold-verify`, ...). See `make help` for the full list.

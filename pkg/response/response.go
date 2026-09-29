@@ -122,6 +122,10 @@ func MessageFor(reason string) string {
 		return "request timeout"
 	case "SERVICE_DISABLED":
 		return "endpoint is disabled by configuration"
+	case "NOT_FOUND":
+		return "resource not found"
+	case "CONFLICT":
+		return "resource conflict"
 	case "INTERNAL_ERROR":
 		return "internal server error"
 	case "DATABASE_ERROR":

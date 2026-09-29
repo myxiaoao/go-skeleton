@@ -34,7 +34,7 @@ Closes #
 
 <!-- 提交 PR 前请确认 -->
 
-- [ ] `make verify` 全绿（fmt + vet + test + lint + oapi-verify + docs-verify）
+- [ ] `make verify` 全绿（完整步骤见 AGENTS.md "验证命令"）
 - [ ] 改了 `api/openapi.yaml` 已跑 `make oapi` 并提交生成产物
 - [ ] 新增 / 修改配置项已同步到 `.env.example` 并补注释
 - [ ] 新增错误码已加到 `pkg/errcode/common.go` 并补 `messageFor` 文案

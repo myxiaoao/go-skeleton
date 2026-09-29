@@ -54,12 +54,31 @@ func (q *Queue) Enqueue(ctx context.Context, t *asynq.Task, opts ...asynq.Option
 
 // Ping 探测 Asynq 底层 Redis 连接是否可达，供 /health 的队列探针用。
 //
-// asynq v0.26 的 (*asynq.Client).Ping() 不接 ctx 参数（它内部直接用短超时
-// PING 一次 Redis）；这里仍然收 ctx 是为了跟 healthDBPinger / healthCachePinger
-// 的接口形状对齐，也给未来 asynq 版本补上 ctx 参数留好扩展点，本层不用它。
-func (q *Queue) Ping(_ context.Context) error {
+// asynq v0.26 的 (*asynq.Client).Ping() 不接 ctx 参数，内部固定用
+// context.Background() 发一次 PING（见 internal/rdb/rdb.go），本身不带
+// 超时——实际耗时完全由底层 go-redis 客户端的 dial/read 超时和重试次数
+// 决定（AsynqRedisOpt 未设置这些，走 go-redis 默认值，Redis 黑洞时可能
+// 阻塞 10s+）。这与 /health 的 2s ctx 超时甚至更紧的 K8s 探针超时不匹配，
+// 所以这里用 goroutine + 带缓冲 channel + select 让调用方的 ctx 真正生效：
+// ctx 到期/取消时立即返回 ctx.Err()，不再傻等底层 PING。
+//
+// 注意：ctx 到期只是让本方法提前返回，并不能取消已经发出去的那次 PING——
+// 它可能仍在后台跑到 go-redis 自己的超时才收敛。用带缓冲的 result channel
+// 接收这个迟到的结果，避免 goroutine 阻塞或泄漏。
+func (q *Queue) Ping(ctx context.Context) error {
 	if q == nil || q.client == nil {
 		return ErrQueueUnavailable
 	}
-	return q.client.Ping()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- q.client.Ping()
+	}()
+
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

@@ -55,7 +55,7 @@ func (m *DBManager) Collector() prometheus.Collector {
 		),
 		maxConns: prometheus.NewDesc(
 			"go_skeleton_db_pool_max_conns",
-			"Maximum size of the pool (from DATABASE_MAX_CONNS).",
+			"Maximum size of the pool (from DB_MAX_CONNS).",
 			nil, nil,
 		),
 		acquireCount: prometheus.NewDesc(

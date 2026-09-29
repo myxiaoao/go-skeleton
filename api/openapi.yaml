@@ -340,7 +340,7 @@ components:
           type: string
           enum: [ok, degraded, unhealthy]
           description: |
-            ok: 全部依赖可达；degraded: 非关键依赖（Redis）异常，HTTP 仍 200，
+            ok: 全部依赖可达；degraded: 非关键依赖（Redis / 队列）异常，HTTP 仍 200，
             LB 不摘流；unhealthy: 关键依赖（Postgres）异常，HTTP 503，LB 摘流。
         checks:
           type: object

@@ -1,8 +1,10 @@
 package taskqueue
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/hibiken/asynq"
 )
@@ -51,10 +53,11 @@ func TestQueuePingUnavailable(t *testing.T) {
 	}
 }
 
-// TestQueuePingUnreachableRedisFails 用一个连不上的地址构造 client，验证
-// Ping 会把底层错误透传出来（不吞、不转成 ErrQueueUnavailable，两者语义
-// 不同：前者是"配置了但连不上"，后者是"压根没配置"）。
-func TestQueuePingUnreachableRedisFails(t *testing.T) {
+// TestQueuePingRespectsContextTimeout 用一个已取消的 ctx 搭配连不上的地址，
+// 验证 Ping 会立刻遵从 ctx 的超时/取消而返回，不会傻等底层 PING（asynq
+// 自己的 Ping 不带超时，会一路等到 go-redis 的 dial/read 超时才返回，那可能
+// 是好几秒）。这里刻意不构造真实网络重试场景，让测试保持快且安静。
+func TestQueuePingRespectsContextTimeout(t *testing.T) {
 	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "127.0.0.1:1"})
 	defer func() {
 		if err := client.Close(); err != nil {
@@ -63,9 +66,18 @@ func TestQueuePingUnreachableRedisFails(t *testing.T) {
 	}()
 
 	q := NewQueue(client)
-	if err := q.Ping(t.Context()); err == nil {
-		t.Fatal("expected error pinging unreachable redis")
-	} else if errors.Is(err, ErrQueueUnavailable) {
-		t.Fatal("unreachable redis should not be reported as ErrQueueUnavailable")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	start := time.Now()
+	err := q.Ping(ctx)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.Canceled or context.DeadlineExceeded, got %v", err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("Ping took too long to respect canceled context: %v", elapsed)
 	}
 }

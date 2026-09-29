@@ -501,3 +501,43 @@ func TestProductionWarnings(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkerProductionWarnings 验证 worker 可观测端口的生产 warn：
+// 非 production / 关闭 / loopback / 私网地址不 warn；监听全部网卡或公网 IP 时 warn。
+func TestWorkerProductionWarnings(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      Environment
+		addr     string
+		wantWarn bool
+	}{
+		{name: "development 不 warn", env: EnvDevelopment, addr: ":9091"},
+		{name: "production 关闭端口不 warn", env: EnvProduction, addr: ""},
+		{name: "production loopback 不 warn", env: EnvProduction, addr: "127.0.0.1:9091"},
+		{name: "production localhost 不 warn", env: EnvProduction, addr: "localhost:9091"},
+		{name: "production 私网 IP 不 warn", env: EnvProduction, addr: "10.0.0.5:9091"},
+		{name: "production 默认 :9091 warn", env: EnvProduction, addr: ":9091", wantWarn: true},
+		{name: "production 0.0.0.0 warn", env: EnvProduction, addr: "0.0.0.0:9091", wantWarn: true},
+		{name: "production 公网 IP warn", env: EnvProduction, addr: "203.0.113.7:9091", wantWarn: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := defaultValidConfig()
+			cfg.Env = tc.env
+			cfg.Worker.MetricsAddr = tc.addr
+			warns := WorkerProductionWarnings(cfg)
+			if tc.wantWarn {
+				if len(warns) != 1 || !strings.Contains(warns[0], "WORKER_METRICS_ADDR") {
+					t.Fatalf("warns = %v, want one WORKER_METRICS_ADDR warn", warns)
+				}
+				return
+			}
+			if len(warns) != 0 {
+				t.Fatalf("warns = %v, want none", warns)
+			}
+		})
+	}
+	if got := WorkerProductionWarnings(nil); got != nil {
+		t.Fatalf("WorkerProductionWarnings(nil) = %v, want nil", got)
+	}
+}

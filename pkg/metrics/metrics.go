@@ -32,6 +32,7 @@ type Registry struct {
 	duration *prometheus.HistogramVec
 	inflight prometheus.Gauge
 	asynq    *asynqMetrics
+	tasks    *taskMetrics
 }
 
 // New 构造 Registry 并预注册标准 collector + 业务 collector。subsystem 用
@@ -79,6 +80,7 @@ func New(subsystem string) *Registry {
 		duration: duration,
 		inflight: inflight,
 		asynq:    newAsynqMetrics(reg, subsystem),
+		tasks:    newTaskMetrics(reg, subsystem),
 	}
 }
 

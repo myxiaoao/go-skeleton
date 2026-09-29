@@ -127,6 +127,7 @@ func Load() (*Config, error) {
 	collect(err)
 	cfg.Worker.RetryMaxDelay, err = durationEnv("WORKER_RETRY_MAX_DELAY", time.Hour)
 	collect(err)
+	cfg.Worker.MetricsAddr = optionalEnv("WORKER_METRICS_ADDR", ":9091")
 
 	if len(errs) > 0 {
 		return cfg, fmt.Errorf("config: invalid environment variables: %w", errors.Join(errs...))
@@ -191,6 +192,15 @@ func environmentEnv(key string, fallback Environment) (Environment, error) {
 func getEnvOrDefault(key, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
+	}
+	return fallback
+}
+
+// optionalEnv 区分"未设置"与"显式设为空"：未设置返回 fallback；设置了（含
+// 空字符串）则返回去首尾空白后的值。用于"空字符串 = 关闭"语义的开关型地址。
+func optionalEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(value)
 	}
 	return fallback
 }

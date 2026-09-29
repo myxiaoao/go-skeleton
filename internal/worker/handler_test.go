@@ -153,6 +153,22 @@ func TestRegisterHandlersFillsNoopProcessor(t *testing.T) {
 	}
 }
 
+// TestRegisterHandlersMountsMetricsMiddleware 验证 Deps.Metrics 注入后，
+// RegisterHandlers 会挂上任务指标 middleware：经 mux 分发的任务被记录一次。
+func TestRegisterHandlersMountsMetricsMiddleware(t *testing.T) {
+	obs := &mockTaskObserver{}
+	mux := asynq.NewServeMux()
+	RegisterHandlers(mux, &Deps{Example: &mockExampleProcessor{}, Metrics: obs})
+
+	body := makeExampleTaskBytes(t, task.ExamplePayload{Header: task.NewHeader(""), Name: "m"})
+	if err := mux.ProcessTask(t.Context(), asynq.NewTask(task.TypeExampleTask, body)); err != nil {
+		t.Fatalf("ProcessTask err = %v", err)
+	}
+	if len(obs.calls) != 1 || obs.calls[0].taskType != task.TypeExampleTask || obs.calls[0].err != nil {
+		t.Fatalf("observe calls = %+v, want one success for %s", obs.calls, task.TypeExampleTask)
+	}
+}
+
 // TestRequiredProcessors 验证 Deps.RequiredProcessors() 把"真业务注入"和
 // "noop 兜底"区分开——buildWorkerDeps 用它在 production 下判 fail-fast。
 func TestRequiredProcessors(t *testing.T) {

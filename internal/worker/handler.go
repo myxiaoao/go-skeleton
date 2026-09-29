@@ -54,10 +54,12 @@ func (noopExampleProcessor) ProcessExample(ctx context.Context, payload task.Exa
 // → repository → sqlc，而不是在 worker 包内直接拿连接池。
 //
 // Cache / Queue 是 pkg/ 通用工具，worker import 它们不破坏分层。
+// Metrics 记录任务级指标（处理结果 + 耗时），nil 表示不记录。
 type Deps struct {
 	Example ExampleProcessor
 	Cache   *cache.Client
 	Queue   *taskqueue.Queue
+	Metrics TaskObserver
 }
 
 // ProcessorRequirement 描述一个 task processor 在装配链里的状态：
@@ -124,8 +126,8 @@ func (d *Deps) HandleExampleTask(ctx context.Context, t *asynq.Task) error {
 }
 
 // RegisterHandlers 把所有异步任务 handler 注册到 mux 上。注册 TraceMiddleware
-// 让 task 调用链自带 trace_id；deps 为 nil 兜底成空 Deps，让 mux.Handle 注
-// 册路径仍然完整。
+// 让 task 调用链自带 trace_id，Deps.Metrics 非 nil 时再挂任务指标 middleware；
+// deps 为 nil 兜底成空 Deps，让 mux.Handle 注册路径仍然完整。
 //
 // Example 未注入时回填 noopExampleProcessor：避免 HandleExampleTask 走到
 // nil deref，保留模板可运行性，但 noop 会打 warn 提醒接业务。
@@ -133,10 +135,11 @@ func RegisterHandlers(mux *asynq.ServeMux, deps *Deps) {
 	if mux == nil {
 		return
 	}
-	registerTraceMiddleware(mux)
 	if deps == nil {
 		deps = &Deps{}
 	}
+	registerTraceMiddleware(mux)
+	registerMetricsMiddleware(mux, deps.Metrics)
 	if deps.Example == nil {
 		deps.Example = noopExampleProcessor{}
 	}

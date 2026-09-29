@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"go-skeleton/config"
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/pkg/buildinfo"
@@ -31,6 +32,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() { _ = applog.Sync() }()
+
+	// production 下输出 worker 专属的"非致命但大概率漏配"提示（如可观测端口
+	// 监听全部网卡）。硬拦项已经在 config.validate 阶段 fail-fast 拦掉。
+	for _, w := range config.WorkerProductionWarnings(cfg) {
+		applog.L().Warn("production config warning", zap.String("hint", w))
+	}
 
 	registry, err := bootstrap.InitWorker(cfg)
 	if err != nil {

@@ -6,6 +6,7 @@
 //
 // 测试按被测脚本拆分到独立文件:
 //   - env_verify_test.go             env-verify
+//   - docs_verify_test.go            docs-verify
 //   - architecture_verify_test.go    architecture-verify
 //   - new_endpoint_test.go           new-endpoint (主流程 / 锚点注入 / x-resource)
 //   - new_endpoint_check_test.go     new-endpoint-check (drift detector)

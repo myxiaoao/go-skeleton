@@ -65,7 +65,7 @@ func parseVersion(name string) (int64, error) {
 }
 
 // filenameRe 强制 `<14位 UTC 时间戳>_<snake_case 描述>.sql`，对齐
-// `make migrate-create` 的产出格式（CLAUDE.md / AGENTS.md "顶层目录"
+// `make migrate-create` 的产出格式（AGENTS.md "顶层目录"
 // 段约定）。把命名漂移挡在 commit 之前，避免：
 //   - YYYYMMDD（少时分秒）→ 同一天多次迁移撞版本号
 //   - 时间戳中插下划线 → goose parseVersion 取首段数字失败

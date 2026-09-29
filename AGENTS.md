@@ -1,8 +1,8 @@
 # go-skeleton 项目约定
 
-> 给 AI 编码助手（Codex 等）看的项目专属规则。本文件是项目唯一真相源，无需依赖外部全局配置。
+> 给所有 AI 编码助手（Codex / Claude Code / Cursor 等）看的项目专属规则。**本文件是项目规则的唯一来源**，无需依赖外部全局配置。
 >
-> **与 `CLAUDE.md` 保持同步**：本项目并行维护两份 AI 编码助手规则文件（AGENTS.md 给 Codex 等工具、CLAUDE.md 给 Claude Code）。改一份时另一份也要改，否则两个助手会给出漂移的代码。
+> `CLAUDE.md` 只通过 `@AGENTS.md` 导入本文件，外加少量 Claude Code 专属补充；**规则正文只改这里，不要复制回 `CLAUDE.md`**。`make docs-verify` 会拦截 `CLAUDE.md` 缺导入行或出现与本文件同名的 `## ` 段。
 
 ## 技术栈
 
@@ -127,12 +127,12 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 **HTTP 状态码按 errcode 映射**（由 `errcode.Error.HTTPStatus()` 决定，pkg/response 的 `WriteError` / `WriteValidationError` 自动应用）：
 
 - 成功（`code=0`）→ 200
-- 1xxx 客户端错误段位 → 400 / 401 / 403 / 404 / 408 / 429 / 503（按 reason 精确映射）
+- 1xxx 客户端错误段位 → 400 / 401 / 403 / 404 / 408 / 409 / 429 / 503（按 reason 精确映射；资源不存在用 `errcode.NotFound`（1007 → 404），唯一键冲突 / 状态机不允许用 `errcode.Conflict`（1008 → 409），不要为此另造同义错误码）
 - 9xxx 服务端错误段位 → 500 / 501 / 503
 
 完整映射表见 [`docs/errcodes.md`](./docs/errcodes.md)（由 `make docs-errcodes` 生成）。客户端仍以 **body `code`** 做精确业务分支；HTTP status 给监控 / LB / 透明代理用作粗粒度信号，两者互不替代。
 
-例外：`/livez` 与 `/health` **不走信封**，直接返 200 / 503 给 K8s 探针；`/livez` 是 liveness（永远 200），`/health` 是 readiness（依赖不可用时 503）。
+例外：`/livez` 与 `/health` **不走信封**，直接返 200 / 503 给 K8s 探针；`/livez` 是 liveness（永远 200），`/health` 是 readiness：Postgres 不可用 → `unhealthy` + 503（LB 摘流）；Redis 缓存或队列（`taskqueue.Queue.Ping`）不可用 → `degraded` + 200（只影响缓存 / 异步投递，不摘流）。探测共用 2s 超时，新增依赖探测要遵守传入的 ctx。
 
 新增错误码：(1) 去 `pkg/errcode/common.go` 加 `newError(code, "REASON")` 常量；(2) 在 `pkg/response/response.go::MessageFor` 补默认英文文案；(3) 如果新 reason 应映射到 HTTP 段位之外的特定 status，去 `pkg/errcode/type.go::HTTPStatus` 的 switch 加 case + 配套单测；(4) 跑 `make docs-errcodes` 重新生成 `docs/errcodes.md`。
 
@@ -191,7 +191,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 
 - 选 Asynq，理由：复用 Redis，自带 Scheduler 和 Asynqmon。**不要引入 Kafka / RabbitMQ。**
 - 任务类型常量和 payload 定义放 `internal/task/`，API 和 Worker 共享。
-- **所有 payload struct 必须头部匿名嵌入 `task.Header`**（带 `Version` + `TraceID`），通过 `task.NewHeader(traceID)` 构造。worker handler 反序列化后第一时间调 `task.CheckHeader(p.Header, task.CurrentSupported)`——schema 不兼容时返 error 走 retry，**不要静默吞**（吞了等于丢消息）。改 payload 字段语义 / 删字段必须升 `task.PayloadSchemaVersion` 并同步更新 `CurrentSupported`；新增字段 + omitempty 不用升版本。
+- **所有 payload struct 必须头部匿名嵌入 `task.Header`**（带 `Version` + `TraceID`），通过 `task.NewHeader(traceID)` 构造。worker handler 反序列化后第一时间调 `task.CheckHeader(p.Header, task.CurrentSupported)`——schema 不兼容时返 error 走 retry，**不要静默吞**（吞了等于丢消息）。`make architecture-verify` 规则 6 强制：`internal/task` 下名字以 `Payload` 结尾的 struct，首字段必须是匿名内嵌的 `Header`。改 payload 字段语义 / 删字段必须升 `task.PayloadSchemaVersion` 并同步更新 `CurrentSupported`；新增字段 + omitempty 不用升版本。
 - **新建 task 走 `task.DefaultOptions()`**（含 MaxRetry=5、Timeout=30s）而不是各工厂自己写一份 `asynq.MaxRetry(...)`。业务有长任务 / 特殊重试需求时显式 `append` 覆盖。
 - **业务键稳定的 task 用 `asynq.TaskID(task.BuildTaskID("ns", keys...))`** 做永久全局去重（订单状态机推进、用户操作日志）。`BuildTaskID` 对超长 ID 会保留可读前缀并追加 SHA-256 后缀，避免简单截断导致不同长业务键误去重；命中 1KB 上限通常说明 caller 把过大的业务对象当 key，应回头收敛 key。**短窗口防抖**用 `asynq.Unique(ttl)`（用户点按钮、定时拉取）。两套语义不同，不要混用——TaskID 冲突返 `ErrTaskIDConflict`、Unique 重复返 `ErrDuplicateTask`，业务上对幂等的预期差很多。
 - service 通过 `ExampleQueue` 接口依赖 `taskqueue.Queue`，不直接拿 `*asynq.Client`。
@@ -294,7 +294,7 @@ yaml 和代码一旦漂移，**build 直接失败**，不依赖人去 review 注
 
 `scripts/new-endpoint.go`（~2k 行）/ `new-endpoint-check.go`（~1k 行）/ `drop-example.go`（~800 行）是已知的大文件——单文件 main 同时承载 yaml 解析 + AST 扫描 + render + 装配注入，这是 **有意保留** 的状态，不是欠的债。**拆分时机**：当且仅当出现"两个 main 之间要共享一份 OpenAPI 解析 / AST 抽取代码"时再做（提取到 `scripts/internal/*` 子包）；只是单个文件大、不构成拆分理由。
 
-测试侧已经按被测脚本拆开（`scripts/{env_verify,architecture_verify,new_endpoint,new_endpoint_check,new_endpoint_dto}_test.go` + `helpers_test.go` + `shell_scripts_test.go`），最大单测文件 ~1k 行；测试拆分独立于业务脚本拆分。
+测试侧已经按被测脚本拆开（`scripts/{env_verify,docs_verify,architecture_verify,new_endpoint,new_endpoint_check,new_endpoint_dto}_test.go` + `helpers_test.go` + `shell_scripts_test.go`），最大单测文件 ~1k 行；测试拆分独立于业务脚本拆分。
 
 工具入口集中在 `make` target：
 - `make new-endpoint NAME=<Name>` —— 生成五层骨架（+ `DRY_RUN=1` 只打印计划；`DTO=1` 反推 DTO struct）
@@ -346,10 +346,10 @@ oapi-codegen 当前对 3.1 标注 "partial support"，跑生成会打 WARNING。
 声明任务完成前必须跑过：
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步打横幅，便于定位失败）
+make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify（每步打横幅，便于定位失败）
 ```
 
-需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
+第一步 `fmt-verify` 只读校验格式（`golangci-lint fmt --diff`，不改写文件），失败时跑 `make fmt` 自动修复后重新提交；pre-commit hook 只跑 `make fmt-verify vet`。上面这行清单由 `make docs-verify` 与 Makefile `verify` 目标逐项比对，改 verify 步骤时同步改各文档里的清单。需要单独跑某一项时见 `make help`。详见根目录 `README.md` 的 "Verify" 小节。
 
 **常用命令速查见 [`docs/runbook.md`](./docs/runbook.md)**——它把"新增 endpoint / 新增任务 / 跑特定测试 / 排错"等高频动作整理成可执行清单，AI 助手优先读它。
 
@@ -451,7 +451,7 @@ feat(service): example 新增分页参数校验
 每次 commit 前一条命令搞定：
 
 ```sh
-make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify
+make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify
 ```
 
 任意一项挂了**不要 `--no-verify` 跳过**——按通用规则，hook 失败先修问题再重新 commit，不要 amend。
@@ -472,10 +472,11 @@ make verify   # fmt + vet + test + lint + architecture-verify + env-verify + tid
 go-example/
 ├── .env.example                配置模板（真实 .env 不入库）
 ├── .gitignore
+├── .dockerignore
 ├── Makefile                    开发与提交前一站式入口（make help 查全部 target）
 ├── README.md
-├── AGENTS.md                   本文件（给 AI 编码助手看的项目规则）
-├── CLAUDE.md                   Claude Code 私有规则（与本文件并存维护）
+├── AGENTS.md                   本文件：所有 AI 编码助手共用的项目规则（唯一来源）
+├── CLAUDE.md                   Claude Code 入口：@AGENTS.md 导入 + Claude 专属补充
 ├── CHANGELOG.md                Keep a Changelog 格式
 ├── Dockerfile                  multi-stage 构建（默认 cmd/api）
 ├── docker-compose.yml          本地 Postgres + Redis
@@ -555,10 +556,10 @@ go-example/
     ├── auth/jwt.go             JWTManager（Layer 1）
     ├── buildinfo/              构建期版本 / commit / 构建时间
     ├── cache/                  Redis client 封装
-    ├── database/               pgxpool 初始化 + 健康检查 + pgx tracer SQL 日志
+    ├── database/               pgxpool 初始化 + 健康检查 + pgx tracer SQL 日志 + 连接池指标（`Collector()`，server.go 注册到 /metrics）
     ├── errcode/                业务错误码集中地（type.go + common.go）
     ├── log/                    zap logger + trace_id ctx helper
-    ├── metrics/                Prometheus 指标收集与暴露
+    ├── metrics/                Prometheus 指标收集与暴露（自定义 collector 走 `Registry.MustRegister`）
     ├── response/response.go    统一响应 (code/message/reason/data/metadata)
     ├── sdnotify/               systemd READY / WATCHDOG 通知
     └── validator/              binding 错误翻译

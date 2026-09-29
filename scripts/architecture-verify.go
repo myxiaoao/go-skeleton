@@ -1,6 +1,6 @@
 //go:build ignore
 
-// architecture-verify 把 CLAUDE.md / AGENTS.md "分层规则" 段落里的 import
+// architecture-verify 把 AGENTS.md "分层规则" 段落里的 import
 // 边界从"靠人/AI 记住"变成"机器拦截"。CI / make verify 会调它；失败时输出
 // 违规文件 + 行号，直接定位。
 //
@@ -16,7 +16,7 @@
 //     的 CallExpr：注释里 "context.Background()" 字样不会误报。
 //   - 测试文件统一豁免（与旧版一致）。
 //
-// 规则一旦改动，同步更新 CLAUDE.md / AGENTS.md 的"分层规则"段。
+// 规则一旦改动，同步更新 AGENTS.md 的"分层规则"段。
 //
 // 不属于任何包，//go:build ignore 让 go build/test 跳过它（与 scripts/gen-errcodes.go 同风格）。
 package main

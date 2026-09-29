@@ -259,7 +259,7 @@ env-verify: ## 校验 config/ 读取的 env key 与 .env.example 模板同步
 	$(GO) run scripts/env-verify.go
 
 .PHONY: docs-verify
-docs-verify: ## 校验 AGENTS.md / CLAUDE.md 共享段保持同步
+docs-verify: ## 校验 CLAUDE.md 只导入 AGENTS.md（不重复规则段）+ 各文档 verify 清单与 Makefile 一致
 	$(GO) run scripts/docs-verify.go
 
 .PHONY: docs-deploy-check

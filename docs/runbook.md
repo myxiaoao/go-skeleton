@@ -1,6 +1,6 @@
 # Runbook
 
-执行清单，给 AI 编码助手和人类用。只列**机器可执行的命令**，不重复规则解释（规则去看 `AGENTS.md` / `CLAUDE.md`）。
+执行清单，给 AI 编码助手和人类用。只列**机器可执行的命令**，不重复规则解释（规则去看 `AGENTS.md`，`CLAUDE.md` 只是导入它的 Claude Code 入口）。
 
 > 想看"从克隆到 PR"的叙事性工作流（按时间线串起来）见 [`docs/development.md`](./development.md)；
 > 本文档按场景查命令。
@@ -77,7 +77,7 @@ go run ./cmd/migrate
 ## 提交前必跑
 
 ```sh
-make verify        # fmt + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + docs-verify + docs-deploy-check + docs-errcodes-verify（每步有横幅）
+make verify        # fmt-verify + vet + test + lint + architecture-verify + env-verify + tidy-verify + oapi-verify + sqlc-verify + docs-verify + docs-deploy-check + docs-errcodes-verify + shell-verify（每步有横幅）
 ```
 
 任意一步挂了，看最后一个红色 `=== STEP FAILED: xxx ===` 横幅就知道挂在哪。**不要用 `--no-verify` 跳过 hook**。
@@ -136,7 +136,7 @@ make verify
 
 资源识别：优先看 yaml 的 `x-resource`（operation 级 > path 级），未声明时 fallback 到 "operationId 大小写不敏感包含 NAME"。`NAME=Order` 走 fallback 时会命中 `listOrders / createOrder / getOrder / enqueueOrderTask`，但同时误命中 `listOrderPayments`——歧义场景直接在 yaml 写 `x-resource: Order` / `x-resource: OrderPayment` 显式归属。
 
-支持边界 / 不支持形态见 CLAUDE.md / AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run vs ≥2 path 参数 / 同资源跨多根路径）。
+支持边界 / 不支持形态见 AGENTS.md §API 契约 的 "`make new-endpoint` 支持边界" 子节（资源归属 / 动作名 / path 参数 0-1 个 / bearerAuth / dry-run vs ≥2 path 参数 / 同资源跨多根路径）。
 
 调试单跑：`make scaffold-verify` 跑 `scripts/` 黑盒回归（支持 `RUN=TestXxx V=1`），快于 `make verify`。
 

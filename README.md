@@ -133,6 +133,12 @@ make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
    - 填业务：handler 补 `c.ShouldBind...`、service 写业务规则、repository
      写 SQL、model 补字段。异步任务：在 `internal/task/` 定义类型，在
      `internal/worker/handler.go` 注册 handler。
+   - `make new-endpoint` 只生成分层骨架，以下几项仍需手写：
+     `internal/repository/queries/*.sql` + `make sqlc`（新查询）、
+     `migrations/*.sql`（新表 / 新列，`make migrate-create`）、复杂 DTO
+     （yaml 里 allOf / oneOf / 嵌套 object / array / enum / `$ref`，反推会
+     降级成空 struct + `// TODO`）、以及 ≥2 个 path 参数的路由（脚本
+     fail-fast，需手写 handler / router）。
    - 调试 yaml ↔ 代码漂移：`make new-endpoint-check` 只读 drift detector。
 
 5. 保证 CI 全绿：

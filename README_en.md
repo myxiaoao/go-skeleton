@@ -136,6 +136,13 @@ Steps to take after cloning this repo as the starting point for a new service:
    - Fill in business logic: handler `c.ShouldBind...`, service rules, repository
      SQL, model fields. Async tasks: define the type in `internal/task/` and
      register the handler in `internal/worker/handler.go`.
+   - `make new-endpoint` only generates the layered skeleton; the following
+     still need to be written by hand: `internal/repository/queries/*.sql` +
+     `make sqlc` (new queries), `migrations/*.sql` (new tables/columns via
+     `make migrate-create`), complex DTOs (yaml `allOf` / `oneOf` / nested
+     objects / arrays / enums / `$ref` degrade to an empty struct + `// TODO`),
+     and routes with 2+ path parameters (the script fails fast; write the
+     handler/router manually).
    - Debug yaml ↔ code drift with `make new-endpoint-check` (read-only).
 
 5. Keep CI green:

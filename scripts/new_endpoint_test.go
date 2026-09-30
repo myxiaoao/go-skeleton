@@ -1016,3 +1016,25 @@ paths:
 		t.Errorf("expected error mentioning path 参数 + x-handler-method, got:\n%s", out)
 	}
 }
+
+// TestNewEndpoint_RepositoryTestUsesSharedMock 验证生成的 repository 测试是真断言
+// （用 tx_test.go 的 mockDB 构造 repo），而不是 `_ = t` 占位。
+func TestNewEndpoint_RepositoryTestUsesSharedMock(t *testing.T) {
+	bin := buildNewEndpoint(t)
+	dir := newEndpointFixture(t)
+
+	if code, out := runBinary(t, dir, bin, "Order"); code != 0 {
+		t.Fatalf("new-endpoint exit=%d, expected 0\n%s", code, out)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "internal", "repository", "order_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "NewOrderRepository(&mockDB{})") {
+		t.Errorf("repository test should build repo from shared mockDB\n%s", got)
+	}
+	if strings.Contains(got, "_ = t") {
+		t.Errorf("repository test still has `_ = t` placeholder\n%s", got)
+	}
+}

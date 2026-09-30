@@ -53,6 +53,7 @@ type mockTx struct {
 	dbtx       *mockDBTX
 	committed  bool
 	rolledBack bool
+	commitErr  error // 非 nil 时 Commit 返回它，且事务不算已提交
 }
 
 func (m *mockTx) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
@@ -68,6 +69,9 @@ func (m *mockTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Ro
 }
 
 func (m *mockTx) Commit(context.Context) error {
+	if m.commitErr != nil {
+		return m.commitErr
+	}
 	m.committed = true
 	return nil
 }
@@ -188,6 +192,25 @@ func TestInTxNilArgs(t *testing.T) {
 	}
 	if err := InTxWithOptions(t.Context(), nil, &sql.TxOptions{ReadOnly: true}, nil); !errors.Is(err, errNilTxFn) {
 		t.Fatalf("WithOptions fn=nil err = %v, want errNilTxFn", err)
+	}
+	if err := InTxWithOptions(t.Context(), nil, nil, func(context.Context) error { return nil }); !errors.Is(err, errNilDB) {
+		t.Fatalf("WithOptions db=nil err = %v, want errNilDB", err)
+	}
+}
+
+// TestInTxReturnsCommitError：fn 成功但 Commit 失败时，InTx 必须把 Commit 的
+// 错误返回给调用方，而不是吞掉当成功。
+func TestInTxReturnsCommitError(t *testing.T) {
+	commitErr := errors.New("commit failed")
+	tx := &mockTx{dbtx: &mockDBTX{}, commitErr: commitErr}
+	db := newBeginDB(tx, nil)
+
+	err := InTx(t.Context(), db, func(context.Context) error { return nil })
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("InTx err = %v, want commit error", err)
+	}
+	if tx.committed {
+		t.Fatal("tx should not be marked committed when Commit fails")
 	}
 }
 

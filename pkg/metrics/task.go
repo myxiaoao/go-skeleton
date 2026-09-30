@@ -21,7 +21,7 @@ func newTaskMetrics(reg *prometheus.Registry, subsystem string) *taskMetrics {
 			Namespace: "go_skeleton",
 			Subsystem: subsystem,
 			Name:      "asynq_tasks_processed_total",
-			Help:      "Total asynq tasks processed by this worker, partitioned by task type and status (success|retry|failure). failure means final failure (no more retries).",
+			Help:      "Total asynq tasks processed by this worker, partitioned by task type and status (success|retry|failure). failure means final failure (no more retries), including tasks revoked via asynq.RevokeTask, so it may exceed the archived count.",
 		}, []string{"type", "status"}),
 		// 后台任务耗时分布比 HTTP 请求宽得多：从几十毫秒的轻量任务到分钟级的
 		// 批处理都有，所以桶从 10ms 一路铺到 5min。

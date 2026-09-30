@@ -229,6 +229,10 @@ func regenerateSQLC() error {
 	if err := runMake("_ensure-sqlc"); err != nil {
 		return fmt.Errorf("sqlc 不可用，已中止且未改动 %s: %w", out, err)
 	}
+	// go install 成功不代表 GOBIN 在 PATH 里，删目录前再确认一次能找到二进制。
+	if _, err := exec.LookPath("sqlc"); err != nil {
+		return fmt.Errorf("sqlc 已安装但不在 PATH（检查 GOBIN），已中止且未改动 %s: %w", out, err)
+	}
 	if err := os.RemoveAll(out); err != nil {
 		return err
 	}

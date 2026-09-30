@@ -36,6 +36,10 @@ func asynqRetryInfo(ctx context.Context) (int, int, bool) {
 //   - SkipRetry / RevokeTask，或重试预算耗尽（retried >= maxRetry，与 asynq
 //     processor 的判定一致）→ failure（最终失败，不会再执行）；
 //   - 其余 → retry。拿不到重试信息（非 asynq 上下文）时保守按 retry。
+//
+// 以 handler 返回值为准：任务超时 / lease 过期由 processor 独立判定失败，handler
+// 忽略 ctx 仍返回 nil 时这里会记 success；停机 abort 走 requeue、不消耗重试预算，
+// 最后一次尝试恰逢停机时这里会记 failure 而任务之后仍会再跑。两者都是少见边界。
 func taskStatus(err error, retried, maxRetry int, ok bool) string {
 	switch {
 	case err == nil:

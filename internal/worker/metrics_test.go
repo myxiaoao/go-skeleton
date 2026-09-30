@@ -97,10 +97,10 @@ func TestRegisterMetricsMiddlewareOnMux(t *testing.T) {
 	registerMetricsMiddleware(asynq.NewServeMux(), nil)
 }
 
-// TestMetricsMiddlewareCountsPanicAsFailure 验证 handler panic 时仍记一次
+// TestMetricsMiddlewareRecordsPanicAndRepanics 验证 handler panic 时仍记一次
 // 失败（无重试信息时按 retry；asynq 在 middleware 链之外 recover，不 defer 记录会漏掉最严重的失败），
 // 并且 panic 继续向上抛，让 asynq 的 recover / 重试照常生效。
-func TestMetricsMiddlewareCountsPanicAsFailure(t *testing.T) {
+func TestMetricsMiddlewareRecordsPanicAndRepanics(t *testing.T) {
 	obs := &mockTaskObserver{}
 	h := MetricsMiddleware(obs, nil)(asynq.HandlerFunc(func(context.Context, *asynq.Task) error {
 		panic("kaboom")

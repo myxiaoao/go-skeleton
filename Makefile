@@ -32,7 +32,7 @@ LDFLAGS  ?= -s -w \
 GO_TEST_FLAGS ?=
 
 # 工具链版本 pin 单独放 tools.mk：CI 工具缓存 key 只 hash 它，改 Makefile 不会让缓存失效。
-include tools.mk
+include $(dir $(lastword $(MAKEFILE_LIST)))tools.mk
 
 .PHONY: help
 help: ## 列出所有可用 target

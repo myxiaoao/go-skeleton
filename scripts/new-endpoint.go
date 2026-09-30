@@ -1502,8 +1502,8 @@ func renderRepositoryTest(name, lower string, _ []operation) string {
 	return fmt.Sprintf(`package repository
 
 // %[1]sRepository smoke 测试：由 make new-endpoint NAME=%[1]s 生成。
-// 真实查询出现后按 example_test.go 风格，用 tx_test.go 里的 mockDBTX /
-// mockTx 断言 SQL 与参数，不连真实 DB。
+// 复用 tx_test.go 里的 mockDB 验证构造器可用。真实查询出现后按 example_test.go
+// 风格，用 mockDBTX / mockTx 断言 SQL 与参数，不连真实 DB。
 
 import (
 	"testing"
@@ -1518,7 +1518,9 @@ func init() {
 }
 
 func Test%[1]sRepositorySmoke(t *testing.T) {
-	_ = t
+	if repo := New%[1]sRepository(&mockDB{}); repo == nil {
+		t.Fatal("New%[1]sRepository returned nil")
+	}
 }
 `, name, lower)
 }

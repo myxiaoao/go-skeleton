@@ -278,7 +278,7 @@ systemd-cgtop -m | grep go-skeleton
 | 想确认跑的是哪个版本 | `/opt/go-skeleton/bin/api -version` 或 `curl /health \| jq .build` |
 | 配置文件改了不生效 | systemd unit 用 `EnvironmentFile` 静态读，必须 `systemctl restart` |
 | Worker 任务停了 | 检查 Redis 是否可达；`journalctl -u go-skeleton-worker.service` 看 asynq 日志 |
-| Worker 是否健康 / 任务失败率 | `curl http://127.0.0.1:9091/health \| jq`；`curl -s http://127.0.0.1:9091/metrics \| grep asynq_tasks_processed_total` |
+| Worker 是否健康 / 任务失败率（看 `status="failure"`） | `curl http://127.0.0.1:9091/health \| jq`；`curl -s http://127.0.0.1:9091/metrics \| grep asynq_tasks_processed_total` |
 
 ## 8. 安全注意
 
@@ -306,7 +306,7 @@ systemd-cgtop -m | grep go-skeleton
 - watchdog 不能替代业务监控：仍然要看 Asynqmon 队列堆积、ErrorHandler 日志。watchdog
   只兜底"进程卡死"，识别不了"进程在跑但任务一直失败"。
 - 可观测端口 `WORKER_METRICS_ADDR`（默认 `:9091`，显式留空关闭）：`/metrics`（含
-  `go_skeleton_worker_asynq_tasks_processed_total{type,status}`、
+  `go_skeleton_worker_asynq_tasks_processed_total{type,status}`（`status` 互斥：`success` / `retry` 会再重试的失败 / `failure` 最终失败）、
   `go_skeleton_worker_asynq_task_duration_seconds{type}`、DB 连接池指标）、`/livez`
   （恒 200）、`/health`（Redis 必查、配了 DB 时查 DB，失败 503；两者顺序探测、共用 2s
   超时，Redis 很慢时 DB 可能被连带标成 `unavailable`，排障时先看 Redis）。端口在 asynq 进入消费态

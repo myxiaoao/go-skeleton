@@ -225,6 +225,14 @@ SELECT 1;
 // 生成文件（如 example.sql.go），不清空会留下引用已删表的代码。
 func regenerateSQLC() error {
 	const out = "internal/repository/sqlcdb"
+	// 先确认 sqlc 可用再删输出目录：工具缺失 / 安装失败时不能留下被清空的 sqlcdb。
+	if err := runMake("_ensure-sqlc"); err != nil {
+		return fmt.Errorf("sqlc 不可用，已中止且未改动 %s: %w", out, err)
+	}
+	// go install 成功不代表 GOBIN 在 PATH 里，删目录前再确认一次能找到二进制。
+	if _, err := exec.LookPath("sqlc"); err != nil {
+		return fmt.Errorf("sqlc 已安装但不在 PATH（检查 GOBIN），已中止且未改动 %s: %w", out, err)
+	}
 	if err := os.RemoveAll(out); err != nil {
 		return err
 	}

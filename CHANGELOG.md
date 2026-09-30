@@ -510,6 +510,14 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Changed
 
+- **CI 工具缓存 key 只跟版本 pin 走**: `*_VERSION ?=` 抽到新文件 `tools.mk`（Makefile
+  `include`），ci / release / security 三个 workflow 的 `~/go/bin` 缓存 key 改为
+  `hashFiles('tools.mk')`，改 Makefile 其他内容不再让缓存失效。
+- **任务指标 `status` 语义改为 success / retry / failure 三值互斥**: `failure` 现在
+  只表示最终失败（`SkipRetry` / `RevokeTask` / 重试预算耗尽，panic 同理），会再
+  重试的失败记 `retry`。`(*Registry).ObserveTask` 签名由 `(type, err, d)` 改为
+  `(type, status, d)`，`worker.TaskObserver` 同步；判定在 `MetricsMiddleware` 里做。
+  依赖旧 `failure` = 任何错误的告警需改成 `failure + retry`。
 - **AGENTS.md 成为 AI 编码助手规则的唯一来源**: `CLAUDE.md` 缩减为
   `@AGENTS.md` 导入行 + Claude Code 专属补充，不再并行维护两份规则正文；
   `CLAUDE.md` 独有的 `.dockerignore` 目录树条目并入 AGENTS.md。docs/ 下指向
@@ -727,6 +735,8 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Fixed
 
+- **DB tracer 将 `context.DeadlineExceeded` 与 `context.Canceled` 一样降为 warn**:
+  请求超时不再按 `db query failed` 记 error，改记 warn `db query timed out`。
 - **new-endpoint 修审计发现的三个 hard stop**:
   上一版"yaml 反向驱动"承诺生成后立即 `make verify` 绿，实测发现三个漏点：
   (1) `internal/router/router_test.go::buildEngine` 的 deps fixture 不会被

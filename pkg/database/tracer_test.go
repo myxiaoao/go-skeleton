@@ -56,6 +56,7 @@ func TestQueryTracerEnd(t *testing.T) {
 	slow := time.Now().Add(-2 * slowQueryThreshold)
 	boom := errors.New("boom")
 	canceled := errors.Join(errors.New("query"), context.Canceled)
+	timedOut := errors.Join(errors.New("query"), context.DeadlineExceeded)
 	cases := []struct {
 		name      string
 		level     logLevel
@@ -69,6 +70,8 @@ func TestQueryTracerEnd(t *testing.T) {
 		{"slow error still error", logWarn, slow, boom, zapcore.ErrorLevel, "db query failed"},
 		{"canceled downgraded to warn", logWarn, fast, canceled, zapcore.WarnLevel, "db query canceled"},
 		{"canceled hidden at error", logError, fast, canceled, 0, ""},
+		{"deadline exceeded downgraded to warn", logWarn, fast, timedOut, zapcore.WarnLevel, "db query timed out"},
+		{"deadline exceeded hidden at error", logError, fast, timedOut, 0, ""},
 		{"slow query warned", logWarn, slow, nil, zapcore.WarnLevel, "db slow query"},
 		{"fast query skipped at warn", logWarn, fast, nil, 0, ""},
 		{"all queries at info", logInfo, fast, nil, zapcore.InfoLevel, "db query"},

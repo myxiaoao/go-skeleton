@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,18 +20,21 @@ func scrape(t *testing.T, r *Registry) string {
 }
 
 // TestRegistry_ObserveTask 验证任务计数按 type + status 分组、耗时 histogram
-// 按 type 累积：成功记 status="success"，返回 error 记 status="failure"。
+// 按 type 累积：status 互斥为 success / retry / failure，未知 status 折叠成 failure。
 func TestRegistry_ObserveTask(t *testing.T) {
 	r := New("worker")
-	r.ObserveTask("example:task", nil, 20*time.Millisecond)
-	r.ObserveTask("example:task", nil, 30*time.Millisecond)
-	r.ObserveTask("example:task", errors.New("boom"), time.Second)
+	r.ObserveTask("example:task", TaskStatusSuccess, 20*time.Millisecond)
+	r.ObserveTask("example:task", TaskStatusSuccess, 30*time.Millisecond)
+	r.ObserveTask("example:task", TaskStatusRetry, time.Second)
+	r.ObserveTask("example:task", TaskStatusFailure, time.Second)
+	r.ObserveTask("example:task", "weird-status", time.Second)
 
 	body := scrape(t, r)
 	for _, want := range []string{
 		`go_skeleton_worker_asynq_tasks_processed_total{status="success",type="example:task"} 2`,
-		`go_skeleton_worker_asynq_tasks_processed_total{status="failure",type="example:task"} 1`,
-		`go_skeleton_worker_asynq_task_duration_seconds_count{type="example:task"} 3`,
+		`go_skeleton_worker_asynq_tasks_processed_total{status="retry",type="example:task"} 1`,
+		`go_skeleton_worker_asynq_tasks_processed_total{status="failure",type="example:task"} 2`,
+		`go_skeleton_worker_asynq_task_duration_seconds_count{type="example:task"} 5`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics output missing %q\n%s", want, body)
@@ -44,5 +46,5 @@ func TestRegistry_ObserveTask(t *testing.T) {
 // 让未开指标的调用方不必到处判空。
 func TestRegistry_ObserveTaskNilSafe(t *testing.T) {
 	var r *Registry
-	r.ObserveTask("example:task", nil, time.Millisecond)
+	r.ObserveTask("example:task", TaskStatusSuccess, time.Millisecond)
 }

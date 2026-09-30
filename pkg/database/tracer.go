@@ -85,6 +85,9 @@ func (t *queryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.T
 	case errors.Is(data.Err, context.Canceled):
 		// 客户端主动断开，不算数据库故障。
 		need, level, msg, extra = logWarn, zapcore.WarnLevel, "db query canceled", zap.Error(data.Err)
+	case errors.Is(data.Err, context.DeadlineExceeded):
+		// 请求超时由 timeout 中间件 / 上游 deadline 触发，属预期内的取消，不算数据库故障。
+		need, level, msg, extra = logWarn, zapcore.WarnLevel, "db query timed out", zap.Error(data.Err)
 	case data.Err != nil:
 		need, level, msg, extra = logError, zapcore.ErrorLevel, "db query failed", zap.Error(data.Err)
 	case elapsed > slowQueryThreshold:

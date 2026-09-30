@@ -727,6 +727,8 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Fixed
 
+- **DB tracer 将 `context.DeadlineExceeded` 与 `context.Canceled` 一样降为 warn**:
+  请求超时不再按 `db query failed` 记 error，改记 warn `db query timed out`。
 - **new-endpoint 修审计发现的三个 hard stop**:
   上一版"yaml 反向驱动"承诺生成后立即 `make verify` 绿，实测发现三个漏点：
   (1) `internal/router/router_test.go::buildEngine` 的 deps fixture 不会被

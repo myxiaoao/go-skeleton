@@ -21,7 +21,7 @@ func newTaskMetrics(reg *prometheus.Registry, subsystem string) *taskMetrics {
 			Namespace: "go_skeleton",
 			Subsystem: subsystem,
 			Name:      "asynq_tasks_processed_total",
-			Help:      "Total asynq tasks processed by this worker, partitioned by task type and status (success|failure).",
+			Help:      "Total asynq tasks processed by this worker, partitioned by task type and status (success|retry|failure). failure means final failure (no more retries).",
 		}, []string{"type", "status"}),
 		// 后台任务耗时分布比 HTTP 请求宽得多：从几十毫秒的轻量任务到分钟级的
 		// 批处理都有，所以桶从 10ms 一路铺到 5min。
@@ -37,16 +37,28 @@ func newTaskMetrics(reg *prometheus.Registry, subsystem string) *taskMetrics {
 	return m
 }
 
-// ObserveTask 记录一次任务处理结果：err 为 nil 记 status="success"，否则
-// 记 status="failure"（含会被重试的失败）；d 计入耗时 histogram。
+// 任务处理结果的 status label 取值，互斥：
+//   - success：处理成功；
+//   - retry：本次失败但 asynq 还会重试；
+//   - failure：最终失败（重试耗尽 / SkipRetry / RevokeTask），不会再被执行。
+const (
+	TaskStatusSuccess = "success"
+	TaskStatusRetry   = "retry"
+	TaskStatusFailure = "failure"
+)
+
+// ObserveTask 记录一次任务处理结果：status 取上面的 TaskStatus* 常量，由调用方
+// （worker middleware，持有 asynq 重试上下文）判定；d 计入耗时 histogram。
+// 未知 status 一律折叠成 failure，避免任意字符串撑爆 label 基数。
 // nil *Registry 安全调用（no-op），调用方不必判空。
-func (r *Registry) ObserveTask(taskType string, err error, d time.Duration) {
+func (r *Registry) ObserveTask(taskType, status string, d time.Duration) {
 	if r == nil || r.tasks == nil {
 		return
 	}
-	status := "success"
-	if err != nil {
-		status = "failure"
+	switch status {
+	case TaskStatusSuccess, TaskStatusRetry, TaskStatusFailure:
+	default:
+		status = TaskStatusFailure
 	}
 	r.tasks.processed.WithLabelValues(taskType, status).Inc()
 	r.tasks.duration.WithLabelValues(taskType).Observe(d.Seconds())

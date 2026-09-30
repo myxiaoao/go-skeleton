@@ -9,6 +9,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"go-skeleton/internal/task"
+	"go-skeleton/pkg/metrics"
 )
 
 // mockExampleProcessor 是 ExampleProcessor 的 inline mock：捕获最近一次调用
@@ -164,7 +165,7 @@ func TestRegisterHandlersMountsMetricsMiddleware(t *testing.T) {
 	if err := mux.ProcessTask(t.Context(), asynq.NewTask(task.TypeExampleTask, body)); err != nil {
 		t.Fatalf("ProcessTask err = %v", err)
 	}
-	if len(obs.calls) != 1 || obs.calls[0].taskType != task.TypeExampleTask || obs.calls[0].err != nil {
+	if len(obs.calls) != 1 || obs.calls[0].taskType != task.TypeExampleTask || obs.calls[0].status != metrics.TaskStatusSuccess {
 		t.Fatalf("observe calls = %+v, want one success for %s", obs.calls, task.TypeExampleTask)
 	}
 }

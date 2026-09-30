@@ -510,6 +510,11 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Changed
 
+- **任务指标 `status` 语义改为 success / retry / failure 三值互斥**: `failure` 现在
+  只表示最终失败（`SkipRetry` / `RevokeTask` / 重试预算耗尽，panic 同理），会再
+  重试的失败记 `retry`。`(*Registry).ObserveTask` 签名由 `(type, err, d)` 改为
+  `(type, status, d)`，`worker.TaskObserver` 同步；判定在 `MetricsMiddleware` 里做。
+  依赖旧 `failure` = 任何错误的告警需改成 `failure + retry`。
 - **AGENTS.md 成为 AI 编码助手规则的唯一来源**: `CLAUDE.md` 缩减为
   `@AGENTS.md` 导入行 + Claude Code 专属补充，不再并行维护两份规则正文；
   `CLAUDE.md` 独有的 `.dockerignore` 目录树条目并入 AGENTS.md。docs/ 下指向

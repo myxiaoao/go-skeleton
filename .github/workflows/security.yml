@@ -28,12 +28,12 @@ jobs:
 
       # 缓存 make init / make sec 装到 ~/go/bin 的工具二进制（setup-go 只缓存
       # GOMODCACHE / GOCACHE）。key 带 Go 版本：旧 Go 编译的分析工具处理不了新
-      # 版本代码；工具版本变了 Makefile 的 _ensure-* 会自动重装，restore-keys 安全。
+      # 版本代码；key 只跟 tools.mk（版本 pin）走，版本变了换 key，_ensure-* 也会自动重装，restore-keys 安全。
       - name: Cache tool binaries
         uses: actions/cache@v6
         with:
           path: ~/go/bin
-          key: ${{ runner.os }}-gobin-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('Makefile') }}
+          key: ${{ runner.os }}-gobin-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('tools.mk') }}
           restore-keys: ${{ runner.os }}-gobin-${{ steps.setup-go.outputs.go-version }}-
 
       - name: make sec (govulncheck + gosec)

@@ -510,6 +510,9 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Changed
 
+- **CI 工具缓存 key 只跟版本 pin 走**: `*_VERSION ?=` 抽到新文件 `tools.mk`（Makefile
+  `include`），ci / release / security 三个 workflow 的 `~/go/bin` 缓存 key 改为
+  `hashFiles('tools.mk')`，改 Makefile 其他内容不再让缓存失效。
 - **任务指标 `status` 语义改为 success / retry / failure 三值互斥**: `failure` 现在
   只表示最终失败（`SkipRetry` / `RevokeTask` / 重试预算耗尽，panic 同理），会再
   重试的失败记 `retry`。`(*Registry).ObserveTask` 签名由 `(type, err, d)` 改为

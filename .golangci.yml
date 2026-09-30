@@ -15,9 +15,9 @@
 # falls back to gofmt's stdlib heuristic and treats `go-skeleton/...`
 # as stdlib. v2 sequences them correctly for us.
 #
-# Tool versions are pinned by the Makefile (GCI_VERSION /
-# GOFUMPT_VERSION); `make init` keeps locally installed binaries
-# aligned with these pins.
+# Tool versions are pinned in tools.mk (included by the Makefile:
+# GCI_VERSION / GOFUMPT_VERSION); `make init` keeps locally installed
+# binaries aligned with these pins.
 
 version: "2"
 

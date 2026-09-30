@@ -52,7 +52,13 @@ var (
 	_ sqlcdb.DBTX
 )
 `)
-	// 允许列表：repository 与 pkg/database。
+	// 允许列表：repository、bootstrap 与 pkg/database。
+	writeFile(t, filepath.Join(dir, "internal", "bootstrap", "ok.go"), `package bootstrap
+
+import "github.com/jackc/pgx/v5/pgxpool"
+
+var _ *pgxpool.Pool
+`)
 	writeFile(t, filepath.Join(dir, "internal", "repository", "ok.go"), `package repository
 
 import "github.com/jackc/pgx/v5"
@@ -76,7 +82,7 @@ var _ *pgxpool.Pool
 	if !strings.Contains(out, "go-skeleton/internal/repository/sqlcdb") {
 		t.Errorf("expected sqlcdb import flagged, got:\n%s", out)
 	}
-	for _, ok := range []string{"internal/repository/ok.go", "pkg/database/ok.go"} {
+	for _, ok := range []string{"internal/repository/ok.go", "internal/bootstrap/ok.go", "pkg/database/ok.go"} {
 		if strings.Contains(out, ok) {
 			t.Errorf("%s is in allow list, should not be flagged:\n%s", ok, out)
 		}

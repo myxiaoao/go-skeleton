@@ -18,3 +18,7 @@ sql:
             go_type: time.Time
           - db_type: pg_catalog.timestamptz
             go_type: time.Time
+          # ALTER COLUMN ... TYPE TIMESTAMPTZ 在 sqlc 里解析成不带 schema 前缀
+          # 的 timestamptz，需单独声明，否则会回落到 pgtype.Timestamptz。
+          - db_type: timestamptz
+            go_type: time.Time

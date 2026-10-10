@@ -105,7 +105,7 @@ func NewServer(reg *bootstrap.Registry) (*Server, error) {
 		ctx, cancel := context.WithCancel(context.Background())
 		server.stopMetricsCollect = cancel
 		queues := queueNames(reg.Cfg.Worker.Queues)
-		metricsReg.StartAsynqCollector(ctx, reg.Inspector, queues, asynqCollectInterval, nil)
+		metricsReg.StartAsynqCollector(ctx, reg.Inspector, queues, asynqCollectInterval, applog.L())
 	}
 
 	return server, nil

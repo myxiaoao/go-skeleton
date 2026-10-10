@@ -51,6 +51,46 @@ func TestExampleRepositoryCreatePropagatesError(t *testing.T) {
 	}
 }
 
+func TestExampleRepositoryCreateWithTaskKeyInserts(t *testing.T) {
+	now := time.Now()
+	var gotSQL string
+	var gotArgs []any
+	db := &mockDB{mockDBTX: mockDBTX{queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
+		gotSQL, gotArgs = query, args
+		return mockRow{values: []any{int64(9), "example", now, now}}
+	}}}
+
+	example := &model.Example{Name: "example"}
+	created, err := NewExampleRepository(db).CreateWithTaskKey(t.Context(), example, "key-1")
+	if err != nil {
+		t.Fatalf("CreateWithTaskKey: %v", err)
+	}
+	if !created {
+		t.Fatal("created = false, want true")
+	}
+	if !strings.Contains(gotSQL, "ON CONFLICT (task_key) DO NOTHING") {
+		t.Fatalf("unexpected SQL: %q", gotSQL)
+	}
+	if !slices.Equal(gotArgs, []any{"example", "key-1"}) {
+		t.Fatalf("args = %#v, want [example key-1]", gotArgs)
+	}
+	if example.ID != 9 {
+		t.Fatalf("example not populated from RETURNING: %+v", example)
+	}
+}
+
+// TestExampleRepositoryCreateWithTaskKeyDuplicate 验证 task_key 冲突时
+// （RETURNING 无行 → pgx.ErrNoRows）返回 created=false 且不报错。
+func TestExampleRepositoryCreateWithTaskKeyDuplicate(t *testing.T) {
+	db := &mockDB{mockDBTX: mockDBTX{queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+		return mockRow{err: pgx.ErrNoRows}
+	}}}
+	created, err := NewExampleRepository(db).CreateWithTaskKey(t.Context(), &model.Example{Name: "x"}, "key-1")
+	if err != nil || created {
+		t.Fatalf("created=%v err=%v, want created=false err=nil", created, err)
+	}
+}
+
 func TestExampleRepositoryListRunsInReadOnlySnapshot(t *testing.T) {
 	now := time.Now()
 	var listSQL string

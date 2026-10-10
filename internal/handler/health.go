@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -100,6 +101,21 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
+	// 三个依赖并发探测：串行时前一个慢探测会吃掉后面的超时预算，把健康的
+	// 依赖误标成 unavailable；并发后最坏延迟也只是单次超时（2s）。
+	var dbErr, cacheErr, queueErr error
+	var wg sync.WaitGroup
+	if h.db != nil {
+		wg.Go(func() { dbErr = h.db.Ping(ctx) })
+	}
+	if h.cache != nil {
+		wg.Go(func() { cacheErr = h.cache.Ping(ctx) })
+	}
+	if h.queue != nil {
+		wg.Go(func() { queueErr = h.queue.Ping(ctx) })
+	}
+	wg.Wait()
+
 	checks := map[string]oapi.HealthResponseChecks{}
 	// 关键依赖（Postgres）挂 → unhealthy → 503，LB 必须摘流。
 	// 非关键依赖（Redis）挂 → degraded → 200，LB 不摘流（缓存抖动不应触发全员重启）。
@@ -110,7 +126,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	case h.db == nil:
 		checks["postgres"] = oapi.HealthResponseChecksNotConfigured
 		dbHealthy = false
-	case h.db.Ping(ctx) != nil:
+	case dbErr != nil:
 		checks["postgres"] = oapi.HealthResponseChecksUnavailable
 		dbHealthy = false
 	default:
@@ -120,7 +136,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	switch {
 	case h.cache == nil:
 		checks["redis"] = oapi.HealthResponseChecksNotConfigured
-	case h.cache.Ping(ctx) != nil:
+	case cacheErr != nil:
 		checks["redis"] = oapi.HealthResponseChecksUnavailable
 		cacheHealthy = false
 	default:
@@ -133,7 +149,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	switch {
 	case h.queue == nil:
 		checks["queue"] = oapi.HealthResponseChecksNotConfigured
-	case h.queue.Ping(ctx) != nil:
+	case queueErr != nil:
 		checks["queue"] = oapi.HealthResponseChecksUnavailable
 		queueHealthy = false
 	default:

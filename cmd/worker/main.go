@@ -58,9 +58,10 @@ func main() {
 	defer stop()
 
 	// sd_notify watchdog 心跳：systemd Type=notify + WatchdogSec 时，定期发
-	// WATCHDOG=1 让 systemd 知道 worker 还活着；如果 Asynq handler 卡死（不
-	// panic、不 ErrorHandler），systemd 会按 unit 的 Restart=on-failure 重启。
-	// ctx 取消时自然退出；非 Linux 平台是 noop stub。
+	// WATCHDOG=1 让 systemd 知道进程还活着。注意心跳是独立 goroutine 按固定
+	// 间隔发送，只能兜住"整个进程卡死 / 调度不动"这类故障；单个 Asynq handler
+	// 挂死**不会**让心跳停止，这类问题靠 task Timeout（task.DefaultOptions）
+	// 与 retry / archived 指标告警发现。ctx 取消时自然退出；非 Linux 平台是 noop stub。
 	// READY=1 不在这里发——推迟到 worker 进入消费态（worker.Run 的 onReady）。
 	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
 

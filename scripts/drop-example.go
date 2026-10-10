@@ -265,6 +265,8 @@ func filesToDelete() []string {
 		"internal/task/example.go",
 		"internal/worker/handler_test.go",
 		"migrations/20260521000001_create_examples_table.sql",
+		"migrations/20261010005220_examples_timestamptz.sql",
+		"migrations/20261010005221_add_task_key_to_examples.sql",
 		"internal/repository/queries/example.sql",
 	}
 }

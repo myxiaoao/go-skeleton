@@ -30,6 +30,7 @@ import (
 // repository 实现自然满足。
 type ExampleRepository interface {
 	Create(ctx context.Context, example *model.Example) error
+	CreateWithTaskKey(ctx context.Context, example *model.Example, taskKey string) (bool, error)
 	List(ctx context.Context, limit, offset int) ([]model.Example, int64, error)
 }
 
@@ -127,14 +128,32 @@ type ListExamplesRes struct {
 //
 // 当前模板态只是落一条 example 记录 + 打日志：让接入新业务时有一个清晰的
 // "改这里"靶点，而不是空函数。返回 error 会让 asynq 按 MaxRetry 重试。
+//
+// 幂等：asynq 是 at-least-once 投递，同一任务可能执行多次（ack 前 worker
+// 崩溃、lease 过期等）。payload 带 TaskKey 时按它去重，重复执行直接返回 nil；
+// 旧版本投递的消息没有 TaskKey，退回普通插入。复制本模板写业务时保留这套去重。
 func (s *ExampleService) ProcessExample(ctx context.Context, payload task.ExamplePayload) error {
 	example := model.Example{Name: payload.Name}
-	if err := s.repo.Create(ctx, &example); err != nil {
+	created := true
+	var err error
+	if payload.TaskKey != "" {
+		created, err = s.repo.CreateWithTaskKey(ctx, &example, payload.TaskKey)
+	} else {
+		err = s.repo.Create(ctx, &example)
+	}
+	if err != nil {
 		applog.FromContext(ctx).Error("process example task: persist failed",
 			zap.String("name", payload.Name),
 			zap.Error(err),
 		)
 		return err
+	}
+	if !created {
+		applog.FromContext(ctx).Info("example task already processed, skipped",
+			zap.String("name", payload.Name),
+			zap.String("task_key", payload.TaskKey),
+		)
+		return nil
 	}
 	applog.FromContext(ctx).Info("example task processed",
 		zap.String("name", payload.Name),

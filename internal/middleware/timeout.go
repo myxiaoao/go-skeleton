@@ -11,9 +11,12 @@ import (
 	"go-skeleton/pkg/response"
 )
 
-// Timeout 给 request ctx 挂 deadline。deadline 在 handler 写响应之前触发时，
-// 中间件把失败统一映射成 REQUEST_TIMEOUT 信封，让客户端拿到稳定的错误码，
-// 而不是各种下游冒上来的 raw 错误消息。
+// Timeout 给 request ctx 挂 deadline，让超时统一表现为 REQUEST_TIMEOUT 信封，
+// 客户端拿到稳定的错误码，而不是各种下游冒上来的错误：
+//
+//   - handler 走 response.WriteError 写错误时，WriteError 发现 ctx 已超时，
+//     会把服务端错误（如 DATABASE_ERROR）改写成 REQUEST_TIMEOUT——这是常见路径；
+//   - handler 返回时还没写任何响应，由本中间件兜底写 REQUEST_TIMEOUT。
 //
 // **不适用于 streaming / SSE handler。** Gin 的 c.Next() 是同步阻塞直到 handler
 // 返回，本中间件依赖 handler 返回后再检查 c.Writer.Written()。streaming handler

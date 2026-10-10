@@ -142,3 +142,32 @@ func TestNewHTTPServerSetsTimeouts(t *testing.T) {
 		t.Errorf("server not fully configured: %+v", srv)
 	}
 }
+
+// pingerFunc 把函数适配成 Pinger，用于需要自定义行为的探测测试。
+type pingerFunc func(context.Context) error
+
+func (f pingerFunc) Ping(ctx context.Context) error { return f(ctx) }
+
+// TestHTTPHealthProbesConcurrently 验证 Redis / DB 并发探测：Redis 的 Ping 要等
+// DB 的 Ping 被调用后才返回，串行实现下 Redis 会等到超时被误标 unavailable。
+func TestHTTPHealthProbesConcurrently(t *testing.T) {
+	dbCalled := make(chan struct{})
+	checks := HealthChecks{
+		Redis: pingerFunc(func(ctx context.Context) error {
+			select {
+			case <-dbCalled:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}),
+		DB: pingerFunc(func(context.Context) error {
+			close(dbCalled)
+			return nil
+		}),
+	}
+	w := doGet(t, newHTTPHandler(nil, checks), "/health")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (probes must run concurrently)", w.Code)
+	}
+}

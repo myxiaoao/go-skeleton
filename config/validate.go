@@ -26,6 +26,13 @@ func validate(cfg *Config) error {
 	if cfg.Server.RequestTimeout <= 0 {
 		add(fmt.Sprintf("REQUEST_TIMEOUT must be > 0, got %s", cfg.Server.RequestTimeout))
 	}
+	// gin.SetMode 遇到未知值会直接 panic；在这里拦下，和其他配置错一起汇总报出。
+	// 空值合法：gin 会回退到 debug（测试里为 test）。
+	switch cfg.Server.GinMode {
+	case "", "debug", "release", "test":
+	default:
+		add(fmt.Sprintf("GIN_MODE must be one of debug/release/test, got %q", cfg.Server.GinMode))
+	}
 	if cfg.Server.GracefulDrain < 0 {
 		add(fmt.Sprintf("GRACEFUL_DRAIN must be >= 0, got %s", cfg.Server.GracefulDrain))
 	}

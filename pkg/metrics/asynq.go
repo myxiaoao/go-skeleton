@@ -40,6 +40,13 @@ func newAsynqMetrics(reg *prometheus.Registry, subsystem string) *asynqMetrics {
 	return m
 }
 
+// deleteQueue 删除某个队列在所有 gauge 上的 series。
+func (m *asynqMetrics) deleteQueue(queue string) {
+	for _, g := range []*prometheus.GaugeVec{m.size, m.pending, m.active, m.retry, m.archived, m.latencySec} {
+		g.DeleteLabelValues(queue)
+	}
+}
+
 func newQueueGauge(subsystem, name, help string) *prometheus.GaugeVec {
 	return prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "go_skeleton",
@@ -90,6 +97,9 @@ func (r *Registry) collectAsynq(inspector asyncQueueInspector, queues []string, 
 		info, err := inspector.GetQueueInfo(name)
 		if err != nil {
 			logger.Warn("asynq queue inspect failed", zap.String("queue", name), zap.Error(err))
+			// 抓取失败时删掉该队列的 series，而不是保留上一次的值：旧值会让看板
+			// 显示"正常"、积压告警永远不触发；series 消失可被 absent() 告警捕获。
+			r.asynq.deleteQueue(name)
 			continue
 		}
 		r.asynq.size.WithLabelValues(name).Set(float64(info.Size))

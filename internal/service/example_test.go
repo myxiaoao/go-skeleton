@@ -26,8 +26,9 @@ func taskExamplePayload(name string) task.ExamplePayload {
 }
 
 type mockExampleRepo struct {
-	createFunc func(ctx context.Context, example *model.Example) error
-	listFunc   func(ctx context.Context, limit, offset int) ([]model.Example, int64, error)
+	createFunc            func(ctx context.Context, example *model.Example) error
+	createWithTaskKeyFunc func(ctx context.Context, example *model.Example, taskKey string) (bool, error)
+	listFunc              func(ctx context.Context, limit, offset int) ([]model.Example, int64, error)
 }
 
 type mockExampleQueue struct {
@@ -37,6 +38,10 @@ type mockExampleQueue struct {
 
 func (m *mockExampleRepo) Create(ctx context.Context, example *model.Example) error {
 	return m.createFunc(ctx, example)
+}
+
+func (m *mockExampleRepo) CreateWithTaskKey(ctx context.Context, example *model.Example, taskKey string) (bool, error) {
+	return m.createWithTaskKeyFunc(ctx, example, taskKey)
 }
 
 func (m *mockExampleRepo) List(ctx context.Context, limit, offset int) ([]model.Example, int64, error) {
@@ -153,6 +158,46 @@ func TestProcessExampleRepoError(t *testing.T) {
 	err := svc.ProcessExample(t.Context(), taskExamplePayload("x"))
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
+	}
+}
+
+// TestProcessExampleUsesTaskKey 验证 payload 带 TaskKey 时走幂等插入，
+// 且 TaskKey 原样传给 repo。
+func TestProcessExampleUsesTaskKey(t *testing.T) {
+	var gotKey string
+	repo := &mockExampleRepo{
+		createWithTaskKeyFunc: func(_ context.Context, example *model.Example, taskKey string) (bool, error) {
+			gotKey = taskKey
+			example.ID = 1
+			return true, nil
+		},
+	}
+	svc := NewExampleService(repo, nil)
+
+	p := taskExamplePayload("job")
+	p.TaskKey = "key-1"
+	if err := svc.ProcessExample(t.Context(), p); err != nil {
+		t.Fatalf("ProcessExample: %v", err)
+	}
+	if gotKey != "key-1" {
+		t.Fatalf("repo got task_key=%q, want key-1", gotKey)
+	}
+}
+
+// TestProcessExampleDuplicateIsNoop 验证同一任务重复执行（TaskKey 已存在）
+// 时返回 nil：不能返 error，否则 asynq 会继续重试一个已经成功的任务。
+func TestProcessExampleDuplicateIsNoop(t *testing.T) {
+	repo := &mockExampleRepo{
+		createWithTaskKeyFunc: func(context.Context, *model.Example, string) (bool, error) {
+			return false, nil
+		},
+	}
+	svc := NewExampleService(repo, nil)
+
+	p := taskExamplePayload("job")
+	p.TaskKey = "key-1"
+	if err := svc.ProcessExample(t.Context(), p); err != nil {
+		t.Fatalf("ProcessExample duplicate: %v, want nil", err)
 	}
 }
 

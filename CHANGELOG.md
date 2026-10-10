@@ -735,6 +735,27 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Fixed
 
+- **请求超时统一返回 `REQUEST_TIMEOUT`**: `response.WriteError` 在请求 ctx 已过
+  deadline 时把服务端错误（5xx，如 `DATABASE_ERROR`）改写成 `REQUEST_TIMEOUT`
+  （408）。此前下游调用因超时失败后被包成 `DATABASE_ERROR`，handler 写出 500，
+  `middleware.Timeout` 看到已写响应直接放行，超时信封几乎不会生效。
+- **examples 时间列改为 `TIMESTAMPTZ`**: 新迁移 `20261010005220_examples_timestamptz.sql`。
+  `TIMESTAMP` 存会话时区墙钟时间、pgx 又按 UTC 解码，会话时区非 UTC 时返回时间偏移。
+  迁移标注 `-- breaking`（重写整表），Go 侧类型不变（仍为 `time.Time`）。
+- **example 任务消费幂等**: payload 新增 `task_key`（入队时生成 UUIDv7，omitempty，
+  不升 schema 版本），新迁移 `20261010005221_add_task_key_to_examples.sql` 加唯一索引，
+  `ProcessExample` 走 `INSERT ... ON CONFLICT (task_key) DO NOTHING`，重复执行直接
+  成功返回；不带 `task_key` 的旧消息退回普通插入。
+- **worker payload 反序列化失败不再重试**: 包 `asynq.SkipRetry` 直接进 archived。
+- **`/health` 依赖并发探测**: API 与 worker 的 readiness 探测改为并发，慢依赖不再
+  挤占其他依赖的 2s 超时预算导致误判 unavailable。
+- **asynq 队列指标采集失败可见**: API 侧 collector 传入全局 logger（此前为 nil →
+  Nop，失败静默）；采集失败时删除该队列的 gauge series，不再停留在旧值掩盖积压。
+- **`GIN_MODE` 非法值启动期报错**: 纳入 `config.validate` 汇总报错，不再在
+  `gin.SetMode` 里 panic。
+- **`WORKER_QUEUES` 权重非正时报错文案**: 不再出现 `%!w(<nil>)`。
+- **worker watchdog 注释纠正**: 心跳是独立 goroutine，单个 handler 挂死不会触发
+  systemd 重启，注释不再夸大自愈能力。
 - **DB tracer 将 `context.DeadlineExceeded` 与 `context.Canceled` 一样降为 warn**:
   请求超时不再按 `db query failed` 记 error，改记 warn `db query timed out`。
 - **new-endpoint 修审计发现的三个 hard stop**:
@@ -789,6 +810,9 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Security
 
+- **`/docs` 只给同源请求注入 Bearer token**: 页面 fetch 拦截器此前对所有请求都加
+  `Authorization`，跨域请求（CDN、外部 `$ref` 等）会把 localStorage 里的 JWT 带给
+  第三方 origin。
 - **JWT 强制要求 `exp` claim，闭环永不过期 token**: `pkg/auth.JWTManager.ParseToken`
   显式启用 `jwt.WithExpirationRequired()`——jwt/v5 默认 `exp` 是 optional，
   没有它即使拿到 secret 也能签出永不过期 token，与文档声明的 Layer 1

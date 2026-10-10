@@ -66,6 +66,32 @@ func TestTimeoutEmitsRequestTimeoutEnvelope(t *testing.T) {
 	}
 }
 
+// TestTimeoutMapsDownstreamErrorToRequestTimeout 覆盖最常见的超时路径：下游调用
+// 因 ctx 超时失败，service 包成 DATABASE_ERROR，handler 走 WriteError——客户端
+// 应拿到 REQUEST_TIMEOUT 而不是 500 DATABASE_ERROR。
+func TestTimeoutMapsDownstreamErrorToRequestTimeout(t *testing.T) {
+	engine := gin.New()
+	engine.Use(Timeout(20 * time.Millisecond))
+	engine.GET("/db", func(c *gin.Context) {
+		<-c.Request.Context().Done()
+		response.WriteError(c, errcode.DatabaseError)
+	})
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/db", nil))
+
+	if w.Code != errcode.RequestTimeout.HTTPStatus() {
+		t.Fatalf("status = %d, want %d", w.Code, errcode.RequestTimeout.HTTPStatus())
+	}
+	var resp response.Response
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Code != errcode.RequestTimeout.Code() {
+		t.Fatalf("code = %d, want %d", resp.Code, errcode.RequestTimeout.Code())
+	}
+}
+
 func TestTimeoutDoesNotOverrideHandlerResponse(t *testing.T) {
 	// 如果 handler 已经写过响应（哪怕是慢流），就不能再覆盖——已经 flush
 	// 的 body 被改写会导致响应体损坏。

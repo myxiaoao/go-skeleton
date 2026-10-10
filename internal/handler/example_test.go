@@ -40,6 +40,11 @@ func (m *mockExampleRepo) Create(ctx context.Context, example *model.Example) er
 	return m.createFunc(ctx, example)
 }
 
+// CreateWithTaskKey 只在 worker 消费路径用到，HTTP handler 测试不会调用。
+func (m *mockExampleRepo) CreateWithTaskKey(context.Context, *model.Example, string) (bool, error) {
+	panic("CreateWithTaskKey not expected in handler tests")
+}
+
 func (m *mockExampleRepo) List(ctx context.Context, limit, offset int) ([]model.Example, int64, error) {
 	return m.listFunc(ctx, limit, offset)
 }

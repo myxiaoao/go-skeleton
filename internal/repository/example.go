@@ -15,6 +15,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
 
 	"go-skeleton/internal/model"
 	"go-skeleton/internal/repository/sqlcdb"
@@ -38,8 +41,26 @@ func (r *ExampleRepository) Create(ctx context.Context, example *model.Example) 
 	if err != nil {
 		return err
 	}
-	*example = toExampleModel(row)
+	*example = toExampleModel(exampleRow(row))
 	return nil
+}
+
+// CreateWithTaskKey 带幂等键插一条 example：taskKey 已存在（同一任务重复执行）
+// 时不插入，返回 created=false、err=nil；插入成功时回填 ID / 时间戳到 example。
+func (r *ExampleRepository) CreateWithTaskKey(ctx context.Context, example *model.Example, taskKey string) (bool, error) {
+	row, err := sqlcdb.New(dbFromContext(ctx, r.db)).CreateExampleWithTaskKey(ctx, sqlcdb.CreateExampleWithTaskKeyParams{
+		Name:    example.Name,
+		TaskKey: taskKey,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// ON CONFLICT DO NOTHING 命中时 RETURNING 不返回行。
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	*example = toExampleModel(exampleRow(row))
+	return true, nil
 }
 
 // List 按 id DESC 返回分页 example 列表 + 总行数。Count 和 List 在同一个
@@ -65,7 +86,7 @@ func (r *ExampleRepository) List(ctx context.Context, limit, offset int) ([]mode
 		total = n
 		examples = make([]model.Example, 0, len(rows))
 		for _, row := range rows {
-			examples = append(examples, toExampleModel(row))
+			examples = append(examples, toExampleModel(exampleRow(row)))
 		}
 		return nil
 	})
@@ -75,8 +96,13 @@ func (r *ExampleRepository) List(ctx context.Context, limit, offset int) ([]mode
 	return examples, total, nil
 }
 
+// exampleRow 是各查询共用的行形状（id, name, created_at, updated_at）。sqlc
+// 为每个查询各生成一个字段完全相同的 XxxRow 类型，Go 允许它们之间直接做类型
+// 转换，统一转成 exampleRow 后复用同一个映射函数。
+type exampleRow sqlcdb.ListExamplesRow
+
 // toExampleModel 把 sqlc 生成的行类型映射成对外的 model.Example。
-func toExampleModel(row sqlcdb.Example) model.Example {
+func toExampleModel(row exampleRow) model.Example {
 	return model.Example{
 		ID:        row.ID,
 		Name:      row.Name,

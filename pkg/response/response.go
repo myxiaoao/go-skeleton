@@ -1,6 +1,7 @@
 package response
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -79,14 +80,27 @@ func WriteSuccess(c *gin.Context, data any) {
 // WriteError 把 service 返的 error 转成响应信封。如果是 errcode.Error
 // 直接用对应 Code / Reason + HTTPStatus；其他类型一律压成 INTERNAL_ERROR
 // (HTTP 500)，避免泄漏底层错误细节给客户端。
+//
+// 请求 ctx 已超过 deadline（middleware.Timeout 挂的）时，服务端错误（5xx）
+// 统一改写成 REQUEST_TIMEOUT：此时下游 DB / 队列调用是因 ctx 超时失败，
+// service 会把它包成 DATABASE_ERROR 等错误，不改写的话客户端拿到 500、
+// DB 告警被误触发。客户端错误（4xx）保持原样，它们与超时无关。
 func WriteError(c *gin.Context, err error) {
-	if ec, ok := errors.AsType[errcode.Error](err); ok {
-		c.Set(MetricsCodeKey, ec.Code())
-		c.JSON(ec.HTTPStatus(), ErrorResponse(c, ec))
-		return
+	ec, ok := errors.AsType[errcode.Error](err)
+	if !ok {
+		ec = errcode.InternalError
 	}
-	c.Set(MetricsCodeKey, errcode.InternalError.Code())
-	c.JSON(errcode.InternalError.HTTPStatus(), ErrorResponse(c, errcode.InternalError))
+	if ec.HTTPStatus() >= http.StatusInternalServerError && requestTimedOut(c) {
+		ec = errcode.RequestTimeout
+	}
+	c.Set(MetricsCodeKey, ec.Code())
+	c.JSON(ec.HTTPStatus(), ErrorResponse(c, ec))
+}
+
+// requestTimedOut 判断请求 ctx 是否因 deadline 到期而结束。客户端断开是
+// context.Canceled，不算超时。
+func requestTimedOut(c *gin.Context) bool {
+	return c.Request != nil && errors.Is(c.Request.Context().Err(), context.DeadlineExceeded)
 }
 
 // AbortError 给 middleware 使用：写出 errcode 对应的 HTTP status + 错误信封，

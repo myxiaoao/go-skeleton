@@ -97,7 +97,8 @@ const elementsVersion = "8.4.2"
 //     访问 /docs 所用的地址，本地/部署任意域名都自洽，不受 spec 里写死的
 //     server 影响、也不会跨 origin 触发 CORS。
 //   - fetch 拦截器：从 localStorage 的 go_skeleton_token 读 token，非空时给
-//     TryIt 请求自动加 Authorization 头，保留调试时的自动鉴权便利。
+//     **同源** TryIt 请求自动加 Authorization 头；跨域请求不注入，防止 token
+//     泄露给第三方 origin。
 //   - Theme=system 时监听 prefers-color-scheme 动态切换 data-theme；并修复
 //     Elements dark 模式下代码高亮配色（见 stoplightio/elements#2188）。
 var docsTemplate = template.Must(template.New("docs").Parse(`<!DOCTYPE html>
@@ -115,7 +116,9 @@ var docsTemplate = template.Must(template.New("docs").Parse(`<!DOCTYPE html>
       window.fetch = function (input, init) {
         init = init || {};
         var token = window.localStorage.getItem('go_skeleton_token');
-        if (token) {
+        // 只给同源请求注入 token，避免 JWT 随 CDN / 外部 $ref 等跨域请求泄露给第三方。
+        var url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+        if (token && url.origin === window.location.origin) {
           var headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
           headers.set('Authorization', 'Bearer ' + token);
           init.headers = headers;

@@ -94,8 +94,8 @@ func (d *Deps) RequiredProcessors() []ProcessorRequirement {
 }
 
 // HandleExampleTask 消费 example 异步任务：解 payload → 调 typed
-// ExampleProcessor。处理失败返回 error 让 asynq 走重试策略；解析失败也返
-// error 但属于不可恢复（数据错），上层 asynq 会按 MaxRetry 控制。
+// ExampleProcessor。处理失败返回 error 让 asynq 走重试策略；解析失败属于
+// 不可恢复的数据错，包 asynq.SkipRetry 直接进 archived，不白白重试。
 //
 // Deps.Example 在 RegisterHandlers 阶段已经回填了 noopExampleProcessor，
 // 所以这里**不**再 nil 兜底——如果 nil 进来说明 RegisterHandlers 被绕过
@@ -103,7 +103,7 @@ func (d *Deps) RequiredProcessors() []ProcessorRequirement {
 func (d *Deps) HandleExampleTask(ctx context.Context, t *asynq.Task) error {
 	var p task.ExamplePayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
-		return fmt.Errorf("unmarshal example payload: %w", err)
+		return fmt.Errorf("unmarshal example payload: %w: %w", err, asynq.SkipRetry)
 	}
 	// 反序列化后第一时间校验 payload schema version：超界返 error 让 asynq
 	// 重试，赌后续 worker 升级会消化；不要静默吞——吞了等于真的丢消息，

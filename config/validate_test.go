@@ -38,6 +38,14 @@ func TestValidateTableDriven(t *testing.T) {
 			wantInclude: "REQUEST_TIMEOUT",
 		},
 		{
+			name: "GIN_MODE 非法值被拒（避免 gin.SetMode panic）",
+			mutate: func(c *Config) {
+				c.Server.GinMode = "prod"
+			},
+			wantErr:     true,
+			wantInclude: "GIN_MODE",
+		},
+		{
 			name: "GracefulDrain 负数非法（0 合法）",
 			mutate: func(c *Config) {
 				c.Server.GracefulDrain = -1 * time.Second

@@ -251,6 +251,19 @@ func TestQueueWeightsEnvRejectsGarbage(t *testing.T) {
 	}
 }
 
+// TestQueueWeightsEnvNonPositiveMessage 验证权重非正时报错文案可读，不出现
+// "%!w(<nil>)" 这种格式化残渣。
+func TestQueueWeightsEnvNonPositiveMessage(t *testing.T) {
+	t.Setenv("WORKER_QUEUES", "critical:0")
+	_, err := queueWeightsEnv("WORKER_QUEUES", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if msg := err.Error(); strings.Contains(msg, "%!") || !strings.Contains(msg, "must be > 0") {
+		t.Errorf("unexpected error message: %q", msg)
+	}
+}
+
 func TestParseCSVHandlesWhitespaceAndEmpties(t *testing.T) {
 	got := parseCSV(" a, b ,, c,  ")
 	want := []string{"a", "b", "c"}

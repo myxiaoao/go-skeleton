@@ -7,6 +7,7 @@ package sqlcdb
 
 import (
 	"context"
+	"time"
 )
 
 const countExamples = `-- name: CountExamples :one
@@ -26,9 +27,48 @@ VALUES ($1)
 RETURNING id, name, created_at, updated_at
 `
 
-func (q *Queries) CreateExample(ctx context.Context, name string) (Example, error) {
+type CreateExampleRow struct {
+	ID        int64
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (q *Queries) CreateExample(ctx context.Context, name string) (CreateExampleRow, error) {
 	row := q.db.QueryRow(ctx, createExample, name)
-	var i Example
+	var i CreateExampleRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createExampleWithTaskKey = `-- name: CreateExampleWithTaskKey :one
+INSERT INTO examples (name, task_key)
+VALUES ($1, $2::varchar)
+ON CONFLICT (task_key) DO NOTHING
+RETURNING id, name, created_at, updated_at
+`
+
+type CreateExampleWithTaskKeyParams struct {
+	Name    string
+	TaskKey string
+}
+
+type CreateExampleWithTaskKeyRow struct {
+	ID        int64
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// task_key 冲突（同一任务重复执行）时不插入、不返回行，调用方据此识别重复。
+func (q *Queries) CreateExampleWithTaskKey(ctx context.Context, arg CreateExampleWithTaskKeyParams) (CreateExampleWithTaskKeyRow, error) {
+	row := q.db.QueryRow(ctx, createExampleWithTaskKey, arg.Name, arg.TaskKey)
+	var i CreateExampleWithTaskKeyRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -50,15 +90,22 @@ type ListExamplesParams struct {
 	Lim int64
 }
 
-func (q *Queries) ListExamples(ctx context.Context, arg ListExamplesParams) ([]Example, error) {
+type ListExamplesRow struct {
+	ID        int64
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (q *Queries) ListExamples(ctx context.Context, arg ListExamplesParams) ([]ListExamplesRow, error) {
 	rows, err := q.db.Query(ctx, listExamples, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Example
+	var items []ListExamplesRow
 	for rows.Next() {
-		var i Example
+		var i ListExamplesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,

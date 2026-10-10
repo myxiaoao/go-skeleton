@@ -6,6 +6,8 @@ package sqlcdb
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Example struct {
@@ -13,4 +15,5 @@ type Example struct {
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	TaskKey   pgtype.Text
 }

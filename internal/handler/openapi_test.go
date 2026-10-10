@@ -87,6 +87,7 @@ func TestDocs(t *testing.T) {
 		"window.location.origin",
 		"apiDescriptionDocument",
 		"go_skeleton_token",
+		"url.origin === window.location.origin", // token 只注入同源请求
 		"@stoplight/elements@" + elementsVersion,
 	} {
 		if !strings.Contains(body, want) {

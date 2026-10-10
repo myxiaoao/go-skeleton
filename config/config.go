@@ -160,8 +160,11 @@ func queueWeightsEnv(key string, fallback map[string]int) (map[string]int, error
 			return fallback, fmt.Errorf("%s: expected name:weight pairs, got %q", key, part)
 		}
 		weight, err := strconv.Atoi(weightStr)
-		if err != nil || weight <= 0 {
+		if err != nil {
 			return fallback, fmt.Errorf("%s: invalid weight in %q: %w", key, part, err)
+		}
+		if weight <= 0 {
+			return fallback, fmt.Errorf("%s: weight must be > 0 in %q", key, part)
 		}
 		out[name] = weight
 	}

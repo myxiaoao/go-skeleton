@@ -76,3 +76,25 @@ func TestExampleRepositoryIntegration_CreateThenList(t *testing.T) {
 		t.Fatalf("created row %d not in first page", e.ID)
 	}
 }
+
+// TestExampleRepositoryIntegration_CreateWithTaskKeyIsIdempotent 验证同一
+// task_key 重复插入只落一行：第二次返回 created=false 且不报错。
+func TestExampleRepositoryIntegration_CreateWithTaskKeyIsIdempotent(t *testing.T) {
+	pool := openTestPool(t)
+	repo := repository.NewExampleRepository(pool)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	key := "integration-" + time.Now().Format("150405.000000")
+	first := &model.Example{Name: key}
+	created, err := repo.CreateWithTaskKey(ctx, first, key)
+	if err != nil || !created || first.ID == 0 {
+		t.Fatalf("first insert: created=%v id=%d err=%v", created, first.ID, err)
+	}
+
+	created, err = repo.CreateWithTaskKey(ctx, &model.Example{Name: key}, key)
+	if err != nil || created {
+		t.Fatalf("duplicate insert: created=%v err=%v, want created=false err=nil", created, err)
+	}
+}

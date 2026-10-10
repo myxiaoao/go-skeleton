@@ -12,6 +12,8 @@ package task
 //     service，**不要**在 worker 里复制一份业务逻辑。
 
 import (
+	"uuid"
+
 	"github.com/hibiken/asynq"
 )
 
@@ -22,29 +24,34 @@ const (
 )
 
 // ExamplePayload 是 example 任务的 JSON payload。Header 提供 trace_id +
-// schema version，Name 是业务字段。JSON 序列化后形如：
+// schema version，Name 是业务字段，TaskKey 是消费端的幂等键（入队时生成，
+// 同一任务的每次重试 / 重复投递都带同一个值）。JSON 序列化后形如：
 //
-//	{"v":1,"trace_id":"...","name":"foo"}
+//	{"v":1,"trace_id":"...","name":"foo","task_key":"..."}
+//
+// TaskKey 是后加字段（omitempty），旧版本投递的消息没有它，消费端要兼容空值。
 //
 // 嵌入字段被 Go JSON encoding 自动提升到顶层，所以 worker 端的
 // TraceIDFromPayload 仍按 "trace_id" 解析；CheckHeader 按 "v" 校验。
 type ExamplePayload struct {
 	Header
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	TaskKey string `json:"task_key,omitempty"`
 }
 
 // NewExampleTask 构造一个待入队的 example 任务，自动带 DefaultOptions
 // （MaxRetry + Timeout）。traceID 用 variadic 是为了让无 trace 上下文的
 // 调用方（脚本 / 测试）可以省略，但只取第一个；多传会被静默忽略，保持
-// 调用面简单。
+// 调用面简单。每次调用生成新的 TaskKey（UUIDv7），供消费端去重。
 func NewExampleTask(name string, traceID ...string) (*asynq.Task, error) {
 	var tid string
 	if len(traceID) > 0 {
 		tid = traceID[0]
 	}
 	p := ExamplePayload{
-		Header: NewHeader(tid),
-		Name:   name,
+		Header:  NewHeader(tid),
+		Name:    name,
+		TaskKey: uuid.NewV7().String(),
 	}
 
 	payload, err := MarshalPayload(TypeExampleTask, p)

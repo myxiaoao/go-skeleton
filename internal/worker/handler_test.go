@@ -118,13 +118,17 @@ func TestHandleExampleTaskRejectsUnsupportedVersion(t *testing.T) {
 }
 
 // TestHandleExampleTaskRejectsMalformedPayload 验证 JSON 解析失败时返
-// error；这是 unmarshal 错（payload 数据本身坏），不该静默放过。
+// error；这是 unmarshal 错（payload 数据本身坏），不该静默放过，且必须包
+// asynq.SkipRetry——重试也解析不了，白白占并发槽。
 func TestHandleExampleTaskRejectsMalformedPayload(t *testing.T) {
 	deps := &Deps{Example: &mockExampleProcessor{}}
 	err := deps.HandleExampleTask(t.Context(),
 		asynq.NewTask(task.TypeExampleTask, []byte("not-json")))
 	if err == nil {
 		t.Fatal("want unmarshal error, got nil")
+	}
+	if !errors.Is(err, asynq.SkipRetry) {
+		t.Errorf("want error wrapping asynq.SkipRetry, got %v", err)
 	}
 }
 

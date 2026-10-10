@@ -235,3 +235,40 @@ func TestHealthHandlerReturns503WhenDBDown(t *testing.T) {
 		t.Errorf("status = %q, want %q", body.Status, oapi.HealthResponseStatusUnhealthy)
 	}
 }
+
+// TestHealthHandlerProbesConcurrently 验证依赖是并发探测的：DB 的 Ping 要等
+// Redis 的 Ping 被调用后才返回，串行实现下 DB 会一直等到 2s 超时被误标
+// unavailable；并发实现下两者都 ok。
+func TestHealthHandlerProbesConcurrently(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	redisCalled := make(chan struct{})
+	db := healthPingerFunc(func(ctx context.Context) error {
+		select {
+		case <-redisCalled:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	redis := healthPingerFunc(func(context.Context) error {
+		close(redisCalled)
+		return nil
+	})
+	queueOK := healthPingerFunc(func(context.Context) error { return nil })
+
+	h := newHealthHandlerForTest(db, redis, queueOK)
+	router.GET("/health", h.Health)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var body oapi.HealthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Checks["postgres"] != oapi.HealthResponseChecksOk {
+		t.Errorf("postgres check = %q, want ok (probes must run concurrently)", body.Checks["postgres"])
+	}
+}

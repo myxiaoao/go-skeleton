@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"go-skeleton/pkg/buildinfo"
@@ -61,16 +62,17 @@ func newHTTPHandler(metrics http.Handler, checks HealthChecks) http.Handler {
 }
 
 // serveHealth 是 readiness：Redis 必查、DB 配置时才查，任一失败返 503。
-//
-// 注意：Redis 与 DB 是**顺序**探测、共用同一个 healthProbeTimeout（2s）。Redis
-// 很慢时会吃掉大部分预算，DB 可能因 ctx 超时被标成 unavailable——此时 checks
-// 里的 postgres 状态不一定是 DB 本身的问题，但整体结果都是 503，判定不受影响。
+// Redis 与 DB 并发探测，各自都拿到完整的 healthProbeTimeout（2s），一个慢
+// 依赖不会挤占另一个的预算、把健康依赖误标成 unavailable。
 func (hc HealthChecks) serveHealth(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), healthProbeTimeout)
 	defer cancel()
 
-	redis := probe(ctx, hc.Redis)
-	db := probe(ctx, hc.DB)
+	var redis, db string
+	var wg sync.WaitGroup
+	wg.Go(func() { redis = probe(ctx, hc.Redis) })
+	wg.Go(func() { db = probe(ctx, hc.DB) })
+	wg.Wait()
 	healthy := redis == checkOK && db != checkUnavailable
 
 	status, code := "ok", http.StatusOK

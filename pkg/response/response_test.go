@@ -1,11 +1,13 @@
 package response
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -80,6 +82,47 @@ func TestWriteErrorFallsBackForUnknownError(t *testing.T) {
 	}
 	if resp.Reason != errcode.InternalError.Reason() {
 		t.Errorf("expected reason %q, got %q", errcode.InternalError.Reason(), resp.Reason)
+	}
+}
+
+// newTimedOutCtx 构造一个请求 ctx 已过 deadline 的 gin.Context，模拟
+// middleware.Timeout 到期后 handler 再写错误的场景。
+func newTimedOutCtx(t *testing.T) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, w := newCtx()
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	t.Cleanup(cancel)
+	c.Request = c.Request.WithContext(ctx)
+	return c, w
+}
+
+// TestWriteErrorRewritesServerErrorOnTimeout 验证请求 ctx 超时后，下游包出来
+// 的服务端错误（DATABASE_ERROR / 未知 error）被改写成 REQUEST_TIMEOUT。
+func TestWriteErrorRewritesServerErrorOnTimeout(t *testing.T) {
+	for _, err := range []error{errcode.DatabaseError, errors.New("boom")} {
+		c, w := newTimedOutCtx(t)
+		WriteError(c, err)
+
+		if w.Code != errcode.RequestTimeout.HTTPStatus() {
+			t.Errorf("%v: status = %d, want %d", err, w.Code, errcode.RequestTimeout.HTTPStatus())
+		}
+		if resp := decode(t, w); resp.Code != errcode.RequestTimeout.Code() {
+			t.Errorf("%v: code = %d, want %d", err, resp.Code, errcode.RequestTimeout.Code())
+		}
+		if got, _ := c.Get(MetricsCodeKey); got != errcode.RequestTimeout.Code() {
+			t.Errorf("%v: metrics code = %v, want %d", err, got, errcode.RequestTimeout.Code())
+		}
+	}
+}
+
+// TestWriteErrorKeepsClientErrorOnTimeout 验证超时不会改写客户端错误（4xx），
+// 它们和超时无关。
+func TestWriteErrorKeepsClientErrorOnTimeout(t *testing.T) {
+	c, w := newTimedOutCtx(t)
+	WriteError(c, errcode.NotFound)
+
+	if resp := decode(t, w); resp.Code != errcode.NotFound.Code() {
+		t.Errorf("code = %d, want %d", resp.Code, errcode.NotFound.Code())
 	}
 }
 

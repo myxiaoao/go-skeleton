@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
 )
 
 type mockInspector struct {
@@ -91,5 +92,24 @@ func TestRegistry_StartAsynqCollector_InspectorErrorLogged(t *testing.T) {
 	}
 	if inspector.callCount.Load() == 0 {
 		t.Fatal("expected at least one inspector call before deadline")
+	}
+}
+
+// TestRegistry_CollectAsynq_FailureDropsStaleSeries 验证抓取失败时删掉旧 series，
+// 而不是让 gauge 停在上一次成功的值上掩盖积压。
+func TestRegistry_CollectAsynq_FailureDropsStaleSeries(t *testing.T) {
+	r := New("test")
+	inspector := &mockInspector{
+		infos: map[string]*asynq.QueueInfo{"critical": {Queue: "critical", Pending: 30}},
+	}
+	r.collectAsynq(inspector, []string{"critical"}, zap.NewNop())
+
+	inspector.mu.Lock()
+	inspector.errFor = map[string]error{"critical": errors.New("redis down")}
+	inspector.mu.Unlock()
+	r.collectAsynq(inspector, []string{"critical"}, zap.NewNop())
+	// DeleteLabelValues 返回 false 说明 series 已被 collector 删掉。
+	if r.asynq.pending.DeleteLabelValues("critical") {
+		t.Fatal("pending series still present after failed collect")
 	}
 }

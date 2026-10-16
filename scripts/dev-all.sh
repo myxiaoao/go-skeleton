@@ -14,7 +14,7 @@
 #   1. 探活 Postgres + Redis（dev-deps-check 等价逻辑，复用 .env 解析）。
 #      不可达时不自动起 docker——caller 自行 `make dev-up`，避免脚本越权
 #      改本机环境。
-#   2. 跑 `go run ./cmd/migrate -cmd up`，迁移完才放行后续进程，避免 API
+#   2. 跑 `go run ./cmd/go-skeleton migrate up`，迁移完才放行后续进程，避免 API
 #      启动期撞未建好的表。
 #   3. 并发起 API + Worker，前台跟随两路日志（前缀 [api] / [worker]
 #      区分），Ctrl-C 优雅停：SIGINT/SIGTERM 触发 trap，向两个 PID
@@ -26,7 +26,7 @@
 #   - 不带文件热重载：那是 `make watch` 的事，dev-all 是"端到端跑一遍"。
 #
 # 进程模型：
-#   主脚本 fork 两个子进程（cmd/api、cmd/worker），各自把 stdout/stderr
+#   主脚本 fork 两个子进程（api、worker 子命令），各自把 stdout/stderr
 #   通过 awk 行缓冲加前缀后写主进程的 stdout。监控用 polling 写法，兼
 #   容 macOS 自带的 bash 3.2（没有 `wait -n`）。
 
@@ -107,7 +107,7 @@ fi
 
 # ---- 2. 迁移 ----
 echo "[dev-all] running migrations..."
-go run ./cmd/migrate -cmd up
+go run ./cmd/go-skeleton migrate up
 
 # ---- 3. 并发起 API + Worker，加前缀输出 ----
 #
@@ -116,11 +116,11 @@ go run ./cmd/migrate -cmd up
 # cleanup 和 exit code 都会盯错对象。
 echo "[dev-all] starting api + worker (Ctrl-C to stop both)..."
 
-go run ./cmd/api \
+go run ./cmd/go-skeleton api \
   > >(awk '{ print "[api]    " $0; fflush(stdout) }') 2>&1 &
 API_PID=$!
 
-go run ./cmd/worker \
+go run ./cmd/go-skeleton worker \
   > >(awk '{ print "[worker] " $0; fflush(stdout) }') 2>&1 &
 WORKER_PID=$!
 

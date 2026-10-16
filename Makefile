@@ -3,11 +3,10 @@
 # 项目元信息
 MODULE      := go-skeleton
 BIN_DIR     := bin
-API_BIN     := $(BIN_DIR)/api
-WORKER_BIN  := $(BIN_DIR)/worker
-MIGRATE_BIN := $(BIN_DIR)/migrate
+APP_BIN     := $(BIN_DIR)/go-skeleton
+APP_CMD     := ./cmd/go-skeleton
 
-# 本地默认 API 端口（与 cmd/api/.env.example SERVER_PORT 对齐）
+# 本地默认 API 端口（与 .env.example SERVER_PORT 对齐）
 API_PORT ?= 3000
 
 # go 命令统一开关
@@ -372,7 +371,7 @@ tidy-verify: ## 校验 go.mod / go.sum 与 go mod tidy 结果一致（防漂移�
 	rm -rf "$$tmpdir"; \
 	echo "tidy-verify: go.mod / go.sum are tidy."
 
-# ---------- 本地运行（三进程入口） ----------
+# ---------- 本地运行（单二进制的三个子命令） ----------
 
 .PHONY: run-api
 run-api: ## 启动 API（占用 API_PORT，默认 3000）。端口占用会直接报错退出
@@ -380,7 +379,7 @@ run-api: ## 启动 API（占用 API_PORT，默认 3000）。端口占用会直�
 		echo "ERROR: port $(API_PORT) is busy. Run 'make stop-api' to free it, or set API_PORT=<other>."; \
 		exit 1; \
 	fi
-	$(GO) run ./cmd/api
+	$(GO) run $(APP_CMD) api
 
 .PHONY: stop-api
 stop-api: ## 显式终止占用 API_PORT 的进程（先 TERM，超时后 KILL）
@@ -406,7 +405,7 @@ stop-api: ## 显式终止占用 API_PORT 的进程（先 TERM，超时后 KILL�
 
 .PHONY: run-worker
 run-worker: ## 启动 Asynq 消费者
-	$(GO) run ./cmd/worker
+	$(GO) run $(APP_CMD) worker
 
 .PHONY: _ensure-air
 _ensure-air:
@@ -429,7 +428,7 @@ watch: ## 用 air 热重载跑 API（保存 .go 文件自动重启）
 
 .PHONY: run-migrate
 run-migrate: ## 跑迁移 up：应用全部待执行的 migrations/*.sql（需要 POSTGRES 配置）
-	$(GO) run ./cmd/migrate -cmd up
+	$(GO) run $(APP_CMD) migrate up
 
 .PHONY: migrate-down
 migrate-down: ## 回滚最近一版迁移（破坏性，默认需确认；CI/脚本传 confirm=1 绕过）
@@ -438,11 +437,11 @@ migrate-down: ## 回滚最近一版迁移（破坏性，默认需确认；CI/脚
 		read ans; \
 		if [ "$$ans" != "yes" ]; then echo "已取消。"; exit 1; fi; \
 	fi
-	$(GO) run ./cmd/migrate -cmd down
+	$(GO) run $(APP_CMD) migrate down
 
 .PHONY: migrate-status
 migrate-status: ## 打印各迁移的应用状态（需要 POSTGRES 配置）
-	$(GO) run ./cmd/migrate -cmd status
+	$(GO) run $(APP_CMD) migrate status
 
 .PHONY: migrate-create
 # name 经 target-specific export 进环境变量 migrate_name，recipe 全程只引用 shell
@@ -475,19 +474,8 @@ version: ## 打印当前会注入到二进制里的版本元数据
 	@echo "BUILD_TIME = $(BUILD_TIME)"
 
 .PHONY: build
-build: build-api build-worker build-migrate ## 构建三个进程的二进制到 bin/（本机平台，注入版本）
-
-.PHONY: build-api
-build-api: | $(BIN_DIR) ## 构建 API
-	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(API_BIN) ./cmd/api
-
-.PHONY: build-worker
-build-worker: | $(BIN_DIR) ## 构建 Worker
-	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(WORKER_BIN) ./cmd/worker
-
-.PHONY: build-migrate
-build-migrate: | $(BIN_DIR) ## 构建 Migrate
-	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(MIGRATE_BIN) ./cmd/migrate
+build: | $(BIN_DIR) ## 构建单二进制 bin/go-skeleton（子命令 api / worker / migrate，本机平台，注入版本）
+	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(APP_BIN) $(APP_CMD)
 
 # ---------- 交叉编译 + 发布 artifact ----------
 #
@@ -506,13 +494,11 @@ build-cross:
 	@os=$$(echo $(TARGET) | cut -d/ -f1); arch=$$(echo $(TARGET) | cut -d/ -f2); \
 	out=$(DIST_DIR)/$(VERSION)/$${os}-$${arch}; \
 	mkdir -p $$out/bin $$out/deploy/systemd; \
-	for cmd in api worker migrate; do \
-		printf '  → %s/%s/bin/%s\n' "$$os" "$$arch" "$$cmd"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-			$(GO) build -trimpath -tags netgo \
-				-ldflags="$(LDFLAGS)" \
-				-o $$out/bin/$$cmd ./cmd/$$cmd; \
-	done; \
+	printf '  → %s/%s/bin/go-skeleton\n' "$$os" "$$arch"; \
+	CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+		$(GO) build -trimpath -tags netgo \
+			-ldflags="$(LDFLAGS)" \
+			-o $$out/bin/go-skeleton $(APP_CMD); \
 	cp .env.example $$out/.env.example; \
 	cp deploy/systemd/*.service $$out/deploy/systemd/ 2>/dev/null || true; \
 	cp docs/deploy.md $$out/DEPLOY.md 2>/dev/null || true; \
@@ -540,27 +526,25 @@ release: build-linux ## 把 Linux 二进制打成 tarball + SHA256SUMS 到 dist/
 	shasum -a 256 go-skeleton-$(VERSION)-*.tar.gz > SHA256SUMS && \
 	printf '\n=== SHA256SUMS ===\n' && cat SHA256SUMS
 
-# ---------- 容器镜像（默认构建 cmd/api） ----------
+# ---------- 容器镜像（单镜像，子命令由容器参数决定） ----------
 
 DOCKER_IMAGE ?= go-skeleton
 DOCKER_TAG   ?= dev
-CMD_TARGET   ?= api
 
 .PHONY: docker-build
-docker-build: ## 构建 multi-stage 镜像（CMD_TARGET=api|worker|migrate）
+docker-build: ## 构建 multi-stage 镜像（单二进制；运行时传 api|worker|migrate 选子命令，默认 api）
 	docker build \
-		--build-arg CMD_TARGET=$(CMD_TARGET) \
 		--build-arg VERSION='$(VERSION)' \
 		--build-arg COMMIT='$(COMMIT)' \
 		--build-arg BUILD_TIME='$(BUILD_TIME)' \
-		-t $(DOCKER_IMAGE)-$(CMD_TARGET):$(DOCKER_TAG) .
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 .PHONY: docker-run
 docker-run: ## 本地跑 API 镜像（依赖 make dev-up；host.docker.internal 通到宿主）
 	docker run --rm -p 3000:3000 \
 		-e POSTGRES=postgres://user:password@host.docker.internal:5432/app?sslmode=disable \
 		-e REDIS_ADDR=host.docker.internal:6379 \
-		$(DOCKER_IMAGE)-api:$(DOCKER_TAG)
+		$(DOCKER_IMAGE):$(DOCKER_TAG) api
 
 # ---------- 检查 ----------
 

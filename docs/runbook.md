@@ -69,7 +69,7 @@ SQL
 
 ```sh
 make dev-deps-check    # 探活 Postgres :5432 + Redis :6379
-go run ./cmd/migrate
+go run ./cmd/go-skeleton migrate up
 ```
 
 > 生产凭证**不要**用 `user/password`；这套默认值只是开发期为了零配置。改 `.env` 里的 `POSTGRES` DSN + `REDIS_PASSWORD` 后再 `make dev-deps-check`。
@@ -239,7 +239,7 @@ make dev-all       # 探活 → 迁移 → 并发起 API + Worker（前缀 [api]
 
 `make dev-all` 是 `scripts/dev-all.sh` 的薄封装，做 4 件事：
 - `dev-deps-check` 探活 Postgres + Redis（不可达直接 fail，不自动起 docker）
-- `go run ./cmd/migrate -cmd up`（迁移完才放行后续）
+- `go run ./cmd/go-skeleton migrate up`（迁移完才放行后续）
 - 并发起 API + Worker，stdout 前缀化方便区分
 - Ctrl-C 触发优雅停：先 SIGTERM，等 `GRACEFUL_SHUTDOWN_TIMEOUT`（默认 15s）再 SIGKILL 兜底
 
@@ -249,7 +249,7 @@ make dev-all       # 探活 → 迁移 → 并发起 API + Worker（前缀 [api]
 
 ```sh
 make dev-up
-go run ./cmd/migrate           # goose up，应用 migrations/ 待执行迁移（建表）
+go run ./cmd/go-skeleton migrate up   # goose up，应用 migrations/ 待执行迁移（建表）
 make run-api &                 # 端口 3000
 make run-worker &              # 消费 Asynq
 ```
@@ -300,9 +300,7 @@ make build-linux-amd64
 make build-linux-arm64
 
 # 看二进制版本：
-./bin/api -version
-./bin/worker -version
-./bin/migrate -version
+./bin/go-skeleton version      # 单二进制，子命令 api / worker / migrate 共用
 
 # CI 自动发版：推一个 v* tag 会触发 .github/workflows/release.yml
 git tag v0.2.0 && git push origin v0.2.0
@@ -311,11 +309,11 @@ git tag v0.2.0 && git push origin v0.2.0
 ## 打容器镜像
 
 ```sh
-make docker-build              # 默认 cmd/api，产物 go-skeleton-api:dev
-make docker-run                # 本地跑，连 host.docker.internal 上的 dev 依赖
+make docker-build              # 单镜像 go-skeleton:dev（ENTRYPOINT 二进制，默认 CMD api）
+make docker-run                # 本地跑 API，连 host.docker.internal 上的 dev 依赖
 
-CMD_TARGET=worker make docker-build   # 同一份 Dockerfile 打 worker
-CMD_TARGET=migrate make docker-build  # 同一份 Dockerfile 打 migrate
+docker run go-skeleton:dev worker       # 同一镜像跑 worker（覆盖 args）
+docker run go-skeleton:dev migrate up   # 同一镜像跑迁移
 ```
 
 ## 排错 cheat sheet
@@ -366,11 +364,11 @@ pprof debug 端点默认关闭。需要现场抓 CPU/heap profile 时临时打�
 | DB 慢查询 | `psql -c "SELECT pid, now()-query_start AS dur, query FROM pg_stat_activity WHERE state='active' ORDER BY dur DESC LIMIT 10"` |
 | Worker 不消费 | `curl http://127.0.0.1:8980` (Asynqmon)；或 `redis-cli -n 6 LLEN asynq:queues:default` |
 | trace_id 找日志 | `journalctl -u go-skeleton-api -o cat \| jq 'select(.trace_id=="XXX")'` |
-| 想知道版本 | `/opt/go-skeleton/bin/api -version` 或 `curl /health \| jq .build` |
+| 想知道版本 | `/opt/go-skeleton/bin/go-skeleton version` 或 `curl /health \| jq .build` |
 | /health degraded | Redis 抖动；看 `journalctl -u go-skeleton-api \| grep -i redis` |
 | /health 503 | DB 不可达；看 Postgres 进程 + 连接数（`pg_stat_activity`） |
 | watchdog 重启 | `journalctl -u go-skeleton-api \| grep -i watchdog`；进程挂死或 GC pause 过长 |
-| FD 耗尽 (EMFILE) | `cat /proc/$(pgrep -f bin/api)/limits`；确认 LimitNOFILE=65535 生效 |
+| FD 耗尽 (EMFILE) | `cat /proc/$(systemctl show -p MainPID --value go-skeleton-api)/limits`；确认 LimitNOFILE=65535 生效 |
 
 ## 日志字段速查
 

@@ -68,7 +68,7 @@ func NewWorker(reg *bootstrap.Registry) (*Worker, error) {
 // Run 启动 Asynq worker server，阻塞到 ctx 取消，然后两阶段停服。
 //
 // 用 Start 而不是 Run：Run = Start + 它自己的 waitForSignals + Shutdown，
-// 那条内置 signal loop 会和 cmd/worker/main.go 的 signal.NotifyContext 抢
+// 那条内置 signal loop 会和 internal/cli/worker.go 的 signal.NotifyContext 抢
 // SIGTERM，两套信号处理并存语义混乱。Start 是同步的、返回启动期 error，让我们
 // 能精确地"启动成功后才发 READY=1"——这是 onReady 的关键：在 Start 返回 nil
 // 之后调，Asynq 已真正进入消费态。若 Start 失败（如 Redis 不可达），直接返

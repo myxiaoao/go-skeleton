@@ -1,0 +1,96 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# all-in-one overlay：单个 Deployment 跑 all 模式（不带子命令 = 进程内
+# migrate up + API + Worker），适合小规模集群 / 预发环境。需要 API / Worker
+# 分开扩缩容时改用 overlays/production（拆分部署）。
+#
+# 相对 base 的差异：
+#   - go-skeleton-api Deployment 去掉 args 走 all 模式，额外暴露 worker 可观测
+#     端口 9091；component label 仍沿用 api，Service / HPA / PDB 不用改。
+#   - 删除独立的 worker Deployment 与 migrate Job：迁移由每个 Pod 启动时执行，
+#     多副本并发启动由 advisory lock 串行化。
+#   - worker 的 NetworkPolicy / PodMonitor 改为选中 api Pod 的 9091 端口。
+#
+# 用法：
+#   cd deploy/k8s/overlays/all-in-one
+#   kustomize edit set image go-skeleton=registry/your-org/go-skeleton:$VERSION
+#   kubectl apply -k .
+
+namespace: go-skeleton
+
+resources:
+  - ../../base
+
+images:
+  - name: go-skeleton
+    newName: registry/your-org/go-skeleton
+    newTag: REPLACE-TAG-WITH-VERSION
+
+patches:
+  - target:
+      kind: Deployment
+      name: go-skeleton-worker
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: go-skeleton-worker
+  - target:
+      kind: Job
+      name: go-skeleton-migrate
+    patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: go-skeleton-migrate
+  - target:
+      kind: Deployment
+      name: go-skeleton-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: []
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value:
+          name: worker-metrics
+          containerPort: 9091
+          protocol: TCP
+      # 与 base worker Deployment 一致：worker 可观测端口只绑 Pod IP。
+      - op: add
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: WORKER_METRICS_ADDR
+            value: "$(POD_IP):9091"
+      # 迁移在 HTTP 端口绑定之前执行：startup 窗口放宽到 5min，覆盖 advisory lock 等待。
+      - op: replace
+        path: /spec/template/spec/containers/0/startupProbe/failureThreshold
+        value: 60
+      # drain + HTTP Shutdown 与 worker 两阶段停服并行，按 worker 的 60s 取值。
+      - op: replace
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 60
+  - target:
+      kind: NetworkPolicy
+      name: go-skeleton-worker
+    patch: |-
+      - op: replace
+        path: /spec/podSelector/matchLabels/app.kubernetes.io~1component
+        value: api
+  - target:
+      kind: PodMonitor
+      name: go-skeleton-worker
+    patch: |-
+      - op: replace
+        path: /spec/selector/matchLabels/app.kubernetes.io~1component
+        value: api
+      - op: replace
+        path: /spec/podMetricsEndpoints/0/port
+        value: worker-metrics

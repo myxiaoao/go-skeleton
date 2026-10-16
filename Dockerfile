@@ -1,13 +1,14 @@
 # Multi-stage build for go-skeleton.
-# Default target is cmd/api. Build cmd/worker or cmd/migrate by overriding
-# CMD_TARGET at build time, e.g.:
-#   docker build --build-arg CMD_TARGET=worker -t go-skeleton-worker .
+# One image ships the single go-skeleton binary; pick the subcommand at run
+# time (default: all = migrate up + API + worker in one process), e.g.:
+#   docker run go-skeleton            # all
+#   docker run go-skeleton api
+#   docker run go-skeleton worker
+#   docker run go-skeleton migrate up
 
 ARG GO_VERSION=1.27.1
 
 FROM golang:${GO_VERSION}-bookworm AS builder
-
-ARG CMD_TARGET=api
 
 # Build metadata injected into pkg/buildinfo via -ldflags -X (mirrors the
 # Makefile). The build context has no .git, so pass these from CI:
@@ -40,7 +41,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
             -X 'go-skeleton/pkg/buildinfo.Version=${VERSION}' \
             -X 'go-skeleton/pkg/buildinfo.Commit=${COMMIT}' \
             -X 'go-skeleton/pkg/buildinfo.BuildTime=${BUILD_TIME}'" \
-        -o /out/app ./cmd/${CMD_TARGET}
+        -o /out/app ./cmd/go-skeleton
 
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 

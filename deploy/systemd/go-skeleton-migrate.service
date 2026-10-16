@@ -16,7 +16,7 @@ Group=go-skeleton
 
 WorkingDirectory=/opt/go-skeleton
 EnvironmentFile=/etc/go-skeleton/.env
-ExecStart=/opt/go-skeleton/bin/migrate
+ExecStart=/opt/go-skeleton/bin/go-skeleton migrate up
 
 NoNewPrivileges=true
 ProtectSystem=strict

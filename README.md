@@ -8,9 +8,14 @@
 
 ## 目录结构
 
-- `cmd/api`：HTTP API 进程。
-- `cmd/worker`：Asynq worker 进程。
-- `cmd/migrate`：基于 goose 的版本化 SQL 迁移入口（迁移文件在 `migrations/`）。
+- `cmd/go-skeleton`：单二进制入口，按子命令区分进程（实现在 `internal/cli`）：
+  - `go-skeleton`（不带参数，等同 `go-skeleton all`）：单进程内先跑 `migrate up`，再同时启动 API + Worker，适合小规模单机部署。
+  - `go-skeleton api`：HTTP API 进程。
+  - `go-skeleton worker`：Asynq worker 进程。
+  - `go-skeleton migrate [up|down|status]`：基于 goose 的版本化 SQL 迁移（默认 up，迁移文件在 `migrations/`）。
+  - `go-skeleton version`：打印版本信息（也支持 `-version`）。
+
+  需要 API / Worker 分开扩缩容时，用 `api` / `worker` / `migrate` 子命令把它们作为独立进程部署（systemd / k8s 默认就是这种拆分方式），共用同一个二进制 / 镜像。
 - `config`：环境变量加载与配置类型。
 - `internal/bootstrap`：进程级资源初始化与生命周期管理。
 - `internal`：应用装配、路由、中间件以及 example 分层代码。
@@ -31,7 +36,7 @@ cp .env.example .env
 ```sh
 make dev-up          # 起 Postgres + Redis 容器
 make run-migrate     # 跑迁移 up（建表）；回滚/状态见 docs/runbook.md
-go run ./cmd/api     # 监听 :3000
+go run ./cmd/go-skeleton api     # 监听 :3000
 ```
 
 ### B. 用本机已装的 Postgres + Redis（不用 docker）
@@ -44,13 +49,13 @@ brew install postgresql@17 redis && brew services start postgresql@17 && brew se
 # 建与 .env.example 对齐的 user / db（见 docs/runbook.md 详细命令）
 make dev-deps-check  # 探活 Postgres :5432 + Redis :6379，不通会给出装包提示
 make run-migrate
-go run ./cmd/api
+go run ./cmd/go-skeleton api
 ```
 
 配置好 Redis 后另开一个终端跑 worker：
 
 ```sh
-go run ./cmd/worker
+go run ./cmd/go-skeleton worker
 ```
 
 或一条命令前台同时跑迁移 + API + Worker（Ctrl-C 优雅停两者）：
@@ -68,11 +73,11 @@ make dev-down
 或者用仓库自带的 multi-stage `Dockerfile` 构建镜像：
 
 ```sh
-make docker-build        # 构建 go-skeleton-api:dev（默认 CMD_TARGET=api）
+make docker-build        # 构建单镜像 go-skeleton:dev（默认 CMD 为 api）
 make docker-run          # 在本地运行，并连到 make dev-up 起的依赖
 ```
 
-`CMD_TARGET=worker make docker-build`、`CMD_TARGET=migrate make docker-build` 复用同一个 `Dockerfile` 打另外两个进程的镜像。
+worker / migrate 复用同一个镜像，覆盖启动参数即可：`docker run go-skeleton:dev worker`、`docker run go-skeleton:dev migrate up`。
 
 生产环境的容器编排（迁移当独立 Job / Helm hook 跑、滚动升级、回滚、并发安全）见 [`docs/deploy.md` §10](./docs/deploy.md#10-docker--k8s-路径)；本节只讲本地起步。
 
@@ -186,14 +191,14 @@ curl -X POST http://127.0.0.1:3000/api/v1/examples/tasks \
 
 ```mermaid
 flowchart TD
-    API["cmd/api"] --> CFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
+    API["go-skeleton api"] --> CFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
     CFG --> BOOT["bootstrap.InitAPI"]
     BOOT --> REG["Registry: DB, Redis, JWT, Queue"]
     REG --> APP["app.NewServer"]
     APP --> ROUTER["router.RegisterRoutes"]
     ROUTER --> HTTP["/health, /api/v1/auth, /api/v1/examples"]
 
-    WORKER["cmd/worker"] --> WCFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
+    WORKER["go-skeleton worker"] --> WCFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
     WCFG --> WBOOT["bootstrap.InitWorker"]
     WBOOT --> WREG["Registry: Redis, optional DB, Queue"]
     WREG --> ASYNQ["app.NewWorker + Asynq handlers"]
@@ -235,7 +240,7 @@ make oapi-verify   # 生成产物与 yaml 不一致时失败（make verify 会�
 - [ ] **warn** `PPROF_ENABLED=true` 时 `PPROF_ADDR` 必须绑 loopback（`127.0.0.1` / `::1` / `localhost`）。pprof 端点暴露 heap / goroutine / profile，公网可访问 = 信息泄露 + DoS 向量。默认 false，排障时打开 + SSH 隧道访问。
 - [ ] K8s liveness 接 `/livez`，readiness 接 `/health`。**不要**把 liveness 指向 `/health`——DB 抖一下会把健康 Pod 杀掉重启。
 - [ ] 根据实例规格和 Postgres `max_connections` 调 `DB_MAX_CONNS` / `DB_MIN_CONNS` / `DB_CONN_MAX_LIFETIME`，默认值（30 / 0 / 30m）是开发档位，不是生产档位。
-- [ ] API 启动前先跑 `go run ./cmd/migrate`（goose up，应用 `migrations/` 待执行迁移）。
+- [ ] API 启动前先跑 `go-skeleton migrate up`（goose up，应用 `migrations/` 待执行迁移）。
 - [ ] 想清楚是否部署 worker 进程：有 `*/tasks` 接口暴露但没消费者，任务会越堆越多。
 - [ ] **拦** Worker 进程的业务 processor 必须真注入。`APP_ENV=production` 下没真业务 processor（如 `internal/worker.go::buildWorkerDeps` 里 `reg.DB == nil`）会 fail-fast，避免任务被 noop 静默 ack 掉只剩 warn 日志。
 
@@ -245,13 +250,13 @@ make oapi-verify   # 生成产物与 yaml 不一致时失败（make verify 会�
 
 ### 容器
 
-走 multi-stage [`Dockerfile`](./Dockerfile)（`make docker-build` / `make docker-run`）。同一份 Dockerfile 通过 `CMD_TARGET` build-arg 也能打 `worker` / `migrate` 镜像。
+走 multi-stage [`Dockerfile`](./Dockerfile)（`make docker-build` / `make docker-run`）。三个进程共用一个镜像，通过启动参数选择子命令（默认 `api`，`worker` / `migrate up` 覆盖 args）。
 
 ### 二进制 + systemd
 
-`make build-linux` 出 Linux 静态二进制（`make release` 顺便打 tarball + `SHA256SUMS`）。主机初始化、systemd unit 安装、滚动升级、回滚、journald 日志查询的完整步骤见 [`docs/deploy.md`](./docs/deploy.md)。
+`make build-linux` 出 Linux 静态单二进制 `go-skeleton`（`make release` 顺便打 tarball + `SHA256SUMS`）。主机初始化、systemd unit 安装、滚动升级、回滚、journald 日志查询的完整步骤见 [`docs/deploy.md`](./docs/deploy.md)。
 
-每次推 `v*` tag 时 GitHub Actions 会自动发布 `linux-amd64` / `linux-arm64` tarball（见 [`.github/workflows/release.yml`](./.github/workflows/release.yml)）。二进制通过 ldflags 内嵌 `version` / `commit` / `build_time`，能从 `<binary> -version`、`/livez` 的 `version` 字段、`/health` 的 `build` 对象三处读到。
+每次推 `v*` tag 时 GitHub Actions 会自动发布 `linux-amd64` / `linux-arm64` tarball（见 [`.github/workflows/release.yml`](./.github/workflows/release.yml)）。二进制通过 ldflags 内嵌 `version` / `commit` / `build_time`，能从 `go-skeleton version`、`/livez` 的 `version` 字段、`/health` 的 `build` 对象三处读到。
 
 ### 通用约定（两条路径都适用）
 

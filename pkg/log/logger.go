@@ -53,7 +53,7 @@ func init() {
 }
 
 // Init 初始化全局 zap logger 并存到 defaultLogger。Format 不识别时报错，
-// 让 cmd/*/main.go fail-fast 退出而不是默默回落到 nop。
+// 让 internal/cli 子命令 fail-fast 退出而不是默默回落到 nop。
 func Init(cfg Config) (*zap.Logger, error) {
 	level, err := parseLevel(cfg.Level)
 	if err != nil {
@@ -125,7 +125,7 @@ func SetLogger(logger *zap.Logger) func() {
 	}
 }
 
-// Sync flush 缓冲日志条目；cmd/*/main.go defer Sync()，让程序退出前最后一
+// Sync flush 缓冲日志条目；internal/cli 子命令 defer Sync()，让程序退出前最后一
 // 批日志能落盘 / 落 stdout（stdout 走 pipe 时会被缓冲）。
 func Sync() error {
 	return defaultLogger.Load().Sync()

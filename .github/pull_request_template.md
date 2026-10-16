@@ -22,9 +22,9 @@ Closes #
 
 <!-- 影响哪些层 / 哪些进程 -->
 
-- [ ] `cmd/api`
-- [ ] `cmd/worker`
-- [ ] `cmd/migrate`
+- [ ] `go-skeleton api`（`internal/cli/api.go`）
+- [ ] `go-skeleton worker`（`internal/cli/worker.go`）
+- [ ] `go-skeleton migrate`（`internal/cli/migrate.go`）
 - [ ] `api/openapi.yaml` 契约
 - [ ] DB schema（涉及迁移）
 - [ ] 部署配置（systemd / Dockerfile / docker-compose）

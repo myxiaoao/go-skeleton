@@ -16,7 +16,7 @@ Group=go-skeleton
 
 WorkingDirectory=/opt/go-skeleton
 EnvironmentFile=/etc/go-skeleton/.env
-ExecStart=/opt/go-skeleton/bin/worker
+ExecStart=/opt/go-skeleton/bin/go-skeleton worker
 
 Restart=on-failure
 RestartSec=5s

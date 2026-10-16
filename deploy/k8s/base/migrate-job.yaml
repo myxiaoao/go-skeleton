@@ -39,9 +39,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: go-skeleton-migrate:REPLACE-TAG
+          image: go-skeleton:REPLACE-TAG
           imagePullPolicy: IfNotPresent
-          args: ["-cmd", "up"]
+          args: ["migrate", "up"]
           envFrom:
             - configMapRef:
                 name: go-skeleton-env

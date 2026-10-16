@@ -1,12 +1,10 @@
-package main
+package cli
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -17,7 +15,6 @@ import (
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/internal/router"
-	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
 	"go-skeleton/pkg/sdnotify"
 )
@@ -34,18 +31,15 @@ type httpServerLifecycle interface {
 	Close() error
 }
 
-func main() {
-	showVersion := flag.Bool("version", false, "print version info and exit")
-	flag.Parse()
-	if *showVersion {
-		fmt.Println(buildinfo.String())
-		os.Exit(0)
+// runAPI 启动 HTTP 服务：加载配置 → 初始化 → 启动 → 信号优雅关闭。
+func runAPI(args []string) error {
+	if err := noArgs("api", args); err != nil {
+		return err
 	}
 
 	cfg, err := bootstrap.LoadConfig("api")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	defer func() { _ = applog.Sync() }()
 
@@ -70,6 +64,26 @@ func main() {
 		applog.L().Fatal("assemble http server", zap.Error(err))
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// sd_notify watchdog 心跳：systemd Type=notify + WatchdogSec 时，定期发
+	// WATCHDOG=1 让 systemd 知道进程还活着；ctx 取消时自然退出。非 Linux 是 noop。
+	// 注意：Watchdog 不再负责发 READY=1——READY 推迟到端口真正绑定成功后
+	// （server.Run 的 onReady 回调）才发，避免绑定失败时也骗 systemd "已就绪"。
+	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
+
+	if err := serveAPI(ctx, registry, server, sdnotify.Ready); err != nil {
+		applog.L().Fatal("web server error", zap.Error(err))
+	}
+	return nil
+}
+
+// serveAPI 运行 HTTP 服务（含可选 pprof），阻塞到 ctx 取消后完成 drain + 优雅关闭；
+// 服务运行期出错时直接返回该 error。供 api 与 all 子命令复用。
+func serveAPI(ctx context.Context, registry *bootstrap.Registry, server *app.Server, onReady func()) error {
+	cfg := registry.Cfg
+
 	// 可选的 pprof debug 服务器，仅在配置开启时启动。生产默认关闭；排障时
 	// 临时打开 + 通过 SSH 隧道访问，**不要**把端口暴露到公网。
 	var pprofSrv *http.Server
@@ -81,31 +95,26 @@ func main() {
 				applog.L().Error("pprof server error", zap.Error(err))
 			}
 		}()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := pprofSrv.Shutdown(shutdownCtx); err != nil {
+				applog.L().Warn("pprof shutdown failed", zap.Error(err))
+			}
+		}()
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	// sd_notify watchdog 心跳：systemd Type=notify + WatchdogSec 时，定期发
-	// WATCHDOG=1 让 systemd 知道进程还活着；ctx 取消时自然退出。非 Linux 是 noop。
-	// 注意：Watchdog 不再负责发 READY=1——READY 推迟到端口真正绑定成功后
-	// （server.Run 的 onReady 回调）才发，避免绑定失败时也骗 systemd "已就绪"。
-	go sdnotify.Watchdog(ctx, cfg.Server.WatchdogInterval)
 
 	errCh := make(chan error, 1)
 	go func() {
 		// onReady 在端口绑定成功、即将接请求时回调——此刻发 READY=1 最准确。
-		errCh <- server.Run(sdnotify.Ready)
+		errCh <- server.Run(onReady)
 	}()
 
 	applog.L().Info("starting web server", zap.String("addr", cfg.Server.Port))
 
 	select {
 	case err := <-errCh:
-		if err != nil {
-			applog.L().Fatal("web server error", zap.Error(err))
-		}
-		return
+		return err
 	case <-ctx.Done():
 	}
 
@@ -123,14 +132,7 @@ func main() {
 	if err := shutdownWebServer(server, errCh, gracefulShutdownTimeout, serverExitWaitTimeout); err != nil {
 		applog.L().Error("web server shutdown failed", zap.Error(err))
 	}
-
-	if pprofSrv != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := pprofSrv.Shutdown(shutdownCtx); err != nil {
-			applog.L().Warn("pprof shutdown failed", zap.Error(err))
-		}
-		cancel()
-	}
+	return nil
 }
 
 func shutdownWebServer(server httpServerLifecycle, errCh <-chan error, shutdownTimeout, waitTimeout time.Duration) error {

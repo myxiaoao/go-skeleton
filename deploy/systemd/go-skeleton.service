@@ -1,0 +1,53 @@
+[Unit]
+Description=go-skeleton all-in-one (migrate up + HTTP API + Asynq worker)
+Documentation=https://github.com/myxiaoao/go-skeleton
+After=network-online.target postgresql.service redis.service
+Wants=network-online.target
+# all 模式与拆分部署二选一：同机同时跑会抢 API 端口 / worker 可观测端口。
+Conflicts=go-skeleton-api.service go-skeleton-worker.service
+
+[Service]
+# notify: 迁移完成、API 端口绑定成功且 worker 进入消费态后才发 READY=1。
+Type=notify
+NotifyAccess=main
+User=go-skeleton
+Group=go-skeleton
+
+WorkingDirectory=/opt/go-skeleton
+EnvironmentFile=/etc/go-skeleton/.env
+# 不带子命令即 all 模式。
+ExecStart=/opt/go-skeleton/bin/go-skeleton
+
+Restart=on-failure
+RestartSec=5s
+# 启动期先跑 migrate up：advisory lock 等待最长 5min，再给迁移本身留余量。
+TimeoutStartSec=360s
+KillSignal=SIGTERM
+# API drain（GRACEFUL_DRAIN）+ HTTP Shutdown 与 worker 两阶段停服并行进行，
+# 取两者较长者再留余量。
+TimeoutStopSec=45s
+# 与 worker 一致取 60s：长任务阻塞期间心跳仍由独立 goroutine 发送。
+WatchdogSec=60s
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# Logs go to journald; use `journalctl -u go-skeleton -f` to follow.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

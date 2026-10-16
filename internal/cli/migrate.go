@@ -1,10 +1,10 @@
-package main
+package cli
 
 import (
 	"context"
-	"flag"
+	"errors"
 	"fmt"
-	"os"
+	"slices"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -12,18 +12,18 @@ import (
 	"github.com/pressly/goose/v3/lock"
 	"go.uber.org/zap"
 
+	"go-skeleton/config"
 	"go-skeleton/internal/bootstrap"
 	"go-skeleton/migrations"
-	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
 )
 
-// migrate 进程：用 goose 跑版本化 SQL 迁移（migrations/*.sql，已 embed 进二进制）。
+// runMigrate 是 migrate 子命令：用 goose 跑版本化 SQL 迁移（migrations/*.sql，已 embed 进二进制）。
 //
-//	go run ./cmd/migrate            # up：应用全部待执行迁移（默认）
-//	go run ./cmd/migrate -cmd up    # 同上
-//	go run ./cmd/migrate -cmd down  # 回滚最近一版
-//	go run ./cmd/migrate -cmd status# 打印各迁移的应用状态
+//	go-skeleton migrate         # up：应用全部待执行迁移（默认）
+//	go-skeleton migrate up      # 同上
+//	go-skeleton migrate down    # 回滚最近一版
+//	go-skeleton migrate status  # 打印各迁移的应用状态
 //
 // 真相源是 migrations/ 下的 SQL 文件，不是 Go struct——AutoMigrate 已移除。
 //
@@ -37,27 +37,32 @@ import (
 // 关于 go.sum 里的 modernc.org/sqlite：那是 goose 主包（github.com/pressly/goose/v3）
 // 源码里 import 的，所以留在模块依赖图、go.sum 必须记其校验和，`go mod tidy` 删不掉。
 // 但"在依赖图里"≠"进二进制"——本文件只 import Provider + DialectPostgres，sqlite 那套
-// package 没被实际 import，Go 的死代码消除会把它剔掉。`go list -deps ./cmd/migrate`
+// package 没被实际 import，Go 的死代码消除会把它剔掉。`go list -deps ./cmd/go-skeleton`
 // 里没有任何 sqlite/其他方言驱动可证。看到 go.sum 里的 sqlite 不必折腾去删。
-func main() {
-	showVersion := flag.Bool("version", false, "print version info and exit")
-	cmd := flag.String("cmd", "up", "migration command: up | down | status")
-	flag.Parse()
-	if *showVersion {
-		fmt.Println(buildinfo.String())
-		os.Exit(0)
+func runMigrate(args []string) error {
+	cmd, err := parseMigrateArgs(args)
+	if err != nil {
+		return err
 	}
 
 	cfg, err := bootstrap.LoadConfig("migrate")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	defer func() { _ = applog.Sync() }()
 
+	if err := migrate(cfg, cmd); err != nil {
+		applog.L().Fatal("migrate failed", zap.String("cmd", cmd), zap.Error(err))
+	}
+	return nil
+}
+
+// migrate 执行一次 goose 迁移命令（up / down / status），供 migrate 与 all 子命令复用。
+// 自己开一份 DB 连接、用完即关，不占用业务进程的连接池。
+func migrate(cfg *config.Config, cmd string) error {
 	dbMgr, err := bootstrap.InitDatabase(cfg)
 	if err != nil {
-		applog.L().Fatal("initialize database", zap.Error(err))
+		return fmt.Errorf("initialize database: %w", err)
 	}
 	defer func() {
 		if err := dbMgr.Close(); err != nil {
@@ -66,7 +71,7 @@ func main() {
 	}()
 	sqlDB := dbMgr.SQLDB()
 	if sqlDB == nil {
-		applog.L().Fatal("database is not configured")
+		return errors.New("database is not configured")
 	}
 	// sqlDB 是共享 pgx pool 之上的 database/sql 视图，goose 复用它，
 	// 不另开自己的连接。
@@ -76,7 +81,7 @@ func main() {
 	// 版本表竞态。把"migrate 仅一次"从靠人工纪律变成机制保证。
 	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {
-		applog.L().Fatal("create postgres session locker", zap.Error(err))
+		return fmt.Errorf("create postgres session locker: %w", err)
 	}
 
 	provider, err := goose.NewProvider(
@@ -89,7 +94,7 @@ func main() {
 		goose.WithDisableGlobalRegistry(true),
 	)
 	if err != nil {
-		applog.L().Fatal("create goose provider", zap.Error(err))
+		return fmt.Errorf("create goose provider: %w", err)
 	}
 
 	// 不给整体操作设激进超时：迁移可能长跑，且锁等待本身已有 5min 上限；进程被卡
@@ -98,14 +103,14 @@ func main() {
 	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelPing()
 	if err := provider.Ping(pingCtx); err != nil {
-		applog.L().Fatal("ping database", zap.Error(err))
+		return fmt.Errorf("ping database: %w", err)
 	}
 
-	switch *cmd {
+	switch cmd {
 	case "up":
 		results, err := provider.Up(ctx)
 		if err != nil {
-			applog.L().Fatal("goose up", zap.Error(err))
+			return fmt.Errorf("goose up: %w", err)
 		}
 		for _, r := range results {
 			applog.L().Info("migration applied",
@@ -117,7 +122,7 @@ func main() {
 	case "down":
 		result, err := provider.Down(ctx)
 		if err != nil {
-			applog.L().Fatal("goose down", zap.Error(err))
+			return fmt.Errorf("goose down: %w", err)
 		}
 		applog.L().Info("migration rolled back",
 			zap.String("direction", result.Direction),
@@ -127,7 +132,7 @@ func main() {
 	case "status":
 		statuses, err := provider.Status(ctx)
 		if err != nil {
-			applog.L().Fatal("goose status", zap.Error(err))
+			return fmt.Errorf("goose status: %w", err)
 		}
 		for _, s := range statuses {
 			appliedAt := "pending"
@@ -140,14 +145,29 @@ func main() {
 				zap.String("state", string(s.State)),
 				zap.String("applied_at", appliedAt))
 		}
-		return
-	default:
-		applog.L().Fatal("unknown migration command", zap.String("cmd", *cmd))
+		return nil
 	}
 
 	if v, err := provider.GetDBVersion(ctx); err == nil {
-		applog.L().Info("migrations completed", zap.String("cmd", *cmd), zap.Int64("db_version", v))
+		applog.L().Info("migrations completed", zap.String("cmd", cmd), zap.Int64("db_version", v))
 	} else {
-		applog.L().Info("migrations completed", zap.String("cmd", *cmd))
+		applog.L().Info("migrations completed", zap.String("cmd", cmd))
 	}
+	return nil
+}
+
+// parseMigrateArgs 解析 migrate 子命令参数：最多一个位置参数，缺省为 up。
+// 在加载配置、连库之前校验，拼错命令不会白连一次数据库。
+func parseMigrateArgs(args []string) (string, error) {
+	if len(args) > 1 {
+		return "", fmt.Errorf("migrate: too many arguments %v", args)
+	}
+	cmd := "up"
+	if len(args) == 1 {
+		cmd = args[0]
+	}
+	if !slices.Contains([]string{"up", "down", "status"}, cmd) {
+		return "", fmt.Errorf("migrate: unknown command %q (want up | down | status)", cmd)
+	}
+	return cmd, nil
 }

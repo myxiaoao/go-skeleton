@@ -13,11 +13,11 @@ User=go-skeleton
 Group=go-skeleton
 
 # Layout assumed by docs/deploy.md:
-#   /opt/go-skeleton/bin/{api,worker,migrate}
+#   /opt/go-skeleton/bin/go-skeleton   (single binary: api | worker | migrate)
 #   /etc/go-skeleton/.env   (config, mode 0640, owned by root:go-skeleton)
 WorkingDirectory=/opt/go-skeleton
 EnvironmentFile=/etc/go-skeleton/.env
-ExecStart=/opt/go-skeleton/bin/api
+ExecStart=/opt/go-skeleton/bin/go-skeleton api
 
 Restart=on-failure
 RestartSec=5s

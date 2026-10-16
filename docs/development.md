@@ -29,8 +29,11 @@ cp .env.example .env
 
 ```sh
 make run-migrate         # 跑迁移 up（应用 migrations/ 待执行的 SQL，建表）
-go run ./cmd/api         # :3000
-go run ./cmd/worker      # 另一终端跑 Asynq 消费
+go run ./cmd/go-skeleton api      # :3000
+go run ./cmd/go-skeleton worker   # 另一终端跑 Asynq 消费
+
+# 或者一条命令：不带参数 = all 模式，单进程内 migrate up + API + Worker
+go run ./cmd/go-skeleton
 ```
 
 > 这是 skeleton 仓库本身的 onboarding。如果你是**从 skeleton fork 出新服务**，先跑 `./scripts/rename.sh <new-module> <shortname>` 改 module 名（一次性，跑完删脚本）——详细 [runbook §0](./runbook.md#0-第一次复制-skeleton)。
@@ -138,7 +141,7 @@ yaml 是真相源。按这个顺序：
 3. 改 [internal/repository/queries/](../internal/repository/queries/) 的 SQL 与 [internal/model/](../internal/model/) 的 struct，跑 make sqlc 重新生成（struct 与迁移文件需手动保持一致）
 4. `make run-migrate` 应用；回滚一版 `make migrate-down`，看状态 `make migrate-status`
 
-> 命令详解（含 `-cmd up/down/status`、命名约定）见 [runbook §本地起完整三进程](./runbook.md#本地起完整三进程)。和 AutoMigrate 不同，破坏性变更（删列 / 改类型）现在由你显式写在 Down/Up 里，goose 不会替你跳过。
+> 命令详解（含 `go-skeleton migrate up/down/status`、命名约定）见 [runbook §本地起完整三进程](./runbook.md#本地起完整三进程)。和 AutoMigrate 不同，破坏性变更（删列 / 改类型）现在由你显式写在 Down/Up 里，goose 不会替你跳过。
 
 ---
 

@@ -62,7 +62,7 @@ linters:
       # - gin.Context.Error 只是把 err 塞 c.Errors 链供后续中间件读，写日志侧
       #   已经在 Recovery / handler 里处理过；
       # - fmt.Fprint* 写 ResponseWriter / Stderr 的 error 在我们的场景不可控；
-      # - http.Server.Shutdown 的 err 已由 cmd/api/main.go 走 applog.Warn 接住，
+      # - http.Server.Shutdown 的 err 已由 internal/cli/api.go 走 applog.Warn 接住，
       #   多余的 errcheck 报警会引导写没必要的 _ = 赋值。
       exclude-functions:
         - (*github.com/gin-gonic/gin.Context).Error

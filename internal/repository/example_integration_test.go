@@ -5,7 +5,7 @@
 // 触发方式：
 //
 //	make dev-up                         # 起本地 Postgres + Redis
-//	go run ./cmd/migrate                # 建表
+//	go run ./cmd/go-skeleton migrate up # 建表
 //	make test-integration               # 跑所有 //go:build integration 的测试
 //
 // 单元测试默认不跑这一档（make test / go test ./... 都跳过），

@@ -19,9 +19,30 @@ deploy/k8s/
 │   ├── pdb.yaml                   # PodDisruptionBudget（API minAvailable=1）
 │   └── networkpolicy.yaml         # NetworkPolicy（API/worker ingress 收紧）
 └── overlays/
-    └── production/
-        └── kustomization.yaml     # 生产 overlay（镜像 tag / 副本数 / HPA 边界）
+    ├── production/
+    │   └── kustomization.yaml     # 生产 overlay（拆分部署：镜像 tag / 副本数 / HPA 边界）
+    └── all-in-one/
+        └── kustomization.yaml     # all 模式 overlay（单 Deployment：migrate up + API + Worker）
 ```
+
+## all-in-one overlay
+
+小规模集群 / 预发环境不想维护三个工作负载时，用 `overlays/all-in-one`：
+
+```sh
+cd deploy/k8s/overlays/all-in-one
+kustomize edit set image go-skeleton=registry/your-org/go-skeleton:$VERSION
+kubectl apply -k .
+```
+
+相对 base 的差异：
+
+- `go-skeleton-api` Deployment 去掉 `args` 走 all 模式，额外暴露 worker 可观测端口 `worker-metrics`（9091，`WORKER_METRICS_ADDR` 绑 Pod IP）；component label 仍是 `api`，Service / HPA / PDB / ServiceMonitor 不变。
+- 删除 `go-skeleton-worker` Deployment 与 `go-skeleton-migrate` Job：迁移在每个 Pod 启动时执行，多副本并发由 advisory lock 串行化，无需单独等 Job。
+- startupProbe 窗口放宽到 5min（迁移在 HTTP 绑定之前执行）；`terminationGracePeriodSeconds` 调到 60s（覆盖 worker 两阶段停服）。
+- worker 的 NetworkPolicy / PodMonitor 改为选中 api Pod 的 9091 端口。
+
+需要 API / Worker 分开扩缩容、或迁移要与发布解耦时，改用 `overlays/production`。
 
 ## 部署前要做的事
 
@@ -43,9 +64,8 @@ deploy/k8s/
 
    ```sh
    cd deploy/k8s/overlays/production
-   kustomize edit set image go-skeleton-api=registry/your-org/go-skeleton-api:$VERSION
-   kustomize edit set image go-skeleton-worker=registry/your-org/go-skeleton-worker:$VERSION
-   kustomize edit set image go-skeleton-migrate=registry/your-org/go-skeleton-migrate:$VERSION
+   # api / worker / migrate 共用同一镜像，靠容器 args（["api"] / ["worker"] / ["migrate","up"]）区分
+   kustomize edit set image go-skeleton=registry/your-org/go-skeleton:$VERSION
    ```
 
 3. **确认集群有可选依赖**（缺哪个就注释掉对应 yaml）：
@@ -106,6 +126,7 @@ kustomize build . | kubectl apply -f -
 | `go-skeleton-api.service` | `api-deployment.yaml` Deployment + Service |
 | `go-skeleton-worker.service` | `worker-deployment.yaml` Deployment |
 | `go-skeleton-migrate.service` | `migrate-job.yaml` Job |
+| `go-skeleton.service`（all 模式） | `overlays/all-in-one` 的单个 Deployment |
 | `WatchdogSec=30s` | livenessProbe + readinessProbe（K8s 概念不同但意图相同） |
 | `LimitNOFILE=65535` | 由节点 ulimit / containerd 默认值兜底；高并发场景需在 Pod spec 加 `ulimits` |
 | `EnvironmentFile=/etc/go-skeleton/.env` | `envFrom: configMapRef + secretRef` |

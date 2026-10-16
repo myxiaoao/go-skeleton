@@ -44,9 +44,9 @@ func TestDevAllPropagatesServiceExitCode(t *testing.T) {
 }
 
 go() {
-  if [ "$1" = "run" ] && [ "$2" = "./cmd/migrate" ]; then return 0; fi
-  if [ "$1" = "run" ] && [ "$2" = "./cmd/api" ]; then echo api boom; return 7; fi
-  if [ "$1" = "run" ] && [ "$2" = "./cmd/worker" ]; then
+  if [ "$1" = "run" ] && [ "$3" = "migrate" ]; then return 0; fi
+  if [ "$1" = "run" ] && [ "$3" = "api" ]; then echo api boom; return 7; fi
+  if [ "$1" = "run" ] && [ "$3" = "worker" ]; then
     trap "exit 0" TERM
     while true; do sleep 1; done
   fi

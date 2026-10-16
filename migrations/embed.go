@@ -1,6 +1,6 @@
 // Package migrations 持有版本化的 SQL 迁移文件，并通过 //go:embed 把它们打进
 // 二进制——和 internal/oapi 的 spec 一样，部署时无需额外拷贝 SQL 目录，Docker /
-// systemd 路径零改动。cmd/migrate 用 goose 库 API 消费 FS 执行 up/down/status。
+// systemd 路径零改动。migrate 子命令（internal/cli/migrate.go）用 goose 库 API 消费 FS 执行 up/down/status。
 //
 // 新增迁移：跑 `make migrate-create name=add_email_to_examples` 生成一个时间戳
 // 前缀的空文件（goose 时间戳风格，形如

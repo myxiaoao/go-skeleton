@@ -47,7 +47,7 @@ type poolSettings struct {
 // InitAPI / InitWorker 决定数据库是否必需。
 //
 // pgxpool 惰性建连，Init 本身不 ping：启动期 fail-fast 由
-// bootstrap.probeDependencies（API / Worker）和 cmd/migrate 里
+// bootstrap.probeDependencies（API / Worker）和 migrate 子命令里
 // 显式的 ping 各自覆盖。
 func Init(ctx context.Context, cfg Config) (*DBManager, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {

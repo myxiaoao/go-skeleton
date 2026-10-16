@@ -8,9 +8,14 @@ This is a Go service skeleton extracted from a real project. Business modules ha
 
 ## Structure
 
-- `cmd/api`: HTTP API process.
-- `cmd/worker`: Asynq worker process.
-- `cmd/migrate`: goose-based versioned SQL migration entrypoint (files in `migrations/`).
+- `cmd/go-skeleton`: single-binary entrypoint; processes are selected by subcommand (implemented in `internal/cli`):
+  - `go-skeleton` (no args, same as `go-skeleton all`): runs `migrate up`, then API + worker in one process — handy for small single-host deployments.
+  - `go-skeleton api`: HTTP API process.
+  - `go-skeleton worker`: Asynq worker process.
+  - `go-skeleton migrate [up|down|status]`: goose-based versioned SQL migrations (default up, files in `migrations/`).
+  - `go-skeleton version`: print build info (`-version` also works).
+
+  To scale API / worker independently, run the `api` / `worker` / `migrate` subcommands as separate processes (the default for the systemd / k8s manifests); they share one binary / image.
 - `config`: environment loading and typed configuration values.
 - `internal/bootstrap`: process-level resource initialization and lifecycle.
 - `internal`: application wiring, routes, middleware, and example layers.
@@ -31,7 +36,7 @@ Pick one path for dependencies (Postgres + Redis) — both align with `.env.exam
 ```sh
 make dev-up          # start Postgres + Redis containers
 make run-migrate     # migrate up (create tables); rollback/status in docs/runbook.md
-go run ./cmd/api     # listens on :3000
+go run ./cmd/go-skeleton api     # listens on :3000
 ```
 
 ### B. Use host-installed Postgres + Redis (no docker)
@@ -44,13 +49,13 @@ brew install postgresql@17 redis && brew services start postgresql@17 && brew se
 # Create user / db matching .env.example (full commands in docs/runbook.md)
 make dev-deps-check  # probe Postgres :5432 + Redis :6379, prints install hints if unreachable
 make run-migrate
-go run ./cmd/api
+go run ./cmd/go-skeleton api
 ```
 
 Run the worker in another terminal once Redis is configured:
 
 ```sh
-go run ./cmd/worker
+go run ./cmd/go-skeleton worker
 ```
 
 Or run migration + API + Worker together in the foreground (Ctrl-C drains both):
@@ -68,11 +73,11 @@ make dev-down
 Or build a container image from the included multi-stage `Dockerfile`:
 
 ```sh
-make docker-build        # build go-skeleton-api:dev (default CMD_TARGET=api)
+make docker-build        # build the single image go-skeleton:dev (default CMD is api)
 make docker-run          # run it locally, talking to make dev-up dependencies
 ```
 
-`CMD_TARGET=worker make docker-build` and `CMD_TARGET=migrate make docker-build` reuse the same `Dockerfile` to build images for the other two processes.
+worker / migrate reuse the same image by overriding the args: `docker run go-skeleton:dev worker`, `docker run go-skeleton:dev migrate up`.
 
 Production container orchestration (running migrations as a standalone Job / Helm hook, rolling upgrades, rollback, concurrency safety) is covered in [`docs/deploy.md` §10](./docs/deploy.md#10-docker--k8s-路径); this section only covers local bootstrapping.
 
@@ -190,14 +195,14 @@ curl -X POST http://127.0.0.1:3000/api/v1/examples/tasks \
 
 ```mermaid
 flowchart TD
-    API["cmd/api"] --> CFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
+    API["go-skeleton api"] --> CFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
     CFG --> BOOT["bootstrap.InitAPI"]
     BOOT --> REG["Registry: DB, Redis, JWT, Queue"]
     REG --> APP["app.NewServer"]
     APP --> ROUTER["router.RegisterRoutes"]
     ROUTER --> HTTP["/health, /api/v1/auth, /api/v1/examples"]
 
-    WORKER["cmd/worker"] --> WCFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
+    WORKER["go-skeleton worker"] --> WCFG["bootstrap.LoadConfig<br/>(LoadEnv + Load + InitRuntime)"]
     WCFG --> WBOOT["bootstrap.InitWorker"]
     WBOOT --> WREG["Registry: Redis, optional DB, Queue"]
     WREG --> ASYNQ["app.NewWorker + Asynq handlers"]
@@ -239,7 +244,7 @@ Tick these off before pointing real traffic at this service:
 - [ ] **warn** When `PPROF_ENABLED=true`, `PPROF_ADDR` must bind to loopback (`127.0.0.1` / `::1` / `localhost`). The pprof endpoint exposes heap / goroutine / profile data — public reachability is both an info-leak and a DoS vector. Off by default; turn it on for incident response and reach it through an SSH tunnel.
 - [ ] Wire `/livez` to the Kubernetes liveness probe and `/health` to the readiness probe. Do **not** point liveness at `/health` — a DB blip would restart healthy pods.
 - [ ] Tune `DB_MAX_CONNS` / `DB_MIN_CONNS` / `DB_CONN_MAX_LIFETIME` for your instance and Postgres `max_connections`. The defaults (30 / 0 / 30m) are development-tier, not production-tier.
-- [ ] Run `go run ./cmd/migrate` (goose up, applies pending `migrations/`) before the API process starts.
+- [ ] Run `go-skeleton migrate up` (goose up, applies pending `migrations/`) before the API process starts.
 - [ ] Decide on the worker process: if any `*/tasks` endpoints are reachable but no consumer is deployed, queued tasks pile up indefinitely.
 - [ ] **block** Wire real business processors into the worker. Under `APP_ENV=production`, if no real processor is injected (e.g. `internal/worker.go::buildWorkerDeps` sees `reg.DB == nil`), the worker fails to start — preventing the noop fallback from silently `ack`-ing tasks with only a warn log.
 
@@ -249,13 +254,13 @@ Two supported paths:
 
 ### Container
 
-Use the multi-stage [`Dockerfile`](./Dockerfile) (`make docker-build` / `make docker-run`). The same Dockerfile builds `worker` / `migrate` images via the `CMD_TARGET` build-arg.
+Use the multi-stage [`Dockerfile`](./Dockerfile) (`make docker-build` / `make docker-run`). All three processes share one image; pick the subcommand via args (default `api`; override with `worker` / `migrate up`).
 
 ### Binary + systemd
 
-`make build-linux` produces static Linux binaries (`make release` also produces tarballs + `SHA256SUMS`). Step-by-step host setup, systemd unit installation, rolling upgrades, rollback, and journald log queries live in [`docs/deploy.md`](./docs/deploy.md).
+`make build-linux` produces the static Linux single binary `go-skeleton` (`make release` also produces tarballs + `SHA256SUMS`). Step-by-step host setup, systemd unit installation, rolling upgrades, rollback, and journald log queries live in [`docs/deploy.md`](./docs/deploy.md).
 
-Every `v*` tag push triggers GitHub Actions to publish `linux-amd64` / `linux-arm64` tarballs (see [`.github/workflows/release.yml`](./.github/workflows/release.yml)). Binaries embed `version` / `commit` / `build_time` via ldflags — readable via `<binary> -version`, the `/livez` `version` field, or the `/health` `build` object.
+Every `v*` tag push triggers GitHub Actions to publish `linux-amd64` / `linux-arm64` tarballs (see [`.github/workflows/release.yml`](./.github/workflows/release.yml)). Binaries embed `version` / `commit` / `build_time` via ldflags — readable via `go-skeleton version`, the `/livez` `version` field, or the `/health` `build` object.
 
 ### Notes (both paths)
 

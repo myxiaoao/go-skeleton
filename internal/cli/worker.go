@@ -1,10 +1,7 @@
-package main
+package cli
 
 import (
 	"context"
-	"flag"
-	"fmt"
-	"os"
 	"os/signal"
 	"syscall"
 
@@ -13,23 +10,19 @@ import (
 	"go-skeleton/config"
 	app "go-skeleton/internal"
 	"go-skeleton/internal/bootstrap"
-	"go-skeleton/pkg/buildinfo"
 	applog "go-skeleton/pkg/log"
 	"go-skeleton/pkg/sdnotify"
 )
 
-func main() {
-	showVersion := flag.Bool("version", false, "print version info and exit")
-	flag.Parse()
-	if *showVersion {
-		fmt.Println(buildinfo.String())
-		os.Exit(0)
+// runWorker 启动 Asynq 消费者：加载配置 → 初始化 → 启动 → 信号优雅关闭。
+func runWorker(args []string) error {
+	if err := noArgs("worker", args); err != nil {
+		return err
 	}
 
 	cfg, err := bootstrap.LoadConfig("worker")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	defer func() { _ = applog.Sync() }()
 
@@ -70,4 +63,5 @@ func main() {
 		applog.L().Fatal("worker runtime error", zap.Error(err))
 	}
 	applog.L().Info("worker shutdown completed")
+	return nil
 }

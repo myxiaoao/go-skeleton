@@ -510,6 +510,24 @@ Commit prefixes follow the convention in `AGENTS.md`
 
 ### Changed
 
+- **三个进程入口合并为单二进制 `go-skeleton`**: 删除 `cmd/api` / `cmd/worker` /
+  `cmd/migrate`，改为 `cmd/go-skeleton`（`main.go` 只调 `cli.Run`）+
+  `internal/cli/{cli,all,api,worker,migrate}.go` 子命令实现。用法：
+  `go-skeleton`（不带参数 = `all`：单进程内 migrate up + API + Worker，共用一份
+  Registry，两者都就绪才发 READY=1，任一方出错另一方随之停服）/ `go-skeleton api` / `go-skeleton worker` / `go-skeleton migrate [up|down|status]`
+  （默认 up，旧的 `-cmd up` flag 移除）/ `go-skeleton version`（兼容 `-version`）。
+  进程仍各自独立部署、独立扩缩容，只是制品统一：`make build` 只产出
+  `bin/go-skeleton`（移除 `build-api` / `build-worker` / `build-migrate`），release
+  tarball 只含 `bin/go-skeleton`；systemd unit 仍分三个，ExecStart 改为
+  `/opt/go-skeleton/bin/go-skeleton api|worker|migrate up`；Docker 只打一个镜像
+  `go-skeleton:<tag>`（`ENTRYPOINT ["/app"]`、不设 `CMD` 即 all 模式，移除 `CMD_TARGET`
+  build-arg），worker / migrate 通过覆盖 args 运行，k8s 三个工作负载共用同一镜像、
+  靠 `args` 区分。进程级 env 覆盖文件由 `cmd/<proc>/.env` 改为仓库根 `.env.<proc>`
+  （如 `.env.worker`），优先级：真实环境变量 > `.env.<proc>` > `.env`。
+  all 模式部署：新增 systemd unit `deploy/systemd/go-skeleton.service`（与 api / worker
+  unit `Conflicts=` 互斥）与 k8s `overlays/all-in-one`（单 Deployment，删除独立 worker
+  Deployment / migrate Job），CI 的 kustomize / kubeconform 校验同步覆盖新 overlay。升级时需同步
+  更新主机上的二进制路径 / unit 文件、镜像名与 k8s manifest。
 - **CI 工具缓存 key 只跟版本 pin 走**: `*_VERSION ?=` 抽到新文件 `tools.mk`（Makefile
   `include`），ci / release / security 三个 workflow 的 `~/go/bin` 缓存 key 改为
   `hashFiles('tools.mk')`，改 Makefile 其他内容不再让缓存失效。

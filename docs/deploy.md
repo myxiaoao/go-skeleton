@@ -1,6 +1,6 @@
 # 二进制部署指南
 
-适用场景：把 `go-skeleton` 装到 Linux 主机上（裸机或 VM），用 systemd 托管三个进程。
+适用场景：把 `go-skeleton` 装到 Linux 主机上（裸机或 VM），用 systemd 托管三个进程（同一个二进制 `go-skeleton` 的 `api` / `worker` / `migrate` 子命令，各自一个 unit）。
 
 本文以二进制 / systemd 为主线讲操作命令。**§4 升级时序与 §5 回滚里的运维原则
 （迁移向后兼容、expand-contract 两阶段、advisory lock 并发安全、schema 回滚优先备份）
@@ -72,9 +72,7 @@ make release
 ```
 dist/<version>/linux-amd64/
 ├── bin/
-│   ├── api
-│   ├── worker
-│   └── migrate
+│   └── go-skeleton            # 单二进制：go-skeleton api | worker | migrate [up|down|status]
 ├── deploy/systemd/
 │   ├── go-skeleton-api.service
 │   ├── go-skeleton-worker.service
@@ -97,15 +95,15 @@ sudo chown -R go-skeleton:go-skeleton /opt/go-skeleton
 tar -xzf go-skeleton-${VERSION}-linux-${ARCH}.tar.gz
 cd linux-${ARCH}
 
-# 3) 安装二进制
-sudo install -m 0755 -o go-skeleton -g go-skeleton bin/api     /opt/go-skeleton/bin/api
-sudo install -m 0755 -o go-skeleton -g go-skeleton bin/worker  /opt/go-skeleton/bin/worker
-sudo install -m 0755 -o go-skeleton -g go-skeleton bin/migrate /opt/go-skeleton/bin/migrate
+# 3) 安装二进制（三个 unit 共用，ExecStart 分别为 /opt/go-skeleton/bin/go-skeleton api | worker | migrate up）
+sudo install -m 0755 -o go-skeleton -g go-skeleton bin/go-skeleton /opt/go-skeleton/bin/go-skeleton
 
 # 4) 安装 systemd unit
 sudo install -m 0644 deploy/systemd/go-skeleton-api.service     /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/go-skeleton-worker.service  /etc/systemd/system/
 sudo install -m 0644 deploy/systemd/go-skeleton-migrate.service /etc/systemd/system/
+# 单机 all 模式改装这一个即可（与上面三个二选一，见 §3 "all 模式"）：
+# sudo install -m 0644 deploy/systemd/go-skeleton.service /etc/systemd/system/
 sudo systemctl daemon-reload
 
 # 5) 配置文件（含敏感信息，限权）
@@ -156,6 +154,25 @@ curl -fsS http://127.0.0.1:3000/health | jq
 # 后者会返回 build.version / build.commit / build.build_time，能直接对账
 ```
 
+### all 模式（单机小规模部署）
+
+不带子命令执行 `go-skeleton` 即 all 模式：进程内先跑 `migrate up`，再同时启动 API + Worker，
+只需要一个 unit `go-skeleton.service`（`ExecStart=/opt/go-skeleton/bin/go-skeleton`）。它与
+`go-skeleton-api.service` / `go-skeleton-worker.service` 声明了 `Conflicts=`，**二选一**，
+同机同时跑会抢 API 端口与 worker 可观测端口。
+
+```sh
+sudo systemctl enable --now go-skeleton.service
+sudo journalctl -u go-skeleton.service -n 50 --no-pager
+# 依次看到 "migrations completed" → "starting web server" → "worker started"
+curl -fsS http://127.0.0.1:3000/health | jq
+```
+
+- 迁移、API 就绪、Worker 进入消费态全部完成才发 `READY=1`；`TimeoutStartSec=360s` 覆盖 advisory lock 最长 5min 的等待。
+- 任一组件启动失败或运行期出错，另一组件随之停服、进程非零退出，由 `Restart=on-failure` 拉起。
+- 升级 / 回滚流程与拆分部署一致，只是重启对象换成 `go-skeleton.service` 一个 unit。
+- 需要 API / Worker 分开扩缩容、或迁移要与发布解耦时，回到拆分部署。
+
 ## 4. 升级流程（零停机）
 
 API 是无状态的，多实例 + LB 时可以做滚动升级；单机部署则会有几秒的接管窗口。
@@ -163,14 +180,13 @@ API 是无状态的，多实例 + LB 时可以做滚动升级；单机部署则�
 ```sh
 # 单机最小升级（接受几秒停机）：
 sudo systemctl start go-skeleton-migrate.service
-sudo install -m 0755 -o go-skeleton -g go-skeleton bin/api     /opt/go-skeleton/bin/api
-sudo install -m 0755 -o go-skeleton -g go-skeleton bin/worker  /opt/go-skeleton/bin/worker
+sudo install -m 0755 -o go-skeleton -g go-skeleton bin/go-skeleton /opt/go-skeleton/bin/go-skeleton
 sudo systemctl restart go-skeleton-api.service
 sudo systemctl restart go-skeleton-worker.service
 
 # 验证版本对账：
 curl -fsS http://127.0.0.1:3000/health | jq '.build'
-/opt/go-skeleton/bin/api -version
+/opt/go-skeleton/bin/go-skeleton version
 ```
 
 多实例 + LB 时的标准做法：
@@ -199,7 +215,7 @@ curl -fsS http://127.0.0.1:3000/health | jq '.build'
 > 这样任意时刻"当前 schema"都能被"当前在线的任意代码版本"安全访问，滚动升级和
 > 回滚都不会因 schema 漂移炸掉。
 >
-> 并发安全：`cmd/migrate` 用 Postgres advisory lock（goose session locker），多个
+> 并发安全：`go-skeleton migrate` 用 Postgres advisory lock（goose session locker），多个
 > migrate 实例同时跑也只有一个真正执行、其余阻塞等待，不会竞态。这在 Docker / K8s
 > 下尤其重要——多副本滚动发布时若把迁移塞进每个 API 副本的启动钩子，会有 N 个进程
 > 抢着跑 DDL，advisory lock 兜底不竞态；但仍建议把迁移当成**独立一次性步骤**
@@ -210,14 +226,16 @@ curl -fsS http://127.0.0.1:3000/health | jq '.build'
 ### 5.1 回滚代码（二进制）
 
 ```sh
-# 假设旧版本二进制保留在 /opt/go-skeleton/bin/api.previous
-sudo cp /opt/go-skeleton/bin/api.previous /opt/go-skeleton/bin/api
+# 假设旧版本二进制保留在 /opt/go-skeleton/bin/go-skeleton.previous
+sudo cp /opt/go-skeleton/bin/go-skeleton.previous /opt/go-skeleton/bin/go-skeleton
+# API / Worker 共用同一个二进制，两者都要重启才会切回旧版本
 sudo systemctl restart go-skeleton-api.service
+sudo systemctl restart go-skeleton-worker.service
 
 # 或者从 GitHub Releases 重新下载旧版本走第 2/3 步
 ```
 
-部署脚本建议每次升级前 `cp api api.previous` 留一份，回滚单条命令搞定。
+部署脚本建议每次升级前 `cp go-skeleton go-skeleton.previous` 留一份，回滚单条命令搞定。
 
 ### 5.2 回滚 schema（迁移）
 
@@ -228,13 +246,13 @@ sudo systemctl restart go-skeleton-api.service
 
 ```sh
 # 回滚最近一版迁移（执行该版本的 -- +goose Down 段）
-sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd down
+sudo -u go-skeleton /opt/go-skeleton/bin/go-skeleton migrate down
 # 看当前版本确认已退回
-sudo -u go-skeleton /opt/go-skeleton/bin/migrate -cmd status
+sudo -u go-skeleton /opt/go-skeleton/bin/go-skeleton migrate status
 ```
 
 > 本地开发走 `make migrate-down` 会先要求输入 `yes` 确认（防误删）；脚本里要免交互传
-> `make migrate-down confirm=1`。生产直接调二进制 `migrate -cmd down` 没有这层门槛，
+> `make migrate-down confirm=1`。生产直接调二进制 `go-skeleton migrate down` 没有这层门槛，
 > 务必在执行前确认已按下文做了备份。
 
 > ⚠️ **schema 回滚有数据风险**：`down` 执行的是迁移文件里的 `-- +goose Down` 段。
@@ -275,7 +293,7 @@ systemd-cgtop -m | grep go-skeleton
 | `systemctl start` 失败 | `journalctl -u go-skeleton-api.service -n 50 --no-pager` |
 | 启动后立刻退出 | 99% 是 `.env` 配置错；改完 `systemctl restart` |
 | `/health` 返回 503 | `curl http://127.0.0.1:3000/health \| jq` 看哪个 check 是 unavailable |
-| 想确认跑的是哪个版本 | `/opt/go-skeleton/bin/api -version` 或 `curl /health \| jq .build` |
+| 想确认跑的是哪个版本 | `/opt/go-skeleton/bin/go-skeleton version` 或 `curl /health \| jq .build` |
 | 配置文件改了不生效 | systemd unit 用 `EnvironmentFile` 静态读，必须 `systemctl restart` |
 | Worker 任务停了 | 检查 Redis 是否可达；`journalctl -u go-skeleton-worker.service` 看 asynq 日志 |
 | Worker 是否健康 / 任务失败率（看 `status="failure"`） | `curl http://127.0.0.1:9091/health \| jq`；`curl -s http://127.0.0.1:9091/metrics \| grep asynq_tasks_processed_total` |
@@ -316,6 +334,13 @@ systemd-cgtop -m | grep go-skeleton
 
 迁移是一次性进程，不需要 watchdog，保持 `Type=simple`。
 
+### All-in-one unit
+
+- `go-skeleton.service`，`Type=notify` + `WatchdogSec=60s`（取 worker 的宽窗口，理由同上）。
+- `TimeoutStartSec=360s`：启动期先跑迁移，advisory lock 等待最长 5min。
+- `TimeoutStopSec=45s`：API drain + HTTP Shutdown 与 worker 两阶段停服并行，取较长者留余量。
+- `Conflicts=go-skeleton-api.service go-skeleton-worker.service`：与拆分部署互斥。
+
 更多上线前检查见 [README "Production Checklist"](../README.md#production-checklist)。
 
 ## 10. Docker / K8s 路径
@@ -324,13 +349,18 @@ systemd-cgtop -m | grep go-skeleton
 两阶段、advisory lock 保证并发不竞态、schema 回滚优先 `pg_dump` 备份。这里只给命令载体，
 原则不再重复，请回看 §4–§5。
 
-三个进程复用同一份 [`Dockerfile`](../Dockerfile)，靠 `CMD_TARGET` build-arg 选入口：
+三个进程共用同一个镜像（[`Dockerfile`](../Dockerfile) 的 `ENTRYPOINT` 是 `go-skeleton` 二进制，
+不设 `CMD`，不传参数即 `all` 模式：单进程内 migrate up + API + Worker），靠启动参数选子命令：
 
 ```sh
-# 构建三个镜像（CI 里用 git 注入 buildinfo，见 Dockerfile 注释）
-docker build --build-arg CMD_TARGET=api     -t go-skeleton-api:${VERSION}     .
-docker build --build-arg CMD_TARGET=worker  -t go-skeleton-worker:${VERSION}  .
-docker build --build-arg CMD_TARGET=migrate -t go-skeleton-migrate:${VERSION} .
+# 构建一个镜像（CI 里用 git 注入 buildinfo，见 Dockerfile 注释）
+docker build -t go-skeleton:${VERSION} .
+
+# 不同进程只是 args 不同
+docker run go-skeleton:${VERSION}               # all：migrate up + api + worker 单进程
+docker run go-skeleton:${VERSION} api
+docker run go-skeleton:${VERSION} worker
+docker run go-skeleton:${VERSION} migrate up
 ```
 
 ### 迁移：当独立一次性容器跑，不要塞进 API 容器 entrypoint
@@ -338,14 +368,14 @@ docker build --build-arg CMD_TARGET=migrate -t go-skeleton-migrate:${VERSION} .
 ```sh
 # 一次性跑 migration（任一处执行即可，advisory lock 兜底并发）
 docker run --rm --env-file /etc/go-skeleton/.env \
-  go-skeleton-migrate:${VERSION} -cmd up
+  go-skeleton:${VERSION} migrate up
 # 看到 "migrations completed" 日志再滚业务镜像
 
 # 回滚最近一版 schema（应急；先确认已 pg_dump 备份）
 docker run --rm --env-file /etc/go-skeleton/.env \
-  go-skeleton-migrate:${VERSION} -cmd down
+  go-skeleton:${VERSION} migrate down
 docker run --rm --env-file /etc/go-skeleton/.env \
-  go-skeleton-migrate:${VERSION} -cmd status
+  go-skeleton:${VERSION} migrate status
 ```
 
 K8s 下把迁移做成 **Job**（或 Helm `pre-upgrade` hook），等 Job 成功再滚 API/Worker
@@ -364,8 +394,8 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: go-skeleton-migrate:${VERSION}
-          args: ["-cmd", "up"]
+          image: go-skeleton:${VERSION}
+          args: ["migrate", "up"]
           envFrom:
             - secretRef:
                 name: go-skeleton-env   # 同 .env 的内容，走 Secret
@@ -377,7 +407,7 @@ spec:
 
 ### 业务进程
 
-API / Worker 镜像由编排平台（compose / K8s Deployment）托管，systemd 的 watchdog /
+API / Worker 容器（同一镜像，args 分别为 `api` / `worker`）由编排平台（compose / K8s Deployment）托管，systemd 的 watchdog /
 `LimitNOFILE`（§9）换成容器运行时与编排层的等价机制：
 
 - liveness/readiness 探针打 `/livez`（liveness，恒 200）/ `/health`（readiness，依赖挂了 503），
@@ -404,9 +434,17 @@ deploy/k8s/
 │   ├── migrate-job.yaml
 │   ├── hpa.yaml                   # API CPU HPA
 │   └── servicemonitor.yaml        # Prometheus Operator scrape（API ServiceMonitor + Worker PodMonitor）
-└── overlays/production/
-    └── kustomization.yaml         # 镜像 tag / 副本数 / HPA 边界 patch
+└── overlays/
+    ├── production/
+    │   └── kustomization.yaml     # 拆分部署：镜像 tag / 副本数 / HPA 边界 patch
+    └── all-in-one/
+        └── kustomization.yaml     # all 模式：单个 Deployment 跑 migrate up + API + Worker
 ```
+
+小规模集群可用 `overlays/all-in-one`：api Deployment 去掉 args 走 all 模式、额外暴露 worker
+可观测端口 9091，删除独立 worker Deployment 与 migrate Job（迁移由每个 Pod 启动时执行，
+advisory lock 串行化），startupProbe 窗口放宽到 5min、`terminationGracePeriodSeconds` 调到 60s。
+详见 [`deploy/k8s/README.md`](../deploy/k8s/README.md)。
 
 最短上手路径（详见 [`deploy/k8s/README.md`](../deploy/k8s/README.md)）：
 
@@ -421,9 +459,8 @@ kubectl -n go-skeleton create secret generic go-skeleton-secrets \
 
 # 2. 在 overlay 改镜像 tag
 cd deploy/k8s/overlays/production
-kustomize edit set image go-skeleton-api=registry/your-org/go-skeleton-api:$VERSION
-kustomize edit set image go-skeleton-worker=registry/your-org/go-skeleton-worker:$VERSION
-kustomize edit set image go-skeleton-migrate=registry/your-org/go-skeleton-migrate:$VERSION
+# 三个工作负载共用同一镜像，一条命令覆盖（各自靠 args 区分 api / worker / migrate up）
+kustomize edit set image go-skeleton=registry/your-org/go-skeleton:$VERSION
 
 # 3. 一把 apply
 kustomize build . | kubectl apply -f -

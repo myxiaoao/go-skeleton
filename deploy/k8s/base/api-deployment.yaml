@@ -46,9 +46,10 @@ spec:
           # 镜像 tag 由 kustomize overlay 的 images: 字段统一覆盖（见
           # overlays/production/kustomization.yaml）。base 里写一个明确的
           # 占位值，避免误用 :latest 拉到漂移版本。
-          image: go-skeleton-api:REPLACE-TAG
+          # 三个工作负载共用同一个单二进制镜像，靠 args 选子命令。
+          image: go-skeleton:REPLACE-TAG
           imagePullPolicy: IfNotPresent
-          args: []
+          args: ["api"]
           ports:
             - name: http
               containerPort: 3000

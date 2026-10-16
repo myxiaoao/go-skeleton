@@ -176,7 +176,7 @@ func ProductionWarnings(cfg *Config) []string {
 }
 
 // WorkerProductionWarnings 返回 worker 进程在 production 下"非致命但大概率
-// 漏配"的提示列表，由 cmd/worker/main.go 启动时打出。和 ProductionWarnings
+// 漏配"的提示列表，由 internal/cli/worker.go 启动时打出。和 ProductionWarnings
 // 分开：后者的限流 / trusted proxies / API metrics 同端口等项只对 API 有意义，
 // 混在一起会让 worker 日志出现无关告警。非 production 一律返 nil。
 func WorkerProductionWarnings(cfg *Config) []string {

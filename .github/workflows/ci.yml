@@ -99,7 +99,7 @@ jobs:
           cache: true
 
       - name: Run migrations
-        run: go run ./cmd/migrate
+        run: go run ./cmd/go-skeleton migrate up
 
       - name: Run integration tests
         run: make test-integration
@@ -152,8 +152,8 @@ jobs:
           set -e
           sudo useradd --system --no-create-home --shell /usr/sbin/nologin go-skeleton 2>/dev/null || true
           sudo mkdir -p /opt/go-skeleton/bin /etc/go-skeleton
-          sudo touch /opt/go-skeleton/bin/api /opt/go-skeleton/bin/worker /opt/go-skeleton/bin/migrate
-          sudo chmod +x /opt/go-skeleton/bin/api /opt/go-skeleton/bin/worker /opt/go-skeleton/bin/migrate
+          sudo touch /opt/go-skeleton/bin/go-skeleton
+          sudo chmod +x /opt/go-skeleton/bin/go-skeleton
           sudo touch /etc/go-skeleton/.env
           sudo chown -R go-skeleton:go-skeleton /opt/go-skeleton
           sudo chmod 0640 /etc/go-skeleton/.env
@@ -194,10 +194,10 @@ jobs:
           sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
           kubeconform -v
 
-      - name: kustomize build (base + overlays/production)
+      - name: kustomize build (base + overlays/production + overlays/all-in-one)
         run: |
           set -e
-          for target in deploy/k8s/base deploy/k8s/overlays/production; do
+          for target in deploy/k8s/base deploy/k8s/overlays/production deploy/k8s/overlays/all-in-one; do
             echo "=== kustomize build $target ==="
             # kubectl 自带 kustomize 子命令；不引入额外二进制。
             kubectl kustomize "$target" >/dev/null
@@ -206,7 +206,7 @@ jobs:
       - name: kubeconform (schema validate built manifests)
         run: |
           set -e
-          for target in deploy/k8s/base deploy/k8s/overlays/production; do
+          for target in deploy/k8s/base deploy/k8s/overlays/production deploy/k8s/overlays/all-in-one; do
             echo "=== kubeconform $target ==="
             kubectl kustomize "$target" | \
               kubeconform \

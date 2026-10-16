@@ -12,7 +12,8 @@ Go 1.27+ + Gin + sqlc（pgx/v5）+ PostgreSQL + Redis + Asynq。模块名 `go-sk
 
 | 目录 | 职责 | 写代码时的硬约束 |
 | --- | --- | --- |
-| `cmd/api` `cmd/worker` `cmd/migrate` | 三个独立进程入口 | `main.go` 只做"加载配置 → 初始化 → 启动 → 信号优雅关闭"，禁止写业务逻辑 |
+| `cmd/go-skeleton` | 单二进制入口（子命令 `all`（默认，单进程 migrate up + API + Worker）/ `api` / `worker` / `migrate` / `version`） | `main.go` 只调 `cli.Run(os.Args[1:])`，不写任何逻辑 |
+| `internal/cli/` | 子命令实现（`all.go` / `api.go` / `worker.go` / `migrate.go`）；`all` 适合单机小规模部署，需要分开扩缩容时 api / worker / migrate 作为独立进程部署 | 只做"加载配置 → 初始化 → 启动 → 信号优雅关闭"，禁止写业务逻辑 |
 | `config/` | 环境变量加载、运行时配置 | 不持有业务逻辑；新增配置项要补 `.env.example` |
 | `internal/bootstrap/` | 进程级资源装配，输出 `Registry` | API/Worker/Migrate 各自调对应的 `InitXxx` |
 | `internal/` (package `app`) | `server.go` / `worker.go` 把 `Registry` 装配成完整调用链 | 所有 handler/service/repository 的 `new` 集中在这里 |
@@ -26,7 +27,7 @@ Go 1.27+ + Gin + sqlc（pgx/v5）+ PostgreSQL + Redis + Asynq。模块名 `go-sk
 | `internal/taskqueue/` | Asynq client 的薄封装 | service 通过 `ExampleQueue` 这种接口依赖它，不直接 import asynq |
 | `pkg/` | 跟业务无关的通用工具 | 严禁 import `internal/` 任何包 |
 
-数据库迁移用 `cmd/migrate`（基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——sqlc 也直接以 migrations/ 为 schema 输入，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`cmd/migrate` 用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
+数据库迁移用 `go-skeleton migrate [up|down|status]` 子命令（`internal/cli/migrate.go`，基于 [goose](https://github.com/pressly/goose) 库 API）跑仓库根目录 `migrations/` 下的版本化 SQL 文件，文件经 `//go:embed` 打进二进制。真相源是这些 SQL 文件、**不是** Go struct——sqlc 也直接以 migrations/ 为 schema 输入，改表结构走"`make migrate-create name=xxx` 生成空迁移 → 填 SQL → 跑 `make run-migrate`"。文件名是**时间戳前缀**（goose 时间戳风格）：`<YYYYMMDDHHMMSS>_<描述>.sql`，由 `make migrate-create` 自动生成、天然全局有序、多人并行不撞号；版本号必须是文件名首个 `_` 前的纯数字段，时间戳要连写、**不要**在中间插下划线（goose 解析不了）。命令：`make run-migrate`（up）/ `make migrate-down`（回滚一版）/ `make migrate-status`（看状态）/ `make migrate-create name=xxx`（新建空迁移）。迁移文件放仓库根 `migrations/`，**不要**塞 `internal/`。`migrate` 子命令用 goose 的 `Provider` API（绑死 `DialectPostgres`，本项目**只支持 Postgres**）并配 Postgres advisory lock，多实例/多机并发跑 migrate 时自动串行化、不竞态。生产迁移要对旧代码**向后兼容**（只增不破坏），破坏性变更走 expand-contract 两阶段发布——详见 [docs/deploy.md](docs/deploy.md) 升级/回滚段。
 
 迁移文件 lint 由 `migrations/migrations_test.go` 在 `make verify` 链里执行，强制三道门：(1) 文件名严格 `<14位时间戳>_<snake_case>.sql`；(2) 必须含 `-- +goose Up` 与 `-- +goose Down` 注解；(3) Up 段里 `DROP TABLE/COLUMN/CONSTRAINT`、`ALTER COLUMN TYPE/SET NOT NULL`、`RENAME COLUMN/TO`、`TRUNCATE` 这类破坏性 DDL 必须配 `-- breaking: <reason>`（或 `-- +breaking <reason>`）显式标注。新增危险 DDL 形态时同步更新 `migrations_test.go::dangerousDDL`。
 
@@ -197,7 +198,7 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 - service 通过 `ExampleQueue` 接口依赖 `taskqueue.Queue`，不直接拿 `*asynq.Client`。
 - Worker 消费端 handler 在 `internal/worker/handler.go` 注册，业务流程委托给 service。
 - Worker 停服走两阶段：`srv.Stop()` 停止接新任务、`srv.Shutdown()` 等当前任务完成（已在 `internal/worker.go` 实现，扩展时不要破坏顺序）。
-- Worker 启动用 `asynq.Server.Start`（同步、返回启动期 error），**不要退回 `server.Run`**。`Run` = `Start` + 它内置的 `waitForSignals` + `Shutdown`，那条内置 signal loop 会和 `cmd/worker/main.go` 的 `signal.NotifyContext` 抢 SIGTERM；而且 `Run` 异步起 goroutine 没法精确知道启动成败，会让 sd_notify `READY=1` 早发。`internal/worker.go` 的 `Run(ctx, onReady)` 已经是：`Start` 成功后才回调 `onReady`、停服由传入的 `ctx` 驱动。
+- Worker 启动用 `asynq.Server.Start`（同步、返回启动期 error），**不要退回 `server.Run`**。`Run` = `Start` + 它内置的 `waitForSignals` + `Shutdown`，那条内置 signal loop 会和 `internal/cli/worker.go` 的 `signal.NotifyContext` 抢 SIGTERM；而且 `Run` 异步起 goroutine 没法精确知道启动成败，会让 sd_notify `READY=1` 早发。`internal/worker.go` 的 `Run(ctx, onReady)` 已经是：`Start` 成功后才回调 `onReady`、停服由传入的 `ctx` 驱动。
 - **Worker 可观测端口**：`WORKER_METRICS_ADDR`（默认 `:9091`，显式留空关闭）由 `internal/worker.go` 在 asynq `Start` 成功后同步绑定（绑不上 `Run` 返 error、不发 READY），暴露 `/metrics`、`/livez`（恒 200）、`/health`（Redis 必查、DB 配置时查，失败 503，不走业务信封）；停服顺序 asynq `Stop` → `Shutdown` → HTTP `Shutdown`。实现是 `internal/worker/http.go` 的标准库 `net/http`，**不要**为它引入 gin / handler 包。
 - **任务指标**：`internal/worker/metrics.go` 的 `MetricsMiddleware` 与 TraceMiddleware 一起在 `RegisterHandlers` 挂载（`Deps.Metrics` 为 nil 时不挂），记录 `go_skeleton_worker_asynq_tasks_processed_total{type,status}` 与 `go_skeleton_worker_asynq_task_duration_seconds{type}`。type label 取 mux 注册 pattern，未注册的 type 统一记 `unknown`，不要加 task_id / 业务 ID 这类高基数维度；记录在 defer 里完成，panic 按 error 处理后再 re-panic 交给 asynq recover。`status` 三值互斥：`success`；`retry`（本次失败但还会重试）；`failure`（最终失败：`asynq.SkipRetry` / `asynq.RevokeTask` / `GetRetryCount >= GetMaxRetry`；含 RevokeTask 主动丢弃，所以可能大于 Asynqmon 的 archived 数）。判定在 worker middleware 里做，`pkg/metrics.ObserveTask(type, status, d)` 只收 status 字符串（用 `TaskStatus*` 常量），不 import asynq。
 - **Production 漏注入业务 processor 必须 fail-fast**。`internal/worker.go::buildWorkerDeps` 在 `APP_ENV=production` 下调 `deps.RequiredProcessors()`（定义在 `internal/worker/handler.go`）显式检查每个 task 的 processor 注入状态；任一 missing 就返 error，让 `NewWorker` 启动期失败。dev / staging 仍允许 noop 兜底，方便从模板态启动；但生产环境消息被 noop 消费 + ack 掉，比 panic 更危险（消息消失但只剩 warn 日志），所以宁可起不来也不能静默。**加新 task 类型时：必须同步在 `Deps.RequiredProcessors` 追加一条记录**——漏加 = production 下静默 noop，回到改造前的隐患。这是显式声明取代"reg.DB == nil"巧合代理的强制点。
@@ -211,13 +212,13 @@ func (s *OrderService) Place(ctx context.Context, req *PlaceOrderReq) (*Order, e
 ## 环境变量
 
 - **入库模板只有根目录 `.env.example` 一份**，所有进程共用。新增配置项必须同步更新它。
-- 运行时加载顺序（`cmd/<proc>/main.go` 调 `bootstrap.LoadConfig("<proc>")` 统一完成）：
+- 运行时加载顺序（`internal/cli/<proc>.go` 调 `bootstrap.LoadConfig("<proc>")` 统一完成，`<proc>` = `all` / `api` / `worker` / `migrate`）：
   ```
-  真实环境变量 > cmd/<proc>/.env（如果存在） > 根目录 .env
+  真实环境变量 > 根目录 .env.<proc>（如果存在，如 .env.worker） > 根目录 .env
   ```
-  本地想给某个进程开"差异化覆盖"时，自行手写 `cmd/<proc>/.env`——它不入库，被 `.gitignore` 兜底。
+  本地想给某个进程开"差异化覆盖"时，自行在仓库根手写 `.env.<proc>`（如 `.env.worker`）——它不入库，被 `.gitignore` 兜底。
 - 所有 `.env*`（除 `.env.example`）都在 `.gitignore`，禁止把真实凭证落到仓库。
-- `APP_ENV`（development / production，默认 development）控制启动期安全 guard 的严格度，**不等同于 `GIN_MODE`**。设 `production` 时 `config/validate.go` 会硬拦截不安全配置：`JWT_SECRET` 为占位值 / 空 / 短于 32 字节、`AUTH_DEV_TOKEN_ENABLED=true`、`GIN_MODE != release`、`LOG_FORMAT != json`，任一不满足进程直接 fail-fast 退出。"非致命但大概率漏配"的项走 `config.ProductionWarnings(cfg)` 集中输出 warn（由 `cmd/api/main.go` 启动时打）：`RATE_LIMIT_PER_MINUTE=0`、`TRUSTED_PROXIES` 空、`/metrics` 与业务同端口（建议设 `METRICS_ADDR` 拆独立 listener）、`PPROF_ENABLED=true` 且 `PPROF_ADDR` 非 loopback（公网暴露 pprof = heap/goroutine 泄露 + DoS 向量，应绑 `127.0.0.1` / `::1` + SSH 隧道）。新增"生产必须硬拦"的项加到 `validateProductionSecrets`，"非致命漏配 warn"加到 `ProductionWarnings`，不要散到各层。**只和 worker 进程相关**的非致命 warn（如 `WORKER_METRICS_ADDR` 监听全部网卡 / 公网 IP）加到 `config.WorkerProductionWarnings(cfg)`（由 `cmd/worker/main.go` 启动时打）；API 相关的留在 `ProductionWarnings`，两边不要混放——否则 warn 会出现在不相干进程的日志里。
+- `APP_ENV`（development / production，默认 development）控制启动期安全 guard 的严格度，**不等同于 `GIN_MODE`**。设 `production` 时 `config/validate.go` 会硬拦截不安全配置：`JWT_SECRET` 为占位值 / 空 / 短于 32 字节、`AUTH_DEV_TOKEN_ENABLED=true`、`GIN_MODE != release`、`LOG_FORMAT != json`，任一不满足进程直接 fail-fast 退出。"非致命但大概率漏配"的项走 `config.ProductionWarnings(cfg)` 集中输出 warn（由 `internal/cli/api.go` 启动时打）：`RATE_LIMIT_PER_MINUTE=0`、`TRUSTED_PROXIES` 空、`/metrics` 与业务同端口（建议设 `METRICS_ADDR` 拆独立 listener）、`PPROF_ENABLED=true` 且 `PPROF_ADDR` 非 loopback（公网暴露 pprof = heap/goroutine 泄露 + DoS 向量，应绑 `127.0.0.1` / `::1` + SSH 隧道）。新增"生产必须硬拦"的项加到 `validateProductionSecrets`，"非致命漏配 warn"加到 `ProductionWarnings`，不要散到各层。**只和 worker 进程相关**的非致命 warn（如 `WORKER_METRICS_ADDR` 监听全部网卡 / 公网 IP）加到 `config.WorkerProductionWarnings(cfg)`（由 `internal/cli/worker.go` 启动时打）；API 相关的留在 `ProductionWarnings`，两边不要混放——否则 warn 会出现在不相干进程的日志里。
 
 ## 审计日志
 
@@ -420,10 +421,10 @@ go test ./... -cover                  # 看覆盖率
 
 | Scope | 对应改动 |
 | --- | --- |
-| `api` | `cmd/api/`、`internal/server.go`、HTTP 路由 / middleware、`api/openapi.yaml` 契约 |
-| `worker` | `cmd/worker/`、`internal/worker.go`、`internal/worker/`、Asynq handler |
-| `migrate` | `cmd/migrate/`、迁移相关 |
-| `bootstrap` | `internal/bootstrap/`、`config/` |
+| `api` | `internal/cli/api.go`、`internal/server.go`、HTTP 路由 / middleware、`api/openapi.yaml` 契约 |
+| `worker` | `internal/cli/worker.go`、`internal/worker.go`、`internal/worker/`、Asynq handler |
+| `migrate` | `internal/cli/migrate.go`、迁移相关 |
+| `bootstrap` | `internal/bootstrap/`、`config/`、`cmd/go-skeleton/`、`internal/cli/cli.go`（子命令分发） |
 | `handler` / `service` / `repository` / `model` / `router` / `middleware` / `task` / `taskqueue` | 对应 `internal/*` 子包 |
 | `auth` / `cache` / `database` / `errcode` / `log` / `response` / `validator` | 对应 `pkg/*` 子包 |
 | `oapi` | OpenAPI codegen 配置 / 生成产物 (`api/oapi-codegen.yaml`、`internal/oapi/`) |
@@ -464,7 +465,7 @@ make verify   # fmt-verify + vet + test + lint + architecture-verify + env-verif
 
 ### 禁止入库
 
-- 任何真实凭证：`cmd/*/.env`、`.env`、密钥文件。已在 `.gitignore`，**不要去改 `.gitignore` 放行**。
+- 任何真实凭证：`.env`、`.env.<proc>`、密钥文件。已在 `.gitignore`，**不要去改 `.gitignore` 放行**。
 - 构建产物：`bin/`、`dist/`、`coverage.out`。已在 `.gitignore`。
 - IDE 个人配置：`.idea/`、`.vscode/`（如确实要共享 VSCode 配置，单独讨论加白名单文件）。
 
@@ -480,7 +481,7 @@ go-example/
 ├── AGENTS.md                   本文件：所有 AI 编码助手共用的项目规则（唯一来源）
 ├── CLAUDE.md                   Claude Code 入口：@AGENTS.md 导入 + Claude 专属补充
 ├── CHANGELOG.md                Keep a Changelog 格式
-├── Dockerfile                  multi-stage 构建（默认 cmd/api）
+├── Dockerfile                  multi-stage 构建单镜像（ENTRYPOINT 二进制，默认 CMD api）
 ├── docker-compose.yml          本地 Postgres + Redis
 ├── go.mod / go.sum             模块名 go-skeleton
 ├── sqlc.yaml                   sqlc 配置（schema=migrations，queries=internal/repository/queries）
@@ -493,10 +494,8 @@ go-example/
 │   ├── embed.go                //go:embed *.sql → fs.FS
 │   └── <时间戳>_*.sql          goose 时间戳风格（-- +goose Up / Down）
 │
-├── cmd/                        三个进程入口，main.go 只做启停
-│   ├── api/main.go             HTTP 服务
-│   ├── worker/main.go          Asynq 消费者
-│   └── migrate/main.go         goose 迁移（up/down/status）
+├── cmd/
+│   └── go-skeleton/main.go     单二进制入口，只调 cli.Run(os.Args[1:])
 │
 ├── config/                     配置加载 + 类型定义
 │   ├── config.go
@@ -507,6 +506,12 @@ go-example/
 ├── internal/                   business code（Go internal 约束）
 │   ├── server.go               package app: HTTP 装配入口 (NewServer)
 │   ├── worker.go               package app: Worker 装配入口 (NewWorker)
+│   │
+│   ├── cli/                    子命令实现，只做启停
+│   │   ├── cli.go              子命令分发（api / worker / migrate / version）
+│   │   ├── api.go              HTTP 服务
+│   │   ├── worker.go           Asynq 消费者
+│   │   └── migrate.go          goose 迁移（up/down/status）
 │   │
 │   ├── bootstrap/              Registry 模式，进程资源装配
 │   │   ├── registry.go         Registry struct + Close
